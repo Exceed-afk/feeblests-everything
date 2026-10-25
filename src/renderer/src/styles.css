@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Color tokens as "R G B" triples so Tailwind can add opacity (bg-accent/20). */
+:root {
+  --bg: 244 245 248; --panel: 255 255 255; --card: 255 255 255; --line: 226 229 236;
+  --fg: 24 28 38; --muted: 104 112 128;
+  --accent: 139 92 246; /* overwritten at runtime from Settings */
+}
+.dark {
+  --bg: 15 17 23; --panel: 20 23 31; --card: 26 30 40; --line: 42 47 61;
+  --fg: 232 235 243; --muted: 140 148 166;
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-bg font-sans text-fg antialiased; transition: background-color .2s, color .2s; }
+* { @apply transition-colors duration-150; }
+:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.dark { color-scheme: dark; } /* dark date pickers and scrollbars */
+
+/* Shared building blocks, reused by every module. */
+@layer components {
+  .field { @apply w-full rounded-xl border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-muted/70; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-line px-4 py-2 text-sm hover:bg-fg/5; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90; }
+}
