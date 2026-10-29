@@ -29,13 +29,20 @@ export function collectBackup(db: Database.Database): BackupFile {
     savingsTransactions: (db.prepare('SELECT * FROM savings_transactions ORDER BY id').all() as R[]).map((r) => ({
       id: r.id, goalId: r.goal_id, date: r.date, kind: r.kind, amount: r.amount, note: r.note,
       createdAt: r.created_at, updatedAt: r.updated_at
+    })),
+    habits: (db.prepare('SELECT * FROM habits ORDER BY id').all() as R[]).map((r) => ({
+      id: r.id, name: r.name, notes: r.notes, days: JSON.parse(r.days), archived: r.archived === 1, startDate: r.start_date,
+      createdAt: r.created_at, updatedAt: r.updated_at
+    })),
+    habitCheckins: (db.prepare('SELECT * FROM habit_checkins ORDER BY habit_id, date').all() as R[]).map((r) => ({
+      habitId: r.habit_id, date: r.date, createdAt: r.created_at
     }))
   }
 }
 
 export function currentCounts(db: Database.Database): BackupCounts {
   const n = (t: string) => (db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n
-  return { entries: n('logbook_entries'), trades: n('trades'), goals: n('savings_goals'), transactions: n('savings_transactions') }
+  return { entries: n('logbook_entries'), trades: n('trades'), goals: n('savings_goals'), transactions: n('savings_transactions'), habits: n('habits'), checkins: n('habit_checkins') }
 }
 
 // Replaces ALL data with the (already checked) backup. One transaction: if
@@ -44,7 +51,7 @@ export function currentCounts(db: Database.Database): BackupCounts {
 export function restoreBackup(db: Database.Database, b: BackupFile): BackupCounts {
   db.transaction(() => {
     // Goals first on the way in, last on the way out (foreign key).
-    for (const t of ['savings_transactions', 'savings_goals', 'trades', 'logbook_entries', 'settings']) db.exec(`DELETE FROM ${t}`)
+    for (const t of ['habit_checkins', 'habits', 'savings_transactions', 'savings_goals', 'trades', 'logbook_entries', 'settings']) db.exec(`DELETE FROM ${t}`)
 
     const setting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
     for (const [k, v] of Object.entries(b.settings)) setting.run(k, JSON.stringify(v))
@@ -64,6 +71,13 @@ export function restoreBackup(db: Database.Database, b: BackupFile): BackupCount
     const tx = db.prepare(`INSERT INTO savings_transactions (id, goal_id, date, kind, amount, note, created_at, updated_at)
       VALUES (@id, @goalId, @date, @kind, @amount, @note, @createdAt, @updatedAt)`)
     for (const t of b.savingsTransactions) tx.run(t)
+
+    const habit = db.prepare(`INSERT INTO habits (id, name, notes, days, archived, start_date, created_at, updated_at)
+      VALUES (@id, @name, @notes, @days, @archived, @startDate, @createdAt, @updatedAt)`)
+    for (const h of b.habits) habit.run({ ...h, days: JSON.stringify(h.days), archived: h.archived ? 1 : 0 })
+
+    const checkin = db.prepare('INSERT INTO habit_checkins (habit_id, date, created_at) VALUES (@habitId, @date, @createdAt)')
+    for (const c of b.habitCheckins) checkin.run(c)
   })()
   return countsOf(b)
 }

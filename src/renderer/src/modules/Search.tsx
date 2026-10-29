@@ -1,10 +1,11 @@
+import { PageHeader } from '../components/PageHeader'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { BookOpen, CandlestickChart, PiggyBank, Receipt, Search as SearchIcon, X } from 'lucide-react'
 import type { SearchGroup, SearchResults } from '../../../shared/types'
 import { isEmptyQuery, parseQuery } from '../../../shared/search'
 import { progressPercent } from '../../../shared/savings'
-import { MOOD_STYLE } from '../lib/moods'
+import { moodStyle } from '../lib/moods'
 import { formatDate } from '../lib/dates'
 import { fmtAmount, fmtNum, fmtPnl, pnlColor } from '../lib/format'
 import { errMsg } from '../lib/errors'
@@ -21,7 +22,7 @@ const MORE = 16 // how many extra each "Show more" click adds
 let lastQuery = ''
 
 const rowClass =
-  'w-full rounded-2xl border border-line bg-card p-4 text-left shadow-card hover:border-accent/50'
+  'w-full card card-pad-sm text-left hover:border-accent/50'
 
 export function Search({ onOpen }: ModuleProps) {
   const [query, setQuery] = useState(lastQuery)
@@ -37,15 +38,10 @@ export function Search({ onOpen }: ModuleProps) {
 
   useEffect(() => { lastQuery = query }, [query])
 
-  // Focus the box when the page opens, and again on Ctrl+K.
+  // Focus the box when the page opens. (Ctrl+K belongs to the command palette now, see App.tsx.)
   useEffect(() => {
     inputRef.current?.focus()
     inputRef.current?.select()
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key.toLowerCase() === 'k') { e.preventDefault(); inputRef.current?.focus(); inputRef.current?.select() }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   // Re-run shortly after typing stops (same feel as the filters on the other pages).
@@ -71,10 +67,10 @@ export function Search({ onOpen }: ModuleProps) {
     : 0
 
   return (
-    <div className="mx-auto max-w-3xl px-10 py-10">
-      <h1 className="text-2xl font-semibold">Search</h1>
+    <div className="page page-sm">
+      <PageHeader title="Search" subtitle="Logbook, trades and savings in one place." />
 
-      <div className="relative mt-6">
+      <div className="relative">
         <SearchIcon size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" />
         <input ref={inputRef} className="field py-3 pl-11 pr-10 text-base" value={query}
           placeholder="Search your logbook, trades and savings" aria-label="Search everything"
@@ -89,21 +85,21 @@ export function Search({ onOpen }: ModuleProps) {
       </div>
 
       {!searching && (
-        <div className="mt-6 rounded-2xl border border-dashed border-line bg-card/50 p-8">
+        <div className="empty mt-6 items-start text-left">
           <p className="font-medium">Find anything you have written or tracked.</p>
           <ul className="mt-3 space-y-1.5 text-sm text-muted">
             <li><code className="text-fg">gold breakout</code> finds items containing both words</li>
             <li><code className="text-fg">#risk</code> finds items tagged risk</li>
             <li><code className="text-fg">2026-10</code> finds items from October 2026</li>
           </ul>
-          <p className="mt-3 text-sm text-muted">Tip: Ctrl+K brings you back here from anywhere.</p>
+          <p className="mt-3 text-sm text-muted">Tip: Ctrl+K opens the command palette, to jump to any tool from anywhere.</p>
         </div>
       )}
 
-      {error && <p role="alert" className="mt-4 text-sm text-rose-500">{error}</p>}
+      {error && <p role="alert" className="mt-4 text-sm text-neg">{error}</p>}
 
       {results && grandTotal === 0 && (
-        <div className="mt-6 rounded-2xl border border-dashed border-line bg-card/50 p-10 text-center">
+        <div className="empty mt-6">
           <p className="text-muted">Nothing matches “{query.trim()}”.</p>
           <p className="mt-1 text-sm text-muted">Try fewer words, or check the spelling.</p>
         </div>
@@ -119,7 +115,7 @@ export function Search({ onOpen }: ModuleProps) {
             {results.logbook.items.map((e) => (
               <button key={e.id} className={rowClass} onClick={() => onOpen({ module: 'logbook', entry: e })}>
                 <div className="flex items-center gap-2 text-xs text-muted">
-                  {e.mood && <span title={MOOD_STYLE[e.mood].label} className={`h-2.5 w-2.5 rounded-full ${MOOD_STYLE[e.mood].dot}`} />}
+                  {e.mood && <span title={moodStyle(e.mood).label} className={`h-2.5 w-2.5 rounded-full ${moodStyle(e.mood).dot}`} />}
                   {formatDate(e.date)}
                 </div>
                 <div className="mt-1 font-medium"><Highlight text={e.title} terms={terms} /></div>
@@ -137,8 +133,7 @@ export function Search({ onOpen }: ModuleProps) {
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <span className="font-medium"><Highlight text={t.asset} terms={terms} /></span>
-                    <span className={`rounded-lg px-2 py-0.5 text-xs capitalize ${
-                      t.direction === 'long' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>{t.direction}</span>
+                    <span className={`badge capitalize ${t.direction === 'long' ? 'badge-pos' : 'badge-neg'}`}>{t.direction}</span>
                   </div>
                   <span className={`text-sm font-medium tabular-nums ${pnlColor(t.pnl)}`}>{t.pnl === null ? 'Open' : fmtPnl(t.pnl)}</span>
                 </div>
@@ -181,7 +176,7 @@ export function Search({ onOpen }: ModuleProps) {
               <button key={t.id} className={rowClass} onClick={() => onOpen({ module: 'savings', goalId: t.goalId })}>
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium">{t.goalName}</span>
-                  <span className={`text-sm font-medium tabular-nums ${t.kind === 'deposit' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  <span className={`text-sm font-medium tabular-nums ${t.kind === 'deposit' ? 'text-pos' : 'text-neg'}`}>
                     {t.kind === 'deposit' ? '+' : '-'}{fmtAmount(t.amount)}
                   </span>
                 </div>
@@ -213,8 +208,8 @@ function Group<T>({ title, icon, group, onMore, children }: {
   const hidden = group.total - group.items.length
   return (
     <section className="mt-8">
-      <h2 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted">
-        {icon} {title} <span className="rounded-md bg-fg/10 px-1.5 py-0.5 normal-case tracking-normal">{group.total}</span>
+      <h2 className="section-title">
+        {icon} {title} <span className="badge badge-muted">{group.total}</span>
       </h2>
       <div className="mt-3 flex flex-col gap-3">{children}</div>
       {hidden > 0 && (

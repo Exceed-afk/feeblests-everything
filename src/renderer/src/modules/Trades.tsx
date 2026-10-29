@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
+import { useRefreshOnCapture } from '../lib/dataChanged'
+import { CandlestickChart, Plus, Search } from 'lucide-react'
 import type { Direction, Trade, TradeFilter, TradeMeta } from '../../../shared/types'
 import { computeStats } from '../../../shared/trades'
 import { formatDate } from '../lib/dates'
 import { fmtNum, fmtPnl, pnlColor } from '../lib/format'
+import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
+import { Pnl } from '../components/Pnl'
 import type { ModuleProps } from '../lib/navigation'
 import { TradeEditor } from './TradeEditor'
 import { TagChip } from '../components/TagChip'
@@ -29,6 +33,7 @@ export function Trades({ target, onTargetHandled }: ModuleProps) {
     const id = setTimeout(refresh, 150)
     return () => clearTimeout(id)
   }, [refresh])
+  useRefreshOnCapture(refresh) // something was saved from the Quick capture window
 
   // Opened from Search: show that trade's editor straight away.
   useEffect(() => {
@@ -45,34 +50,33 @@ export function Trades({ target, onTargetHandled }: ModuleProps) {
   }, [])
 
   const card = (label: string, value: string, sub: string, color = '') => (
-    <div className="rounded-2xl border border-line bg-card p-4 shadow-card">
-      <div className="text-xs text-muted">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${color}`}>{value}</div>
-      <div className="mt-1 text-xs text-muted">{sub}</div>
+    <div className="card card-pad-sm">
+      <div className="stat-label">{label}</div>
+      <div className={`stat-value ${color}`}>{value}</div>
+      <div className="stat-sub">{sub}</div>
     </div>
   )
 
   return (
-    <div className="mx-auto max-w-5xl px-10 py-10">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Trade Tracker</h1>
+    <div className="page">
+      <PageHeader title="Trades" subtitle={stats.total === 0 ? 'Track every trade, open or closed.' : `${stats.closed} closed, ${stats.open} open${hasFilter ? ' (filtered)' : ''}`}>
         <button className="btn-primary" onClick={() => setEditing('new')} title="Ctrl+N">
           <Plus size={16} /> New trade
         </button>
-      </div>
+      </PageHeader>
 
       {stats.total > 0 && (
-        <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {card('Total P&L', fmtPnl(stats.totalPnl), `after ${fmtNum(stats.totalFees)} in fees`, pnlColor(stats.totalPnl))}
           {card('Win rate', stats.winRate === null ? '-' : `${stats.winRate.toFixed(0)}%`, `${stats.wins} wins, ${stats.losses} losses`)}
-          {card('Trades', String(stats.closed), `${stats.open} still open`)}
+          {card('Closed trades', String(stats.closed), `${stats.open} still open`)}
           {card('Profit factor', stats.profitFactor === null ? '-' : stats.profitFactor.toFixed(2),
             stats.avgWin === null && stats.avgLoss === null ? 'Needs a win and a loss'
               : `avg win ${stats.avgWin === null ? '-' : fmtPnl(stats.avgWin)}, avg loss ${stats.avgLoss === null ? '-' : fmtPnl(stats.avgLoss)}`)}
         </div>
       )}
 
-      <div className="mt-6 flex flex-wrap items-center gap-2">
+      <div className="mt-5 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[12rem] flex-1">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input className="field pl-9" placeholder="Search asset or notes" value={filter.text ?? ''}
@@ -97,60 +101,45 @@ export function Trades({ target, onTargetHandled }: ModuleProps) {
       </div>
 
       <div className="mt-6">
-        {loaded && trades.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-line bg-card/50 p-10 text-center">
-            {hasFilter ? (
-              <p className="text-muted">No trades match these filters.</p>
-            ) : (
-              <>
-                <p className="font-medium">No trades yet. Your first entry starts the track record.</p>
-                <p className="mt-1 text-sm text-muted">Log a trade, including the ones still open, and your stats build themselves.</p>
-                <button className="btn-primary mt-5" onClick={() => setEditing('new')}>
-                  <Plus size={16} /> Log your first trade
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        {loaded && trades.length === 0 && (hasFilter ? (
+          <EmptyState title="No trades match these filters" text="Try a different asset or clear the filters."
+            action={<button className="btn mt-4" onClick={() => setFilter({})}>Clear filters</button>} />
+        ) : (
+          <EmptyState icon={CandlestickChart} title="No trades yet. Your first entry starts the track record."
+            text="Log a trade, including the ones still open, and your stats build themselves."
+            action={<button className="btn-primary" onClick={() => setEditing('new')}><Plus size={16} /> Log your first trade</button>} />
+        ))}
 
         {trades.length > 0 && (
-          <div className="overflow-x-auto rounded-2xl border border-line bg-card shadow-card">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs text-muted">
-                  <th className="px-4 py-3 font-medium">Date</th>
-                  <th className="px-4 py-3 font-medium">Asset</th>
-                  <th className="px-4 py-3 font-medium">Side</th>
-                  <th className="px-4 py-3 text-right font-medium">Entry</th>
-                  <th className="px-4 py-3 text-right font-medium">Exit</th>
-                  <th className="px-4 py-3 text-right font-medium">Size</th>
-                  <th className="px-4 py-3 text-right font-medium">Fees</th>
-                  <th className="px-4 py-3 text-right font-medium">P&L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trades.map((t) => (
-                  <tr key={t.id} onClick={() => setEditing(t)} tabIndex={0}
-                    onKeyDown={(k) => k.key === 'Enter' && setEditing(t)}
-                    className="cursor-pointer border-b border-line last:border-0 hover:bg-fg/5">
-                    <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDate(t.date)}</td>
-                    <td className="px-4 py-3 font-medium">
-                      {t.asset}
-                      {t.tags.length > 0 && <span className="ml-2 inline-flex flex-wrap gap-1 align-middle font-normal">{t.tags.map((x) => <TagChip key={x} tag={x} />)}</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`rounded-lg px-2 py-0.5 text-xs capitalize ${
-                        t.direction === 'long' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>{t.direction}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">{fmtNum(t.entryPrice)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{t.exitPrice === null ? <span className="text-muted">Open</span> : fmtNum(t.exitPrice)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{fmtNum(t.quantity)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted">{fmtNum(t.fees)}</td>
-                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${pnlColor(t.pnl)}`}>{t.pnl === null ? '-' : fmtPnl(t.pnl)}</td>
+          <div className="card overflow-hidden">
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Date</th><th>Asset</th><th>Side</th><th>Status</th>
+                    <th className="r">Entry</th><th className="r">Exit</th><th className="r">Size</th><th className="r">Fees</th><th className="r">P&L</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {trades.map((t) => (
+                    <tr key={t.id} onClick={() => setEditing(t)} tabIndex={0} onKeyDown={(k) => k.key === 'Enter' && setEditing(t)}>
+                      <td className="secondary whitespace-nowrap">{formatDate(t.date)}</td>
+                      <td className="font-medium">
+                        {t.asset}
+                        {t.tags.length > 0 && <span className="ml-2 inline-flex flex-wrap gap-1 align-middle font-normal">{t.tags.map((x) => <TagChip key={x} tag={x} />)}</span>}
+                      </td>
+                      <td><span className={`badge capitalize ${t.direction === 'long' ? 'badge-pos' : 'badge-neg'}`}>{t.direction}</span></td>
+                      <td>{t.exitPrice === null ? <span className="badge badge-open">Open</span> : <span className="badge badge-muted">Closed</span>}</td>
+                      <td className="r">{fmtNum(t.entryPrice)}</td>
+                      <td className="r">{t.exitPrice === null ? <span className="text-muted">-</span> : fmtNum(t.exitPrice)}</td>
+                      <td className="r">{fmtNum(t.quantity)}</td>
+                      <td className="r secondary">{fmtNum(t.fees)}</td>
+                      <td className="r font-medium"><Pnl value={t.pnl} open="-" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

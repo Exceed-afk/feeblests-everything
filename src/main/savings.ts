@@ -75,6 +75,20 @@ export function listTransactions(db: Database.Database, goalId: number): Savings
     .all(goalId) as TxRow[]).map(toTx)
 }
 
+// Every transaction of every goal, oldest first (the weekly / monthly review adds them up by date).
+export function listAllTransactions(db: Database.Database): SavingsTx[] {
+  return (db.prepare('SELECT * FROM savings_transactions ORDER BY date, id').all() as TxRow[]).map(toTx)
+}
+
+// Every transaction of every goal dated between two days (inclusive), with its goal's name. The calendar uses it.
+export function listTransactionsBetween(db: Database.Database, from: string, to: string): SavingsTxHit[] {
+  const rows = db.prepare(
+    `SELECT t.*, g.name AS goal_name FROM savings_transactions t JOIN savings_goals g ON g.id = t.goal_id
+     WHERE t.date >= ? AND t.date <= ? ORDER BY t.date, t.id`
+  ).all(from, to) as (TxRow & { goal_name: string })[]
+  return rows.map((r) => ({ ...toTx(r), goalName: r.goal_name }))
+}
+
 function getTx(db: Database.Database, id: number): SavingsTx {
   const row = db.prepare('SELECT * FROM savings_transactions WHERE id = ?').get(id) as TxRow | undefined
   if (!row) throw new Error('Transaction not found')

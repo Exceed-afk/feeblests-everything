@@ -10,7 +10,7 @@ export const fmtPnl = (n: number): string => {
 }
 
 export const pnlColor = (n: number | null): string =>
-  n === null || n === 0 ? 'text-muted' : n > 0 ? 'text-emerald-500' : 'text-rose-500'
+  n === null || n === 0 ? 'text-muted' : n > 0 ? 'text-pos' : 'text-neg'
 
 // Plain amount with two decimals: 1,234.50
 export const fmtAmount = (n: number): string =>

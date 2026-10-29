@@ -3,6 +3,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { EverythingApi } from '../shared/types'
 
+// Subscribes to a message from the main process (the callback gets no data, so nothing from outside reaches the page).
+function listen(channel: string, cb: () => void): () => void {
+  const handler = (): void => cb()
+  ipcRenderer.on(channel, handler)
+  return () => { ipcRenderer.removeListener(channel, handler) }
+}
+
 const api: EverythingApi = {
   settings: {
     getAll: () => ipcRenderer.invoke('settings:getAll'),
@@ -32,8 +39,33 @@ const api: EverythingApi = {
     updateTransaction: (id, input) => ipcRenderer.invoke('savings:updateTransaction', id, input),
     removeTransaction: (id) => ipcRenderer.invoke('savings:removeTransaction', id)
   },
+  habits: {
+    list: () => ipcRenderer.invoke('habits:list'),
+    create: (input) => ipcRenderer.invoke('habits:create', input),
+    update: (id, input) => ipcRenderer.invoke('habits:update', id, input),
+    remove: (id) => ipcRenderer.invoke('habits:remove', id),
+    setCheckin: (habitId, date, done) => ipcRenderer.invoke('habits:setCheckin', habitId, date, done)
+  },
   dashboard: {
     summary: (today) => ipcRenderer.invoke('dashboard:summary', today)
+  },
+  calendar: {
+    month: (month, today) => ipcRenderer.invoke('calendar:month', month, today)
+  },
+  capture: {
+    status: () => ipcRenderer.invoke('capture:status'),
+    configure: (patch) => ipcRenderer.invoke('capture:configure', patch),
+    open: () => ipcRenderer.invoke('capture:open'),
+    hide: () => ipcRenderer.invoke('capture:hide'),
+    openMain: () => ipcRenderer.invoke('capture:openMain'),
+    resize: (height) => ipcRenderer.invoke('capture:resize', height),
+    saved: () => ipcRenderer.invoke('capture:saved'),
+    // Events from the main process. Each returns the function that stops listening.
+    onShown: (cb) => listen('capture:shown', cb),
+    onDataChanged: (cb) => listen('data:changed', cb)
+  },
+  review: {
+    build: (kind, anchor, today) => ipcRenderer.invoke('review:build', kind, anchor, today)
   },
   search: {
     run: (query, limit) => ipcRenderer.invoke('search:run', query, limit)

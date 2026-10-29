@@ -50,7 +50,7 @@ export function GoalEditor({ goal, onSaved, onClose }: Props) {
         className="flex h-full w-[min(28rem,100%)] flex-col gap-4 overflow-y-auto border-l border-line bg-panel p-6 shadow-card">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{goal ? 'Edit goal' : 'New goal'}</h2>
-          <button className="rounded-lg p-1.5 text-muted hover:bg-fg/5 hover:text-fg" onClick={onClose} aria-label="Close">
+          <button className="btn-icon" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>
@@ -68,13 +68,13 @@ export function GoalEditor({ goal, onSaved, onClose }: Props) {
             placeholder="What is this for?" onChange={(e) => setNotes(e.target.value)} />
         </label>
 
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        {error && <p className="text-sm text-neg">{error}</p>}
 
         <div className="flex items-center gap-2">
-          {goal && !confirmDelete && <button className="btn text-rose-500" onClick={() => setConfirmDelete(true)}>Delete</button>}
+          {goal && !confirmDelete && <button className="btn text-neg" onClick={() => setConfirmDelete(true)}>Delete</button>}
           {goal && confirmDelete && (
             <>
-              <button className="btn bg-rose-500 text-white" onClick={remove}>
+              <button className="btn-danger" onClick={remove}>
                 Delete goal{goal.txCount > 0 ? ` and ${goal.txCount} transaction${goal.txCount === 1 ? '' : 's'}` : ''}
               </button>
               <button className="btn" onClick={() => setConfirmDelete(false)}>Keep it</button>

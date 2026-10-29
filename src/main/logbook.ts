@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3'
 import { cleanTags, escapeLike, isDate, searchWhere } from './util'
 import type { ParsedQuery } from '../shared/search'
 import { logStreak } from '../shared/dashboard'
+import { MOODS } from '../shared/types'
 import type { LogEntry, LogEntryInput, LogFilter, LogSummary, Mood, SearchGroup, TagCount } from '../shared/types'
 
 interface Row {
@@ -45,6 +46,7 @@ export function listTags(db: Database.Database): TagCount[] {
 
 function prepare(input: LogEntryInput) {
   if (!isDate(input.date)) throw new Error('Date must look like 2026-10-25')
+  if (input.mood !== null && !MOODS.includes(input.mood)) throw new Error('Unknown mood')
   return {
     date: input.date,
     title: input.title.trim() || 'Untitled',

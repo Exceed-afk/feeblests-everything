@@ -13,19 +13,123 @@ Local-only logbook, trade tracker and savings tracker for Windows (Electron + Re
 - `src/renderer/` - the UI (React). Each feature is a file in `src/renderer/src/modules/`
 - `src/shared/types.ts` - types used by all three
 
+## What's new in 0.10.0
+- **Habits on the Dashboard**: a "Habits today" tile shows done / scheduled today, the longest current streak among active habits, and today's list (unfinished first). The tile and each line open the Habits page. The data rides on the same `dashboard:summary` call (`habitsToday()` in `src/shared/dashboard.ts`), so the home page is still one round trip.
+- **Daily backup uses your local date**: `everything-YYYY-MM-DD.db` is named with `localDate()` instead of the UTC date, so a late-evening start no longer gets tomorrow's (or yesterday's) name. The keep-14 cleanup is unchanged.
+- **More tests**: trade P&L and stats, savings balances and the no-negative rule, the dashboard habits tile, palette contrast and the link-opening rule. `npm test` runs them all through `tsx`, which is now a proper devDependency (no more `npx --yes`). `tests/` is typechecked by `npm run typecheck`.
+- **Safer links**: only `http:` and `https:` links open outside the app (`src/shared/url.ts`), for both new windows and navigation. Anything else is blocked.
+- **UI/UX pass**: one visual language across every page.
+  - Shared building blocks in `styles.css` and `components/`: `PageHeader` (title, subtitle, primary action), `EmptyState` (what it is, one next step), `Pnl`, and the classes `.page`, `.card`, `.stat`, `.tbl`, `.badge`, `.row-link`, `.empty`.
+  - Dashboard is a command centre: clickable stat tiles, a Today row (habits + P&L chart), recent items, savings progress.
+  - Trades: sticky-header table with a Status column. Open trades are a dashed "Open" badge, and P&L has a sign and an arrow, so colour is never the only cue.
+  - Habits: today's list is the hero. Days are done (tick), missed (cross), rest (dashed), future (dotted) or today-to-do, with a legend under the 12-week grid. The check button pops on done and shows a busy state while saving.
+  - Savings goal cards show balance, a progress bar and percent at a glance; the history table uses the same table style.
+  - Settings is split into Appearance, Tags, Data and Shortcuts. The Shortcuts tab lists every key.
+  - Gain / loss / caution colours are now theme-aware tokens (`pos`, `neg`, `warn`). The old fixed green and red text failed WCAG contrast on light surfaces (2.5:1 and 3.7:1); the new ones reach 4.5:1 or better on every palette (`tests/appearance.ts`).
+  - Graphite (light) got a slightly deeper page colour so cards stand out. The appearance system (palettes, accent, Modern / Classic, roundness, spacing, text size, font, sidebar) is unchanged and everything still follows it.
+
 ## Dashboard
-The home page shows trade stats, savings totals, your logbook streak and the newest entries and trades. Everything comes from one call (`dashboard:summary`, built in `src/main/dashboard.ts`), and clicking any item opens it in its own module.
+The home page shows stat tiles, today's habits, the P&L curve, savings progress and the newest entries and trades. Everything comes from one call (`dashboard:summary`, built in `src/main/dashboard.ts`), and clicking any item opens it in its own module.
+
+## Review (weekly and monthly)
+The **Review** page (sidebar, under Dashboard; also `Ctrl+K` > "review", and a "Review your week" card on the Dashboard) pulls the separate tools into one summary for a week (Monday to Sunday) or a calendar month. Use the arrows to step back through earlier periods; "This week" jumps back to now.
+- **Four tiles**: trading P&L, savings movement, habit consistency and average mood. Each opens its tool. While a period is still running the previous one is shown as plain context ("Last week: +12.00"); once it is over the tile says how much it is up or down.
+- **Trading**: closed trades, win rate, fees, a bar per day, best and worst trade (each opens the trade). A trade counts on its **entry date**, exactly like the P&L curve, so a trade entered on Sunday and closed on Tuesday belongs to the Sunday week. Open trades are counted as open and left out of P&L.
+- **Savings**: deposits, withdrawals and net across all goals, the total balance before and after, and each goal that moved (with a "Goal reached" badge when the period carried it over its target). Goals that did not move are left out, but their balance is still in the total.
+- **Habits**: the share of scheduled days that were done, a box per day, and each habit's rate and missed days (weakest first). The rules are the Habits page's own: only scheduled days count, days before a habit existed are not missed, today is not missed until the day is over, a check-in on a rest day is a bonus, archived habits are ignored.
+- **Mood**: average on a 1 (rough) to 5 (great) scale, a dot per day, how many of each mood, the lowest day when it was low or rough, and a Rising / Steady / Falling label (second half of the logged days against the first; it needs four logged days to say anything).
+- **Across your tools**: only appears when there is enough data (at least two days on each side). Compares mood on days you finished every habit with other days, and on days your trades made money with days they lost. It describes; it does not claim one thing causes the other.
+- **Reflection**: questions made from this period's numbers (a losing week, a weak habit, a low day, savings going down...) plus two that always apply. Click one to add it to the text box, write underneath, optionally pick a mood, and **Save** (`Ctrl+Enter`). "Add the numbers" puts a few lines of this period's figures at the top, so the entry keeps them for later.
+  - A reflection is an **ordinary logbook entry** tagged `review` and `weekly` / `monthly`, titled like `Weekly review 2026-10-19 to 2026-10-25` (a month: `Monthly review 2026-10`). It shows in the Logbook, in Search, and in your JSON export; nothing new is stored. It is dated the period's last day, or today for a period still running.
+  - The page finds a period's reflection again **by that title and the `review` tag**, so saving twice updates the same entry. If you rename it in the Logbook, the page will no longer recognise it and a new one would be created.
+  - Text you have typed but not saved is kept while you step to another week and back, but is lost if you leave the Review page.
+  - Its mood counts in the mood average like any other entry.
+- **Where things live**: `src/shared/review.ts` holds every rule and number (periods, trades, savings, habits, mood, links, questions) as plain functions covered by `tests/review.ts`; `src/main/review.ts` only fetches rows from each tool's own queries (`review:build` call, one round trip); `modules/Review.tsx` is the page and `components/ReviewViews.tsx` the three small day charts (plain SVG/CSS, theme colours only, no library added). To add another section later, extend `buildReview` and render it in `ReviewBody`.
+
+## Calendar
+The **Calendar** page (sidebar, under Dashboard; also `Ctrl+K` > "calendar") shows a month as a Monday-to-Sunday grid, with what happened on each day across the tools. The days of the neighbouring months that fill the first and last row are shown greyed, with their own activity. It is a view of the other tools' data, not a separate list: nothing new is stored, no new table.
+- **In each day**: a mood dot, the number of journal entries, the day's closed-trade P&L (an open trade shows as "1 open"), the savings movement (deposits minus withdrawals) and habits done out of scheduled. Amounts always carry a + or - sign, so colour is never the only clue, and every day has a spoken description ("Tue 20 Oct: 2 entries, 1 closed trade (+39.00), habits 0 of 1 done, mood good") as its tooltip and screen-reader label.
+- **Show**: Journal / Trades / Savings / Habits buttons hide a layer from the grid when it gets busy (remembered between visits). The day panel always shows everything.
+- **Summary line** above the grid: entries and days written, net P&L, savings movement, habit completion and average mood for the days of the month itself.
+- **The day panel** (click a day): entries, trades and savings movements open in their own tool; **habits can be ticked or unticked for that exact day** (the way to catch up a missed one); and "Add a note to this day" writes a Logbook entry dated that day (first line = title, same as Quick capture). A note you have typed but not added is kept while you click through other days.
+- **Keyboard**: the grid is one tab stop. Arrow keys move a day or a week, `Page Up` / `Page Down` a month, and focus follows the selected day. The month and day buttons work with the mouse as usual; "Today" appears when you have moved away.
+- **Rules** (the same as the Habits page and the Review): a trade counts on its **entry date**; a habit counts only on days it was scheduled, days before it existed are not missed, today shows as "not yet" rather than missed until it is over, a check-in on a rest day is a bonus, archived habits are ignored, and days that have not happened yet show no habits.
+- **Not included (yet)**: events or reminders. This calendar looks back at what you logged; planning ahead would need a new table. Weeks start on Monday, like the rest of the app.
+- **Where things live**: `src/shared/calendar.ts` holds every rule (month and grid arithmetic, what lands on each day, the summary, the spoken description), covered by `tests/calendar.ts`. `src/main/calendar.ts` only fetches the rows for the whole visible grid (`calendar:month`, one round trip), and `modules/Calendar.tsx` is the page. The page reloads when something is saved from the Quick capture window.
+
+## Quick capture
+A small always-on-top window for logging something without opening the app: a **note**, a **trade**, a **deposit / withdrawal** or a **habit check-in**. Open it from any program with the global shortcut (default `Ctrl+Shift+Space`, `Cmd+Shift+Space` on a Mac), from the tray / menu-bar icon, or with "Quick capture" in the command palette (`Ctrl+K`). It uses only Electron's own features (`globalShortcut`, `Tray`, a second `BrowserWindow`); no package was added.
+- **Using it**: `Ctrl+1` to `Ctrl+4` switch tab (`Cmd` on a Mac), `Ctrl+Enter` saves, `Esc` closes. In the one-line fields of the trade and deposit tabs plain `Enter` saves too; in the note box it makes a new line. After a save it says so for a moment and puts itself away. Clicking another window also puts it away, but **what you typed stays** until it is saved (switching tabs keeps it too).
+- **Note**: the first line is the title and the rest is the body (a first line longer than 80 characters is cut for the title and the whole text is kept as the body, so nothing is lost). Optional mood and tags.
+- **Trade**: asset, long/short, entry, exit, size, fees. A blank exit saves an **open** trade and blank fees mean 0. The asset and direction are remembered for the next one, and the asset box suggests the ones you already use.
+- **Deposit**: pick the goal (the last one used is remembered), deposit or withdrawal, amount, optional note. It shows the goal's balance.
+- **Habits**: today's habits are listed alphabetically; click one to check it off (or click again to undo). Each click saves at once and the window stays open so you can tick several. Habits that are resting today are only counted ("2 habits are resting today").
+- **Dates**: an entry is dated the day you **save** it (read at that moment, so a window left hidden past midnight does not use yesterday).
+- **The main window follows along**: when something is saved from the small window, the open Dashboard, Logbook, Trades, Savings, Habits and Review pages reload their data (a page is never remounted, so a half-written entry in an editor is untouched).
+- **Settings > Quick capture**: switch it off, change the shortcut, and choose whether closing the main window keeps the app running in the tray. A new shortcut is tried with the system **before** it is saved, so one that another program already owns never replaces one that works; the page tells you why it was refused. Rules for a shortcut: it needs Ctrl (Cmd on a Mac), Alt or the Windows key (Shift alone would stop you typing capitals), and a letter, digit or punctuation key needs **two** modifiers (a lone `Ctrl+C` or `Alt+S` belongs to every other program). The settings are stored as `captureEnabled`, `captureHotkey` and `captureKeepRunning`, so they travel with a JSON backup; a damaged value falls back to the default.
+- **Things that changed because of it**:
+  - Only **one copy** of the app can run now (two would fight over the database and the shortcut). Starting a second copy brings the first to the front.
+  - The capture window is created **hidden at start-up**, so the shortcut opens it instantly. It costs one extra small renderer process while the app runs; turning Quick capture off destroys it.
+  - With "keep running in the tray" **off** (the default), closing the main window quits the app as before. With it **on**, the shortcut and tray icon stay alive and you quit from the tray menu. A Mac always keeps running when its window is closed, as Macs do.
+- **Platform notes**: some Linux desktops hide tray icons, and on Wayland a program cannot listen for shortcuts while another window has focus; if either applies, use "Quick capture" in the command palette. The tray icon is embedded in `src/main/trayIcon.ts` (a plus sign; a black "template" version for the Mac menu bar), so nothing extra has to be packaged.
+- **Where things live**: `src/shared/capture.ts` has every rule (which shortcuts are allowed, how a key press becomes one, how the form text becomes a valid note / trade / deposit, which habits are listed), covered by `tests/capture.ts`. `src/main/capture.ts` owns the shortcut, tray icon and window. `modules/Capture.tsx` is the small window's page (the same renderer bundle, shown instead of `<App />` when the address ends in `#capture`) and `components/CaptureSettings.tsx` the settings tab. To add another thing to capture, add a tab to `TABS` in `Capture.tsx` and a builder in `shared/capture.ts`.
 
 ## Shortcuts
-- `Ctrl+1` to `Ctrl+6` switch module, `Ctrl+N` creates a new item on the current page
-- `Ctrl+K` jumps to Search from anywhere
+- `Ctrl+1` to `Ctrl+7` open the tools that declare those shortcuts (see `tools.ts`; Review has none, use `Ctrl+K`). The Quick capture shortcut works in any program and is set in Settings, `Ctrl+N` creates a new item on the current page
+- `Ctrl+K` (`Cmd+K` on a Mac) opens the command palette; press it again, or `Esc`, to close it. Search is still `Ctrl+6`.
+- `Ctrl+B` collapses the sidebar to icons, or expands it again
+
+## Sidebar
+- **Groups**: tools are grouped by category (Money, Productivity, Notes, Utilities, ...). Click a group heading to fold or unfold it. A folded group that holds the page you are on shows a small accent dot.
+- **Pinned**: hover a tool (or tab to it) and use the pin button to put it in a "Pinned" section at the top; pinned tools are listed there only, in the order you pinned them. Unpin the same way. Settings is always at the bottom and is not pinnable.
+- **Icons only**: the button at the top of the sidebar, or `Ctrl+B`, shrinks it to icons. Hover or tab to an icon to see its name and shortcut. In icons-only mode every group is open so every icon is reachable. (Pinning is done in the full sidebar.) It also switches to icons by itself in a narrow window.
+- **Pin / unpin never loses your place**: the tool moves to the Pinned section (or back to its category), a folded section it is moving into is opened, and keyboard focus follows it to its pin button.
+- **Remembered**: `pinnedTools`, `sidebarClosedGroups` and `sidebarCollapsed` are saved in the app settings (the `settings` table in `everything.db`), so they survive restarts and are part of the JSON export and import. A copy is kept in the window's local storage so the sidebar looks right from the first paint. The grouping rules are in `src/shared/tools.ts` (`sidebarLayout`) and covered by `npm test`; the drawing is in `components/Sidebar.tsx`, with `sb-*` styles in `styles.css`, which use only the theme variables.
+
+## Command palette
+`Ctrl+K` (`Cmd+K` on a Mac) opens a search box in the middle of the window.
+- **Typing** matches tool names, categories and keywords from the registry. Letters only need to appear in order (`lgb` finds Logbook, `money` finds everything in Money), and every word you type must match something. Equal matches keep registry order.
+- **Keys**: `Up` / `Down` move (and wrap round), `Enter` opens, `Esc` closes, and so does `Ctrl+K` again. Hover and click work too. Focus returns to whatever had it before; if that element is gone because the page changed, it lands on the page.
+- **Empty box**: shows the tools you opened most recently (the page you are on is left out), newest first. Before any have been opened it lists every tool.
+- **Recent tools** are saved as `recentTools` in the app settings (the `settings` table in `everything.db`): tool ids, newest first, at most 8, no repeats. Every way of changing tool records one (sidebar, `Ctrl+<digit>`, the palette, "View all", search results). They survive restarts, are part of the JSON export and import, and an id for a tool that no longer exists is skipped when shown. Nothing leaves the computer.
+- **Actions**: things the palette can do besides opening a tool. Add one entry to `ACTIONS` in `src/renderer/src/actions.ts` (the file has an example); the palette itself does not change. The list starts empty.
+- **Where things live**: the matching, ranking, recents and action rules are in `src/shared/palette.ts` (covered by `tests/palette.ts`, run by `npm test`; `tests/registry.ts` checks the real tool list against the sidebar layout and the search, and repeats the rules for a generated 60-tool list); `lib/paletteItems.ts` turns tools and actions into palette rows; `components/PaletteHost.tsx` feeds them in; `components/CommandPalette.tsx` is the window, with `cp-*` styles in `styles.css`, which use only the theme variables. No library was added: the matcher is about 60 lines.
 
 ## Search
 Search matches words in any field (`gold breakout` needs both), `#risk` matches tags, and a date like `2026-10` matches that month.
 The matching rules live in `src/shared/search.ts`; each table's SQL sits next to its other queries (`searchEntries`, `searchTrades`, `searchGoals`, `searchTransactions`).
 
-## Add a module
-Create a page component, add one line to `src/renderer/src/modules/index.ts`.
+## Habits
+Add habits you want to do regularly and check them off day by day. Each habit has its own weekdays (every day, weekdays only, or any mix).
+- The Habits page lists today's habits with a big check button, the current streak and a 7-day strip. Click any of the seven circles to fix a day you forgot.
+- Click a habit's name for its 12-week history grid, 30-day rate and best streak. The same editor archives (hides but keeps the history) or deletes it.
+- **Streak rules**: only scheduled days count, so rest days never break a streak. A scheduled day that passes unchecked does; today does not until the day is over. A check-in on a rest day is a bonus and only adds to the total. You cannot check off a future day.
+- Streaks and rates are always calculated from the check-ins (`src/shared/habits.ts`), never stored. The queries are in `src/main/habits.ts`.
+- The Dashboard's "Habits today" tile uses the same rules, computed for the date the page sends.
+- Habits and check-ins are in the JSON export and import. Backups made before habits existed still import (they just contain no habits).
+
+## Add a tool
+Tools are defined once, in the registry `src/renderer/src/tools.ts`. The sidebar, the page router, the keyboard shortcuts and the Settings shortcut list all read it.
+1. Create the page component (a file in `src/renderer/src/modules/`, taking `ModuleProps`).
+2. Add one entry to `TOOLS`: `id`, `name`, `icon`, `route`, `category`, `keywords` and `component`. Within a category, tools show in list order, and the first entry is the start page.
+   - Categories (`overview`, `money`, `health`, `productivity`, `notes`, `utilities`) are listed in `src/shared/tools.ts`. A category with no tools is not shown; a new category is one line there.
+- `shortcut` (optional, a digit 1 to 9) gives a tool Ctrl+<digit>. Most new tools leave it out. `footer: true` keeps a tool at the bottom of the sidebar, always visible and not pinnable (Settings).
+- Pages and code can go to a tool by id or route: `onNavigate('trades')` or `onNavigate('/trades')`.
+- A mistake in an entry (duplicate id, route or shortcut, bad shape, unknown category) stops the app at start-up with a readable message. The rules are in `src/shared/tools.ts` and covered by `npm test`.
+
+## Appearance (Settings > top four cards)
+Everything applies at once and is saved. Settings are in the JSON export too.
+- **Mode**: Dark, Light or System (follows Windows live). The sun/moon button at the bottom of the sidebar flips it quickly.
+- **Interface style**: *Modern* (rounded cards, soft shadows) or *Classic minimal* (flat, thin lines, sharp corners, compact). Picking one also sets corner roundness and spacing; both can be changed afterwards.
+- **Colour scheme**: six palettes (Default, Midnight, Paper, Forest, Frost, Graphite), each with a light and a dark set. *Customise colours* overrides page, sidebar, card and text colours per mode; borders and secondary text are worked out from them, and a contrast readout warns about unreadable text.
+- **Accent colour**: presets or any colour. Text on accent buttons switches between white and dark by itself so it stays readable (amber, emerald...).
+- **Corner roundness, spacing, text size, font**: one multiplier each, so every page follows without per-page edits.
+- **Sidebar**: full or icons only. It also collapses by itself when the window is under 1000px wide.
+
+How it works: `src/shared/appearance.ts` (palettes, colour maths, validation: no DOM, used by main and renderer) turns Settings into CSS variables; `lib/theme.ts` puts them on `<html>`; `lib/settingsStore.ts` is the one shared copy of the settings (and caches the look so the next start has no flash). `tailwind.config.js` makes every `rounded-*` follow `--rs` and every padding/margin/gap follow `--d`.
+- **Add a colour scheme**: add one entry to `PALETTES` in `appearance.ts`.
+- **Buttons** (`styles.css`): `btn`, `btn-primary`, `btn-danger`, `btn-icon`, plus `btn-sm`. All react to hover, press, keyboard focus, `disabled` and `aria-busy="true"` (spinner while saving).
+- **Sidebar order**: pinned tools first, then the categories in the order of `TOOL_CATEGORIES`; inside a category, the order of `TOOLS`. See "Sidebar" below.
 
 ## Tag colours
 Settings > Tag colours lists every tag; pick a colour and it applies in the logbook, trades and search. Colours are saved in the settings (so they are in your JSON export too). Chip drawing is in `components/TagChip.tsx`, the colour store in `lib/tagColors.ts`.
@@ -33,7 +137,7 @@ Settings > Tag colours lists every tag; pick a colour and it applies in the logb
 ## Export and import (Settings page)
 - **Export everything (JSON)** saves logbook, trades, savings and settings to one file. Keep a copy somewhere other than this computer.
 - **Export trades (CSV)** opens in Excel. It is for reading only; P&L is included as a calculated column.
-- **Import backup** checks the file, shows what it contains versus what the app holds now, and on confirmation *replaces* all data with the file. The current database is copied to `before-import/` first (newest 5 kept). If the file has any problem nothing is changed.
+- **Import backup** checks the file, shows what it contains versus what the app holds now, and on confirmation *replaces* all data with the file. The current database is copied to `before-import/` first (newest 5 kept). If the file has any problem nothing is changed. The check also rejects unknown moods and savings goals that would end below zero (`npm test` covers these).
 - File format and checks: `src/shared/backup.ts`; database side: `src/main/backup.ts`.
 
 ## Your data

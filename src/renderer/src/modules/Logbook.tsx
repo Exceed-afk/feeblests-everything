@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
+import { useRefreshOnCapture } from '../lib/dataChanged'
+import { BookOpen, Plus, Search } from 'lucide-react'
 import type { LogEntry, LogFilter, TagCount } from '../../../shared/types'
-import { MOOD_STYLE } from '../lib/moods'
+import { moodStyle } from '../lib/moods'
 import { formatDate } from '../lib/dates'
 import type { ModuleProps } from '../lib/navigation'
 import { EntryEditor } from './EntryEditor'
 import { TagChip } from '../components/TagChip'
+import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
 
 export function Logbook({ target, onTargetHandled }: ModuleProps) {
   const [entries, setEntries] = useState<LogEntry[]>([])
@@ -21,6 +24,8 @@ export function Logbook({ target, onTargetHandled }: ModuleProps) {
     const [e, t] = await Promise.all([window.api.logbook.list(filter), window.api.logbook.tags()])
     setEntries(e); setTags(t); setLoaded(true)
   }, [filter])
+
+  useRefreshOnCapture(refresh) // something was saved from the Quick capture window
 
   // Re-run the query shortly after the filter changes (so typing feels smooth).
   useEffect(() => {
@@ -43,15 +48,14 @@ export function Logbook({ target, onTargetHandled }: ModuleProps) {
   }, [])
 
   return (
-    <div className="mx-auto max-w-3xl px-10 py-10">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Logbook</h1>
+    <div className="page page-sm">
+      <PageHeader title="Logbook" subtitle={loaded && entries.length > 0 ? `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}${hasFilter ? ' match' : ''}` : 'A line a day is plenty.'}>
         <button className="btn-primary" onClick={() => setEditing('new')} title="Ctrl+N">
           <Plus size={16} /> New entry
         </button>
-      </div>
+      </PageHeader>
 
-      <div className="mt-6 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[12rem] flex-1">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input className="field pl-9" placeholder="Search your entries" value={filter.text ?? ''}
@@ -69,33 +73,27 @@ export function Logbook({ target, onTargetHandled }: ModuleProps) {
         {hasFilter && <button className="btn" onClick={() => setFilter({})}>Clear</button>}
       </div>
 
-      <div className="mt-6 flex flex-col gap-3">
-        {loaded && entries.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-line bg-card/50 p-10 text-center">
-            {hasFilter ? (
-              <p className="text-muted">No entries match these filters.</p>
-            ) : (
-              <>
-                <p className="font-medium">Your logbook is empty, and that's a good place to start.</p>
-                <p className="mt-1 text-sm text-muted">Write a line about today. Future you will be glad you did.</p>
-                <button className="btn-primary mt-5" onClick={() => setEditing('new')}>
-                  <Plus size={16} /> Write your first entry
-                </button>
-              </>
-            )}
-          </div>
-        )}
+      <div className="mt-5 flex flex-col gap-3">
+        {loaded && entries.length === 0 && (hasFilter ? (
+          <EmptyState title="No entries match these filters" text="Try a different word or clear the filters."
+            action={<button className="btn mt-4" onClick={() => setFilter({})}>Clear filters</button>} />
+        ) : (
+          <EmptyState icon={BookOpen} title="Your logbook is empty, and that's a good place to start."
+            text="Write a line about today. Future you will be glad you did."
+            action={<button className="btn-primary" onClick={() => setEditing('new')}><Plus size={16} /> Write your first entry</button>} />
+        ))}
 
         {entries.map((e) => (
           <article key={e.id} onClick={() => setEditing(e)} tabIndex={0}
             onKeyDown={(k) => k.key === 'Enter' && setEditing(e)}
-            className="cursor-pointer rounded-2xl border border-line bg-card p-5 shadow-card hover:border-accent/50">
-            <div className="flex items-center gap-2 text-xs text-muted">
-              {e.mood && <span title={MOOD_STYLE[e.mood].label} className={`h-2.5 w-2.5 rounded-full ${MOOD_STYLE[e.mood].dot}`} />}
+            className="card card-pad card-interactive">
+            <div className="meta flex items-center gap-2">
+              {e.mood && <span title={moodStyle(e.mood).label} className={`h-2.5 w-2.5 rounded-full ${moodStyle(e.mood).dot}`} />}
               {formatDate(e.date)}
+              {e.mood && <span>{moodStyle(e.mood).label}</span>}
             </div>
-            <h2 className="mt-1 font-medium">{e.title}</h2>
-            {e.body && <p className="mt-1 line-clamp-2 whitespace-pre-line text-sm text-muted">{e.body}</p>}
+            <h2 className="mt-1 font-semibold">{e.title}</h2>
+            {e.body && <p className="mt-1 line-clamp-2 whitespace-pre-line text-sm leading-relaxed text-muted">{e.body}</p>}
             {e.tags.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {e.tags.map((t) => (

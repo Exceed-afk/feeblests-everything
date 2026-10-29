@@ -32,3 +32,7 @@ export function searchWhere(q: ParsedQuery, columns: string[], tagsColumn: strin
   }
   return { sql: where.length ? where.join(' AND ') : '1', params }
 }
+
+// Today's date on this computer's clock, "YYYY-MM-DD" (toISOString would use UTC).
+export const localDate = (d: Date = new Date()): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

@@ -32,7 +32,7 @@ export function PnlChart({ points }: { points: PnlPoint[] }) {
   const area = `${line} L${x(n).toFixed(1)} ${y(0).toFixed(1)} L${x(0).toFixed(1)} ${y(0).toFixed(1)} Z`
   const last = values[n]
   const up = last >= 0
-  const color = up ? 'text-emerald-500' : 'text-rose-500'
+  const color = up ? 'text-pos' : 'text-neg'
 
   // Which point is shown in the readout: the hovered one, otherwise the latest.
   const shown = hover ?? n

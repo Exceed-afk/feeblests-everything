@@ -55,7 +55,7 @@ export function EntryEditor({ entry, knownTags, onSaved, onClose }: Props) {
         className="flex h-full w-[min(34rem,100%)] flex-col gap-4 overflow-y-auto border-l border-line bg-panel p-6 shadow-card">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{entry ? 'Edit entry' : 'New entry'}</h2>
-          <button className="rounded-lg p-1.5 text-muted hover:bg-fg/5 hover:text-fg" onClick={onClose} aria-label="Close">
+          <button className="btn-icon" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>
@@ -91,15 +91,15 @@ export function EntryEditor({ entry, knownTags, onSaved, onClose }: Props) {
             placeholder="Write freely..." onChange={(e) => setBody(e.target.value)} />
         </label>
 
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        {error && <p className="text-sm text-neg">{error}</p>}
 
         <div className="flex items-center gap-2">
           {entry && !confirmDelete && (
-            <button className="btn text-rose-500" onClick={() => setConfirmDelete(true)}>Delete</button>
+            <button className="btn text-neg" onClick={() => setConfirmDelete(true)}>Delete</button>
           )}
           {entry && confirmDelete && (
             <>
-              <button className="btn bg-rose-500 text-white" onClick={remove}>Yes, delete</button>
+              <button className="btn-danger" onClick={remove}>Yes, delete</button>
               <button className="btn" onClick={() => setConfirmDelete(false)}>Keep it</button>
             </>
           )}

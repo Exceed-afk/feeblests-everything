@@ -88,7 +88,7 @@ export function TradeEditor({ trade, assets, knownTags, onSaved, onClose }: Prop
         className="flex h-full w-[min(34rem,100%)] flex-col gap-4 overflow-y-auto border-l border-line bg-panel p-6 shadow-card">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{trade ? 'Edit trade' : 'New trade'}</h2>
-          <button className="rounded-lg p-1.5 text-muted hover:bg-fg/5 hover:text-fg" onClick={onClose} aria-label="Close">
+          <button className="btn-icon" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>
@@ -110,7 +110,7 @@ export function TradeEditor({ trade, assets, knownTags, onSaved, onClose }: Prop
             {(['long', 'short'] as Direction[]).map((d) => (
               <button key={d} onClick={() => setDirection(d)} aria-pressed={direction === d}
                 className={`rounded-lg px-5 py-1.5 text-sm capitalize ${
-                  direction === d ? (d === 'long' ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white') : 'text-muted hover:text-fg'}`}>
+                  direction === d ? (d === 'long' ? 'bg-pos text-bg' : 'bg-neg text-bg') : 'text-muted hover:text-fg'}`}>
                 {d}
               </button>
             ))}
@@ -138,13 +138,13 @@ export function TradeEditor({ trade, assets, knownTags, onSaved, onClose }: Prop
             placeholder="Why did you take this trade? What did you learn?" onChange={(e) => setNotes(e.target.value)} />
         </label>
 
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        {error && <p className="text-sm text-neg">{error}</p>}
 
         <div className="flex items-center gap-2">
-          {trade && !confirmDelete && <button className="btn text-rose-500" onClick={() => setConfirmDelete(true)}>Delete</button>}
+          {trade && !confirmDelete && <button className="btn text-neg" onClick={() => setConfirmDelete(true)}>Delete</button>}
           {trade && confirmDelete && (
             <>
-              <button className="btn bg-rose-500 text-white" onClick={remove}>Yes, delete</button>
+              <button className="btn-danger" onClick={remove}>Yes, delete</button>
               <button className="btn" onClick={() => setConfirmDelete(false)}>Keep it</button>
             </>
           )}

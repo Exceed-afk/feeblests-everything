@@ -54,5 +54,24 @@ export const MIGRATIONS: string[] = [
      created_at TEXT NOT NULL,
      updated_at TEXT NOT NULL
    );
-   CREATE INDEX idx_savings_tx_goal ON savings_transactions(goal_id, date);`
+   CREATE INDEX idx_savings_tx_goal ON savings_transactions(goal_id, date);`,
+
+  // 5: habits. Streaks and rates are NOT stored; they are calculated from the check-ins.
+  // `days` is a JSON list of scheduled weekdays (0 = Monday ... 6 = Sunday).
+  `CREATE TABLE habits (
+     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+     name       TEXT NOT NULL,
+     notes      TEXT NOT NULL DEFAULT '',
+     days       TEXT NOT NULL DEFAULT '[0,1,2,3,4,5,6]',
+     archived   INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+     start_date TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );
+   CREATE TABLE habit_checkins (
+     habit_id   INTEGER NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+     date       TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     PRIMARY KEY (habit_id, date)
+   );`
 ]

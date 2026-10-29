@@ -5,7 +5,9 @@ import { progressPercent, withRunningBalance } from '../../../shared/savings'
 import { today, formatDate } from '../lib/dates'
 import { fmtAmount } from '../lib/format'
 import { errMsg } from '../lib/errors'
+import { useRefreshOnCapture } from '../lib/dataChanged'
 import { ProgressBar } from '../components/ProgressBar'
+import { EmptyState } from '../components/EmptyState'
 
 interface Props {
   goal: SavingsGoal
@@ -30,7 +32,9 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
     onChanged()
   }, [goal.id, onChanged])
 
-  useEffect(() => { window.api.savings.listTransactions(goal.id).then(setTxs) }, [goal.id])
+  const load = useCallback(() => { window.api.savings.listTransactions(goal.id).then(setTxs) }, [goal.id])
+  useEffect(() => { load() }, [load])
+  useRefreshOnCapture(load) // a deposit was saved from the Quick capture window
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !blocked) onClose() }
@@ -81,7 +85,7 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button className="btn px-3 py-1.5" onClick={onEditGoal}><Pencil size={14} /> Edit goal</button>
-            <button className="rounded-lg p-1.5 text-muted hover:bg-fg/5 hover:text-fg" onClick={onClose} aria-label="Close">
+            <button className="btn-icon" onClick={onClose} aria-label="Close">
               <X size={18} />
             </button>
           </div>
@@ -103,14 +107,14 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
           )}
         </div>
 
-        <section className="rounded-2xl border border-line bg-card p-4"
+        <section className="card card-pad-sm"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.ctrlKey && (e.target as HTMLElement).tagName === 'INPUT') submit() }}>
           <h3 className="text-sm font-medium">{editing ? 'Edit transaction' : 'Add a transaction'}</h3>
           <div className="mt-3 inline-flex rounded-xl border border-line p-1">
             {(['deposit', 'withdrawal'] as TxKind[]).map((k) => (
               <button key={k} onClick={() => setKind(k)} aria-pressed={kind === k}
                 className={`rounded-lg px-4 py-1.5 text-sm capitalize ${
-                  kind === k ? (k === 'deposit' ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white') : 'text-muted hover:text-fg'}`}>
+                  kind === k ? (k === 'deposit' ? 'bg-pos text-bg' : 'bg-neg text-bg') : 'text-muted hover:text-fg'}`}>
                 {k}
               </button>
             ))}
@@ -127,7 +131,7 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
           <label className="mt-3 block text-xs text-muted">Note (optional)
             <input className="field mt-1" value={note} placeholder="Salary, birthday money..." onChange={(e) => setNote(e.target.value)} />
           </label>
-          {error && <p className="mt-3 text-sm text-rose-500">{error}</p>}
+          {error && <p className="mt-3 text-sm text-neg">{error}</p>}
           <div className="mt-4 flex gap-2">
             <button className="btn-primary" onClick={submit}>{editing ? 'Save changes' : kind === 'deposit' ? 'Add deposit' : 'Add withdrawal'}</button>
             {editing && <button className="btn" onClick={resetForm}>Cancel</button>}
@@ -137,40 +141,33 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
         <section>
           <h3 className="text-sm font-medium">History</h3>
           {rows.length === 0 ? (
-            <p className="mt-3 rounded-2xl border border-dashed border-line bg-card/50 p-6 text-center text-sm text-muted">
-              No activity yet. Add your first deposit above and the balance starts here.
-            </p>
+            <div className="mt-3"><EmptyState title="No activity yet" text="Add your first deposit above and the balance starts here." /></div>
           ) : (
-            <div className="mt-3 overflow-hidden rounded-2xl border border-line bg-card">
-              <table className="w-full text-sm">
+            <div className="card mt-3 overflow-hidden">
+              <table className="tbl">
                 <thead>
-                  <tr className="border-b border-line text-left text-xs text-muted">
-                    <th className="px-4 py-2.5 font-medium">Date</th>
-                    <th className="px-4 py-2.5 text-right font-medium">Amount</th>
-                    <th className="px-4 py-2.5 text-right font-medium">Balance</th>
-                    <th className="w-10" />
-                  </tr>
+                  <tr><th>Date</th><th className="r">Amount</th><th className="r">Balance</th><th className="w-10" /></tr>
                 </thead>
                 <tbody>
                   {rows.map((t) => (
-                    <tr key={t.id} onClick={() => startEdit(t)}
-                      className={`cursor-pointer border-b border-line last:border-0 hover:bg-fg/5 ${editing?.id === t.id ? 'bg-accent/10' : ''}`}>
-                      <td className="px-4 py-2.5">
-                        <div className="text-muted">{formatDate(t.date)}</div>
+                    <tr key={t.id} onClick={() => startEdit(t)} tabIndex={0} onKeyDown={(k) => { if (k.key === 'Enter' && k.target === k.currentTarget) startEdit(t) }}
+                      className={editing?.id === t.id ? 'bg-accent/10' : ''}>
+                      <td>
+                        <div className="secondary">{formatDate(t.date)}</div>
                         {t.note && <div className="text-xs">{t.note}</div>}
                       </td>
-                      <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${t.kind === 'deposit' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                      <td className={`r font-medium ${t.kind === 'deposit' ? 'text-pos' : 'text-neg'}`}>
                         {t.kind === 'deposit' ? '+' : '-'}{fmtAmount(t.amount)}
                       </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-muted">{fmtAmount(t.balance)}</td>
-                      <td className="px-2 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                      <td className="r secondary">{fmtAmount(t.balance)}</td>
+                      <td className="text-right" onClick={(e) => e.stopPropagation()}>
                         {confirmId === t.id ? (
                           <span className="flex gap-1 whitespace-nowrap text-xs">
-                            <button className="rounded-lg bg-rose-500 px-2 py-1 text-white" onClick={() => remove(t)}>Delete</button>
-                            <button className="rounded-lg border border-line px-2 py-1" onClick={() => setConfirmId(null)}>Keep</button>
+                            <button className="btn-danger btn-sm" onClick={() => remove(t)}>Delete</button>
+                            <button className="btn btn-sm" onClick={() => setConfirmId(null)}>Keep</button>
                           </span>
                         ) : (
-                          <button className="rounded-lg p-1.5 text-muted hover:bg-fg/5 hover:text-rose-500" aria-label="Delete transaction"
+                          <button className="btn-icon hover:text-neg" aria-label="Delete transaction"
                             onClick={() => setConfirmId(t.id)}><Trash2 size={15} /></button>
                         )}
                       </td>

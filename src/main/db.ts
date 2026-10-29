@@ -5,6 +5,7 @@ import { join } from 'path'
 import { mkdirSync, readdirSync, unlinkSync, existsSync } from 'fs'
 import { DEFAULT_SETTINGS, type Settings } from '../shared/types'
 import { MIGRATIONS } from './migrations'
+import { localDate } from './util'
 
 let db: Database.Database
 
@@ -36,7 +37,7 @@ function migrate(): void {
 async function dailyBackup(dir: string): Promise<void> {
   const backups = join(dir, 'backups')
   mkdirSync(backups, { recursive: true })
-  const target = join(backups, `everything-${new Date().toISOString().slice(0, 10)}.db`)
+  const target = join(backups, `everything-${localDate()}.db`)
   if (!existsSync(target)) await db.backup(target)
   const old = readdirSync(backups).filter((f) => f.endsWith('.db')).sort().reverse().slice(14)
   old.forEach((f) => unlinkSync(join(backups, f)))
