@@ -14,8 +14,10 @@
 //   run       called when the user presses Enter on it; the palette closes right after.
 //             It receives { navigate, open } for actions that go somewhere (see ActionContext).
 import type { LucideIcon } from 'lucide-react'
-import { CheckSquare, LayoutGrid, PenLine } from 'lucide-react'
+import { CheckSquare, LayoutGrid, PenLine, Sunrise } from 'lucide-react'
 import { validateActions, type ActionMeta } from '../../shared/palette'
+import { getCurrentSettings } from './lib/settingsStore'
+import { DEFAULT_INTELLIGENCE } from '../../shared/types'
 import type { OpenTarget } from './lib/navigation'
 
 // What an action's `run` can use. Both are the same functions the pages receive as onNavigate / onOpen.
@@ -32,6 +34,8 @@ export interface ActionDef extends ActionMeta {
 export const ACTIONS: ActionDef[] = [
   { id: 'quick-capture', title: 'Quick capture', icon: PenLine, keywords: ['note', 'log', 'add', 'trade', 'deposit', 'habit', 'check in', 'window'],
     run: () => { window.api.capture.open() } },
+  { id: 'open-briefing', title: 'Open daily briefing', icon: Sunrise, keywords: ['today', 'summary', 'morning', 'brief', 'agenda'],
+    run: ({ navigate }) => { navigate('briefing') } },
   { id: 'new-task', title: 'New task', icon: CheckSquare, keywords: ['add', 'create', 'todo'],
     run: ({ navigate }) => { navigate('tasks'); window.dispatchEvent(new CustomEvent('tasks:new')) } },
   { id: 'today-tasks', title: "Go to Today's tasks", icon: CheckSquare, keywords: ['today', 'due', 'task list'],

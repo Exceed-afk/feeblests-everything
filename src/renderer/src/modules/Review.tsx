@@ -13,6 +13,9 @@ import { useRefreshOnCapture } from '../lib/dataChanged'
 import type { ModuleProps } from '../lib/navigation'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
+import { useSettings } from '../lib/settingsStore'
+import { DEFAULT_INTELLIGENCE } from '../../../shared/types'
+import type { InsightsPayload } from '../../../shared/types'
 import { ProgressBar } from '../components/ProgressBar'
 import { Pnl } from '../components/Pnl'
 import { DayBars, HabitDays, MoodDays, moodNear } from '../components/ReviewViews'
@@ -23,6 +26,7 @@ const MAX_MISSED = 4 // missed days named under a habit before "+N"
 export interface Draft { body: string; mood: Mood | null }
 
 export function Review({ onOpen, onNavigate }: ModuleProps) {
+  const settings = useSettings()
   const [kind, setKind] = useState<ReviewKind>('week')
   const [anchor, setAnchor] = useState(today()) // any date inside the period being shown
   const [data, setData] = useState<ReviewData | null>(null)
@@ -50,6 +54,14 @@ export function Review({ onOpen, onNavigate }: ModuleProps) {
   }, [load])
 
   const now = today()
+  const insightsOn = settings.intelligence?.features.insights ?? DEFAULT_INTELLIGENCE.features.insights
+  const [topInsights, setTopInsights] = useState<InsightsPayload | null>(null)
+  useEffect(() => {
+    if (!insightsOn) return
+    const d = new Date()
+    const t = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    window.api.intelligence.insights.build(t).then(setTopInsights).catch(() => undefined)
+  }, [insightsOn])
   const range = useMemo(() => reviewRange(kind, anchor), [kind, anchor])
   const word = kind === 'week' ? 'week' : 'month'
   const isCurrent = range.start <= now && now <= range.end
@@ -96,6 +108,21 @@ export function Review({ onOpen, onNavigate }: ModuleProps) {
     <div className="page page-lg" aria-busy={stale}>
       {header}
       {error && <p role="alert" className="mb-4 text-sm text-neg">{error}</p>}
+      {insightsOn && topInsights && (
+        topInsights.comparisons.some((c) => c.ok && !topInsights.dismissed.includes(c.id)) ||
+        topInsights.correlations.some((c) => c.ok && !topInsights.dismissed.includes(c.id))
+      ) && (
+        <section className="card card-pad mb-4" aria-label="Top insights">
+          <h2 className="section-title"><Lightbulb size={15} /> Top insights</h2>
+          <ul className="mt-3 flex flex-col gap-2 text-sm">
+            {[...topInsights.comparisons, ...topInsights.correlations]
+              .filter((c) => c.ok && !topInsights.dismissed.includes(c.id))
+              .slice(0, 3)
+              .map((c) => <li key={c.id}>{c.text}<span className="meta"> {c.detail}</span></li>)}
+          </ul>
+          <button className="section-link mt-2" onClick={() => onNavigate('insights')}>See all insights <ChevronRight size={12} /></button>
+        </section>
+      )}
       <div className={stale ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
         <ReviewBody data={data} onOpen={onOpen} onNavigate={onNavigate}
           draft={drafts[draftKey] ?? null} onDraft={setDraft} onSaved={load} />

@@ -9,7 +9,7 @@
 // Order matters: tools are listed in this order inside their category, and the FIRST tool is the start page.
 // Optional: `footer: true` keeps a tool at the bottom of the sidebar (users cannot pin or unpin it).
 import type { ComponentType } from 'react'
-import { LayoutDashboard, ClipboardCheck, CalendarDays, BookOpen, CandlestickChart, PiggyBank, CalendarCheck, CheckSquare, Search, Settings as Cog, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, ClipboardCheck, CalendarDays, BookOpen, CandlestickChart, PiggyBank, CalendarCheck, CheckSquare, Search, Settings as Cog, Brain, Sunrise, Lightbulb, MessageCircleQuestion, type LucideIcon } from 'lucide-react'
 import { validateTools, type ToolMeta } from '../../shared/tools'
 import type { ModuleProps } from './lib/navigation'
 import { Dashboard } from './modules/Dashboard'
@@ -22,7 +22,10 @@ import { Habits } from './modules/Habits'
 import { Tasks } from './modules/Tasks'
 import { Search as SearchPage } from './modules/Search'
 import { SettingsPage } from './modules/SettingsPage'
-
+import { Intelligence } from './modules/Intelligence'
+import { Briefing } from './modules/Briefing'
+import { Insights } from './modules/Insights'
+import { Assistant } from './modules/Assistant'
 export interface ToolDef extends ToolMeta {
   icon: LucideIcon
   component: ComponentType<ModuleProps>
@@ -34,6 +37,12 @@ export const TOOLS: ToolDef[] = [
     keywords: ['home', 'overview', 'summary', 'today'], component: Dashboard },
   { id: 'review', name: 'Review', icon: ClipboardCheck, route: '/review', category: 'overview',
     keywords: ['weekly review', 'monthly review', 'summary', 'recap', 'reflection', 'week', 'month', 'progress', 'report'], component: Review },
+  { id: 'briefing', name: 'Daily briefing', icon: Sunrise, route: '/briefing', category: 'overview',
+    keywords: ['daily briefing', 'today', 'summary', 'morning', 'agenda', 'overview', 'plan', 'brief'], component: Briefing },
+  { id: 'insights', name: 'Insights', icon: Lightbulb, route: '/insights', category: 'overview',
+    keywords: ['insights', 'patterns', 'correlation', 'statistics', 'mood', 'habits', 'weekday', 'trends'], component: Insights },
+  { id: 'assistant', name: 'Assistant', icon: MessageCircleQuestion, route: '/assistant', category: 'overview',
+    keywords: ['assistant', 'ai', 'ask', 'question', 'chat', 'model', 'llm'], component: Assistant },
   { id: 'calendar', name: 'Calendar', icon: CalendarDays, route: '/calendar', category: 'overview',
     keywords: ['month', 'schedule', 'agenda', 'day', 'date', 'activity', 'history', 'planner'], component: Calendar },
   { id: 'logbook', name: 'Logbook', icon: BookOpen, route: '/logbook', category: 'notes', shortcut: '2',
@@ -46,6 +55,8 @@ export const TOOLS: ToolDef[] = [
     keywords: ['habit tracker', 'streak', 'routine', 'daily', 'check-in'], component: Habits },
   { id: 'tasks', name: 'Tasks', icon: CheckSquare, route: '/tasks', category: 'productivity',
     keywords: ['task manager', 'todo', 'to do', 'checklist', 'planner', 'today', 'upcoming'], component: Tasks },
+  { id: 'intelligence', name: 'Intelligence', icon: Brain, route: '/intelligence', category: 'productivity',
+    keywords: ['intelligence', 'ai', 'settings', 'features', 'daily briefing', 'automations', 'smart', 'insights'], component: Intelligence },
   { id: 'search', name: 'Search', icon: Search, route: '/search', category: 'utilities', shortcut: '6',
     keywords: ['find', 'lookup', 'everything'], component: SearchPage },
   { id: 'settings', name: 'Settings', icon: Cog, route: '/settings', category: 'utilities', shortcut: '7', footer: true,

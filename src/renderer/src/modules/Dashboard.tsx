@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, ChevronRight, Circle, ClipboardCheck, Flame, PiggyBank, TrendingUp } from 'lucide-react'
+import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, ChevronRight, Circle, ClipboardCheck, Flame, Lightbulb, PiggyBank, TrendingUp } from 'lucide-react'
 import type { DashboardData, SavingsGoal } from '../../../shared/types'
 import { progressPercent } from '../../../shared/savings'
 import { moodStyle } from '../lib/moods'
@@ -8,6 +8,8 @@ import { formatDate, today } from '../lib/dates'
 import { fmtAmount, fmtPnl, pnlColor } from '../lib/format'
 import { errMsg } from '../lib/errors'
 import { useRefreshOnCapture } from '../lib/dataChanged'
+import { getCurrentSettings } from '../lib/settingsStore'
+import { DEFAULT_INTELLIGENCE } from '../../../shared/types'
 import type { ModuleProps } from '../lib/navigation'
 import { ProgressBar } from '../components/ProgressBar'
 import { PnlChart } from '../components/PnlChart'
@@ -65,6 +67,14 @@ export function Dashboard({ onOpen, onNavigate }: ModuleProps) {
     </button>
   )
 
+  // The daily briefing card: shown only when the feature is on in Intelligence settings.
+  const briefingOn = getCurrentSettings().intelligence?.features.dailyBriefing
+    ?? DEFAULT_INTELLIGENCE.features.dailyBriefing
+  const insightsOn = getCurrentSettings().intelligence?.features.insights
+    ?? DEFAULT_INTELLIGENCE.features.insights
+
+  // A clickable stat tile: the whole tile opens the module it summarises.
+
   return (
     <div className="page page-lg">
       {header}
@@ -79,6 +89,36 @@ export function Dashboard({ onOpen, onNavigate }: ModuleProps) {
             : log.streak === 0 ? 'Write today to start one'
             : `${log.thisMonth} ${log.thisMonth === 1 ? 'entry' : 'entries'} this month`, 'logbook')}
       </div>
+
+      {/* Cross-module insights: a light door when the feature is on */}
+      {insightsOn && (
+        <button className="card card-pad-sm card-interactive mt-4 flex w-full items-center justify-between gap-3 text-left" onClick={() => onNavigate('insights')}
+          aria-label="Open insights: patterns across your tools">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent-fg"><Lightbulb size={16} /></span>
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">See patterns</span>
+              <span className="block truncate text-xs text-muted">Habit days vs savings and trades, mood vs tasks, weekday breakdowns.</span>
+            </span>
+          </span>
+          <ChevronRight size={14} className="shrink-0 text-muted" />
+        </button>
+      )}
+
+      {/* One door to the daily briefing that gathers everything in one quiet summary */}
+      {briefingOn && (
+        <button className="card card-pad-sm card-interactive mt-4 flex w-full items-center justify-between gap-3 text-left" onClick={() => onNavigate('briefing')}
+          aria-label="Open the daily briefing: today's tasks, habits, savings, trades and journal">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent-fg"><ClipboardCheck size={16} /></span>
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">Your daily briefing</span>
+              <span className="block truncate text-xs text-muted">Tasks due, habits left, savings, trades and your journal, for today.</span>
+            </span>
+          </span>
+          <ChevronRight size={14} className="shrink-0 text-muted" />
+        </button>
+      )}
 
       {/* One door to the weekly / monthly summary that ties the tools together */}
       <button className="card card-pad-sm card-interactive mt-4 flex w-full items-center justify-between gap-3 text-left" onClick={() => onNavigate('review')}>

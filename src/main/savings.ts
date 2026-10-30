@@ -3,6 +3,8 @@ import type Database from 'better-sqlite3'
 import { round8 } from '../shared/math'
 import { signedAmount } from '../shared/savings'
 import { isDate, searchWhere } from './util'
+import { emitAutomation } from './automations'
+import { getDb } from './db'
 import type { ParsedQuery } from '../shared/search'
 import type { SavingsGoal, SavingsGoalInput, SavingsTx, SavingsTxHit, SavingsTxInput, SearchGroup, TxKind } from '../shared/types'
 
@@ -126,7 +128,18 @@ export function addTransaction(db: Database.Database, input: SavingsTxInput): Sa
     `INSERT INTO savings_transactions (goal_id, date, kind, amount, note, created_at, updated_at)
      VALUES (@goalId, @date, @kind, @amount, @note, @now, @now)`
   ).run({ ...t, goalId: input.goalId, now })
-  return getTx(db, Number(info.lastInsertRowid))
+  const tx = getTx(db, Number(info.lastInsertRowid))
+  const goal = getGoal(db, input.goalId)
+  // Deposit added (automation event). The goal key in the event key means "first" fires once;
+  // the goal-reached variant has its own key below so each message shows once per goal.
+  if (t.kind === 'deposit') {
+    void emitAutomation(db, 'savings-deposit', `deposit:${tx.id}`, { goalId: goal.id, goalName: goal.name, depositAmount: t.amount })
+  }
+  // Goal reached (automation event): it now sits at/over its target and did not before.
+  if (goal.target !== null && after >= goal.target && balanceWithout(db, goal.id) - signedAmount(t.kind, t.amount) < goal.target) {
+    void emitAutomation(db, 'goal-reached', `goal:${goal.id}:reached`, { goalId: goal.id, goalName: goal.name })
+  }
+  return tx
 }
 
 export function updateTransaction(db: Database.Database, id: number, input: SavingsTxInput): SavingsTx {

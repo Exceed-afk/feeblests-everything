@@ -4,6 +4,7 @@ import { calcPnl } from '../shared/trades'
 import { cleanTags, escapeLike, isDate, searchWhere } from './util'
 import type { ParsedQuery } from '../shared/search'
 import type { Direction, SearchGroup, Trade, TradeFilter, TradeInput, TradeMeta } from '../shared/types'
+import { emitAutomation } from './automations'
 
 interface Row {
   id: number; date: string; asset: string; direction: Direction; entry_price: number
@@ -85,11 +86,17 @@ export function createTrade(db: Database.Database, input: TradeInput): Trade {
 
 export function updateTrade(db: Database.Database, id: number, input: TradeInput): Trade {
   const t = prepare(input)
+  const before = db.prepare('SELECT exit_price FROM trades WHERE id = ?').get(id) as { exit_price: number | null } | undefined
   db.prepare(
     `UPDATE trades SET date=@date, asset=@asset, direction=@direction, entry_price=@entry, exit_price=@exit,
      quantity=@quantity, fees=@fees, notes=@notes, tags=@tags, updated_at=@now WHERE id=@id`
   ).run({ ...t, id, now: new Date().toISOString() })
-  return getTrade(db, id)
+  const trade = getTrade(db, id)
+  // A trade CLOSING (was open, now has an exit) is an automation event.
+  if (before && before.exit_price === null && trade.exitPrice !== null && trade.pnl !== null) {
+    void emitAutomation(db, 'trade-closed', `trade:${trade.id}`, { tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset })
+  }
+  return trade
 }
 
 export function deleteTrade(db: Database.Database, id: number): void {

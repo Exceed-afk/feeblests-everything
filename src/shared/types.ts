@@ -13,6 +13,7 @@ export type FontChoice = 'system' | 'clean' | 'serif' | 'mono'
 export interface ColorOverrides { bg?: string; panel?: string; card?: string; fg?: string }
 
 export interface Settings {
+  intelligence: IntelligenceSettings // per-feature intelligence toggles (step 1)
   theme: ThemeMode
   accent: string // hex color, e.g. "#8b5cf6"
   tagColors: Record<string, string> // tag name -> hex color; tags not listed use the accent color
@@ -30,8 +31,15 @@ export interface Settings {
   taskLayout: TaskLayout // Tasks: the list or the board, remembered between sessions
 }
 
+// Default intelligence feature toggles. Daily briefing is on; everything else is off.
+export const DEFAULT_INTELLIGENCE: IntelligenceSettings = {
+  features: { dailyBriefing: true, automations: false, smartQuickAdd: false, insights: false, aiAssistant: false },
+  aiProvider: 'off'
+}
+
 // These defaults reproduce the look of version 0.7.0 exactly.
 export const DEFAULT_SETTINGS: Settings = {
+  intelligence: DEFAULT_INTELLIGENCE,
   theme: 'dark', accent: '#8b5cf6', tagColors: {},
   palette: 'default', uiStyle: 'modern', radius: 'soft', density: 'comfortable', textSize: 'default', font: 'system',
   colors: { light: {}, dark: {} }, sidebarCollapsed: false, pinnedTools: [], sidebarClosedGroups: [], recentTools: [], taskLayout: 'list'
@@ -39,6 +47,33 @@ export const DEFAULT_SETTINGS: Settings = {
 
 // The API the renderer can call. The preload script implements it and
 // the main process answers it (see src/main/index.ts).
+interface IntelligenceApiInner {
+  get(): Promise<IntelligenceSettings>
+  set(features: Partial<IntelligenceFeatureToggles>): Promise<void>
+  setAiProvider(provider: 'off' | 'local' | 'cloud'): Promise<void>
+  automations: {
+    get(): Promise<AutomationSettings>
+    set(patch: Partial<AutomationSettings>): Promise<AutomationSettings>
+    activity(): Promise<AutomationActivity[]>
+    deleteActivity(id: number): Promise<void>
+    clearActivity(): Promise<void>
+    staleTasks(): Promise<{ id: number; title: string; daysOverdue: number }[]>
+  }
+  insights: {
+    build(today: string): Promise<InsightsPayload>
+    dismiss(id: string, dismissed: boolean): Promise<string[]>
+  }
+  assistant: {
+    get(): Promise<AssistantSettings>
+    set(patch: Partial<AssistantSettings>): Promise<AssistantSettings>
+    keyStatus(): Promise<{ saved: boolean; encryptionOk: boolean }>
+    setKey(key: string): Promise<{ ok: true } | { ok: false; error: string }>
+    clearKey(): Promise<void>
+    functions(): Promise<{ name: string; description: string }[]>
+    ask(question: string, today: string): Promise<AskOutcome>
+  }
+}
+
 export interface EverythingApi {
   settings: {
     getAll(): Promise<Settings>
@@ -104,6 +139,10 @@ export interface EverythingApi {
     // with what happened on each day across the logbook, trades, savings and habits. `month` is "YYYY-MM"; `today` the user's local date.
     month(month: string, today: string): Promise<CalendarData>
   }
+  briefing: {
+    // Everything the daily briefing page shows, worked out from the other tools' data. `today` is the user's local date.
+    build(today: string): Promise<DailyBriefing>
+  }
   capture: {
     // Quick capture: the small always-available window (global shortcut and tray icon). See src/main/capture.ts.
     status(): Promise<CaptureStatus>
@@ -131,9 +170,13 @@ export interface EverythingApi {
     // Step 2: replace ALL current data with the checked file (a safety copy is made first).
     applyImport(): Promise<ImportResult>
   }
+  intelligence: IntelligenceApiInner
 }
 
-// ---------- Backup (export / import) ----------
+// ---------- Insights ----------
+export interface InsightsPayload extends InsightsResult { dismissed: string[] }
+
+// ---------- Quick capture ----------
 export interface ExportResult { path: string; counts: BackupCounts }
 
 export interface BackupCounts { entries: number; trades: number; goals: number; transactions: number; habits: number; checkins: number; tasks: number; subtasks: number }
@@ -336,6 +379,9 @@ export interface TaskReview { created: number; completed: number }
 // ---------- Review (weekly / monthly) ----------
 // Everything here is CALCULATED from the other tools' data each time (nothing new is stored). A written
 // reflection is an ordinary logbook entry tagged "review".
+// 1 (rough) to 5 (great). The Logbook only stores the word, so this is the one place that turns it into a number.
+export const MOOD_SCORE: Record<Mood, number> = { great: 5, good: 4, okay: 3, low: 2, rough: 1 }
+
 export type ReviewKind = 'week' | 'month'
 
 export interface ReviewTrades {
@@ -443,6 +489,39 @@ export interface CaptureStatus extends CaptureSettings {
 }
 
 export interface CaptureConfigResult { ok: boolean; error: string | null; status: CaptureStatus }
+
+// ---------- Intelligence data layer ----------
+export interface IntelligenceFeatureToggles {
+  dailyBriefing: boolean // on by default
+  automations: boolean
+  smartQuickAdd: boolean
+  insights: boolean
+  aiAssistant: boolean
+}
+
+// ---------- Intelligence settings ----------
+import type { AutomationSettings, AutomationActivity } from './automations'
+
+export interface IntelligenceSettings {
+  features: IntelligenceFeatureToggles
+  aiProvider: 'off' | 'local' | 'cloud' // built in step 6
+  automations?: AutomationSettings // step 3: per-rule toggles
+}
+
+export type { AutomationSettings, AutomationActivity }
+
+export type { DailyBriefing, BriefingTasks, BriefingHabits, BriefingSavings, BriefingTrades, BriefingJournal,
+  BriefingTaskItem, BriefingHabitItem, BriefingGoal } from './briefing'
+
+// EverythingApi's briefing section (line 117) needs these types, so import them here too.
+import { round8 } from './math'
+import type { InsightsResult } from './insights'
+import type { DailyBriefing } from './briefing'
+import type { AssistantSettings, AssistantExchange, AskOutcome } from './assistant'
+export type { InsightsResult } from './insights'
+
+// ---------- Insights ----------
+export interface InsightsPayload extends InsightsResult { dismissed: string[] }
 
 // ---------- Calendar ----------
 // Calculated from the other tools' data each time (nothing new is stored).

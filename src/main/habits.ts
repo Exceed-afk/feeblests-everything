@@ -1,6 +1,7 @@
 // Habit database queries (same pattern as the other modules).
 import type Database from 'better-sqlite3'
 import { computeHabitStats } from '../shared/habits'
+import { emitAutomation } from './automations'
 import { isDate, localDate } from './util'
 import type { Habit, HabitInput, HabitsOverview } from '../shared/types'
 
@@ -71,7 +72,14 @@ export function deleteHabit(db: Database.Database, id: number): void {
 export function setCheckin(db: Database.Database, habitId: number, date: string, done: boolean): void {
   if (!isDate(date)) throw new Error('Date must look like 2026-10-25')
   if (date > localDate()) throw new Error('That day has not happened yet.')
-  getHabit(db, habitId) // throws if the habit does not exist
+  const habit = getHabit(db, habitId)
+  // The streak BEFORE this change, so a break can be detected (automation event).
+  const beforeStreak = habit.stats.current
   if (done) db.prepare('INSERT OR IGNORE INTO habit_checkins (habit_id, date, created_at) VALUES (?, ?, ?)').run(habitId, date, new Date().toISOString())
   else db.prepare('DELETE FROM habit_checkins WHERE habit_id = ? AND date = ?').run(habitId, date)
+  const after = getHabit(db, habitId)
+  if (beforeStreak >= 7 && after.stats.current < beforeStreak) {
+    void emitAutomation(db, 'habit-streak-broken', `habit:${habitId}:break:${beforeStreak}:${after.stats.current}`,
+      { habitId, habitName: habit.name, habitStreak: beforeStreak })
+  }
 }

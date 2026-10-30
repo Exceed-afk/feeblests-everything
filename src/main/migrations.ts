@@ -109,7 +109,23 @@ export const MIGRATIONS: string[] = [
   `UPDATE tasks SET parent_task_id = NULL
      WHERE parent_task_id IS NOT NULL
        AND id NOT IN (SELECT MIN(id) FROM tasks WHERE parent_task_id IS NOT NULL GROUP BY parent_task_id);
-   CREATE UNIQUE INDEX idx_tasks_parent_once ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;`
+   CREATE UNIQUE INDEX idx_tasks_parent_once ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;`,
+
+  // 8: automation activity. One row per thing an automation DID (created a draft,
+  // showed a message). It records WHAT and WHEN so nothing happens silently; the
+  // user can delete rows freely and it never touches the user's own data.
+  // rule + event + key together dedup a repeated trigger (e.g. the same goal's
+  // celebration shown once, not once per deposit after it was reached).
+  `CREATE TABLE automation_events (
+     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+     rule       TEXT NOT NULL,
+     event      TEXT NOT NULL,
+     event_key  TEXT NOT NULL,
+     label      TEXT NOT NULL,
+     entry_id   INTEGER,
+     created_at TEXT NOT NULL
+   );
+   CREATE UNIQUE INDEX idx_automation_once ON automation_events(rule, event_key);`
 ]
 
 // Exposed for focused migration tests and used by the app's startup path.

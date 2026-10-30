@@ -17,8 +17,20 @@ import { isWebUrl } from '../shared/url'
 import { getDashboard } from './dashboard'
 import { getReview } from './review'
 import { getCalendar } from './calendar'
+import { getBriefing } from './briefing'
 import { createCapture, type Capture } from './capture'
-import type { CaptureSettings, HabitInput, ReviewKind, TaskInput, TaskStatus, TaskFilter, ExportResult, ImportPreview, ImportResult, SavingsGoalInput, SavingsTxInput, LogEntryInput, LogFilter, TradeFilter, TradeInput } from '../shared/types'
+import { automationSettings, setAutomationSettings, automationActivity, deleteAutomationActivity, clearAutomationActivity } from './automations'
+import { getInsights, setInsightDismissed } from './insights'
+import {
+  assistantSettings, setAssistantSettings, keyStatus, storeKey, clearKey,
+  assistantFunctionList, askAssistant
+} from './assistant'
+import type { AssistantSettings } from '../shared/assistant'
+import { listTasks } from './tasks'
+import type { AutomationSettings } from '../shared/automations'
+import type { CaptureSettings, HabitInput, IntelligenceFeatureToggles, ReviewKind, TaskInput, TaskStatus, TaskFilter, ExportResult, ImportPreview, ImportResult, SavingsGoalInput, SavingsTxInput, LogEntryInput, LogFilter, TradeFilter, TradeInput } from '../shared/types'
+import { DEFAULT_INTELLIGENCE, type IntelligenceSettings } from '../shared/types'
+import { localDate } from './util'
 
 const APP_NAME = "Feeblest's Everything"
 
@@ -159,6 +171,20 @@ app.whenReady().then(async () => {
   ipcMain.handle('dashboard:summary', (_e, today: string) => getDashboard(getDb(), today))
   ipcMain.handle('review:build', (_e, kind: ReviewKind, anchor: string, today: string) => getReview(getDb(), kind, anchor, today))
   ipcMain.handle('calendar:month', (_e, month: string, today: string) => getCalendar(getDb(), month, today))
+  ipcMain.handle('briefing:build', (_e, today: string) => getBriefing(getDb(), today))
+  ipcMain.handle('automations:get', () => automationSettings())
+  ipcMain.handle('automations:set', (_e, patch: Partial<AutomationSettings>) => setAutomationSettings(patch))
+  ipcMain.handle('automations:activity', () => automationActivity(getDb()))
+  ipcMain.handle('automations:activity:delete', (_e, id: number) => deleteAutomationActivity(getDb(), id))
+  ipcMain.handle('automations:activity:clear', () => clearAutomationActivity(getDb()))
+  ipcMain.handle('automations:staleTasks', () => {
+    const today = localDate()
+    return listTasks(getDb(), today)
+      .filter((t) => t.status !== 'done' && t.dueDate !== null && t.dueDate < today)
+      .map((t) => ({ id: t.id, title: t.title, daysOverdue: Math.round((Date.parse(today) - Date.parse(t.dueDate as string)) / 86_400_000) }))
+  })
+  ipcMain.handle('insights:build', (_e, today: string) => getInsights(getDb(), today))
+  ipcMain.handle('insights:dismiss', (_e, id: string, dismissed: boolean) => setInsightDismissed(getDb(), id, dismissed))
   ipcMain.handle('capture:status', () => capture.status())
   ipcMain.handle('capture:configure', (_e, patch: Partial<CaptureSettings>) => capture.configure(patch && typeof patch === 'object' ? patch : {}))
   ipcMain.handle('capture:open', () => capture.show())
@@ -192,6 +218,28 @@ app.whenReady().then(async () => {
     pendingImport = parsed
     return { fileName: basename(file), exportedAt: parsed.exportedAt, counts: countsOf(parsed), current: currentCounts(getDb()) }
   })
+  ipcMain.handle('intelligence:get', () => {
+    const saved = getSettings()
+    return { features: saved.intelligence?.features ?? DEFAULT_INTELLIGENCE.features, aiProvider: saved.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider }
+  })
+  ipcMain.handle('intelligence:set', (_e, features: Partial<IntelligenceFeatureToggles>) => {
+    const saved = getSettings()
+    setSetting('intelligence', { ...saved.intelligence, features: { ...DEFAULT_INTELLIGENCE.features, ...features }, aiProvider: saved.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider })
+  })
+  ipcMain.handle('intelligence:setAiProvider', (_e, provider: 'off' | 'local' | 'cloud') => {
+    const saved = getSettings()
+    setSetting('intelligence', { ...saved.intelligence, features: saved.intelligence?.features ?? DEFAULT_INTELLIGENCE.features, aiProvider: provider })
+  })
+
+  // ---- AI assistant (step 6) ----
+  ipcMain.handle('assistant:get', () => assistantSettings())
+  ipcMain.handle('assistant:set', (_e, patch: Partial<AssistantSettings>) => setAssistantSettings(patch))
+  ipcMain.handle('assistant:keyStatus', () => keyStatus())
+  ipcMain.handle('assistant:setKey', (_e, key: string) => storeKey(String(key ?? '')))
+  ipcMain.handle('assistant:clearKey', () => { clearKey() })
+  ipcMain.handle('assistant:functions', () => assistantFunctionList())
+  ipcMain.handle('assistant:ask', (_e, question: string, today: string) => askAssistant(getDb(), String(question ?? ''), today))
+
   ipcMain.handle('backup:applyImport', async (): Promise<ImportResult> => {
     if (!pendingImport) throw new Error('Choose a backup file first.')
     const copy = await safetyCopy() // so a wrong import can be undone

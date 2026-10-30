@@ -7,16 +7,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, Flame, PiggyBank } from 'lucide-react'
+import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, Flame, PiggyBank, Sparkles } from 'lucide-react'
 import { MOODS, type CaptureKind, type Direction, type Mood, type SavingsGoal, type TxKind } from '../../../shared/types'
 import { buildDeposit, buildNote, buildTrade, habitsForToday, type CaptureHabit } from '../../../shared/capture'
+import { parseQuickAdd, describeProposal, type QuickAddParse } from '../../../shared/quickAdd'
+import { QuickAddPreview } from '../components/QuickAddPreview'
+import { saveProposal } from '../lib/quickAddSave'
 import { today } from '../lib/dates'
 import { errMsg } from '../lib/errors'
 import { fmtAmount } from '../lib/format'
 import { MOOD_STYLE } from '../lib/moods'
 import { loadSettings } from '../lib/settingsStore'
 
-const TABS: { id: CaptureKind; label: string; icon: LucideIcon }[] = [
+const TABS: { id: CaptureKind | 'ask'; label: string; icon: LucideIcon }[] = [
   { id: 'note', label: 'Note', icon: BookOpen },
   { id: 'trade', label: 'Trade', icon: CandlestickChart },
   { id: 'deposit', label: 'Deposit', icon: PiggyBank },
@@ -36,7 +39,31 @@ const MOD = isMac ? '⌘' : 'Ctrl'
 const SAVED_PAUSE_MS = 650 // how long "Saved" shows before the window hides itself
 
 export function Capture() {
-  const [tab, setTab] = useState<CaptureKind>(() => TABS.find((t) => t.id === memory.get(K.tab))?.id ?? 'note')
+  const [tab, setTabBase] = useState<CaptureKind | 'ask'>(() => TABS.find((t) => t.id === memory.get(K.tab))?.id ?? 'note')
+  const setTab = setTabBase
+
+  // Quick add (Ask) tab state: what is typed, the parse, and the confirmed flow.
+  const [ask, setAsk] = useState('')
+  const [qaParse, setQaParse] = useState<QuickAddParse | null>(null)
+  const [qaError, setQaError] = useState('')
+  const [qaNames, setQaNames] = useState<{ goals: SavingsGoal[]; habits: import('../../../shared/types').Habit[] } | null>(null)
+  const quickAddOn = ((): boolean => {
+    try { return JSON.parse(localStorage.getItem('appearance-cache') ?? '{}')?.intelligence?.features?.smartQuickAdd ?? false } catch { return false }
+  })()
+
+  const runAskParse = (text: string): void => {
+    const trimmed = text.trim()
+    if (!trimmed) { setQaParse(null); setQaError(''); return }
+    const r = parseQuickAdd(trimmed, { today: today() })
+    if (r.ok) { setQaParse((r as { parse: QuickAddParse }).parse); setQaError('') }
+    else { setQaParse(null); setQaError((r as { error: string }).error) }
+  }
+
+  const loadNames = async (): Promise<void> => {
+    if (qaNames) return
+    const [goals, habits] = await Promise.all([window.api.savings.listGoals(), window.api.habits.list()])
+    setQaNames({ goals, habits: habits.habits })
+  }
 
   // Note
   const [text, setText] = useState('')
@@ -184,7 +211,7 @@ export function Capture() {
       const mod = e.ctrlKey || e.metaKey
       if (e.key === 'Escape') { e.preventDefault(); window.api.capture.hide() }
       else if (mod && e.key === 'Enter') { e.preventDefault(); latest.current.submit() }
-      else if (mod && /^[1-5]$/.test(e.key)) { e.preventDefault(); latest.current.setTab(TABS[Number(e.key) - 1].id) }
+      else if (mod && /^[1-6]$/.test(e.key)) { e.preventDefault(); latest.current.setTab(Number(e.key) === 6 ? 'ask' : TABS[Number(e.key) - 1].id) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -212,10 +239,39 @@ export function Capture() {
               <t.icon size={14} aria-hidden="true" /> {t.label}
             </button>
           ))}
+          {quickAddOn && (
+            <button aria-pressed={tab === 'ask'} onClick={() => setTab('ask')} title={`Ask (${MOD}+6)`}
+              className="flex flex-1 items-center justify-center gap-1.5" aria-label="Ask: type a sentence, get a preview">
+              <Sparkles size={14} aria-hidden="true" /> Ask
+            </button>
+          )}
         </div>
       </div>
 
       <div className="flex flex-col gap-2.5 p-3" onKeyDown={enterSaves}>
+        {tab === 'ask' && (
+          qaParse ? (
+            <QuickAddPreview proposal={qaParse.proposal} confidence={qaParse.confidence}
+              onConfirm={async (edited) => {
+                await loadNames()
+                const r = await saveProposal(edited, { goals: qaNames!.goals, habits: qaNames!.habits })
+                setAsk(''); setQaParse(null)
+                await finished(r.message)
+              }}
+              onCancel={() => { setQaParse(null); setQaError('') }} />
+          ) : (
+            <>
+              <input data-autofocus aria-label="Ask: what should I record?" className="field" value={ask}
+                placeholder='Try "deposit 200 to vacation", "task pay rent every month", "habit check in meditation", "note feeling tired"'
+                onChange={(e) => { setAsk(e.target.value); runAskParse(e.target.value) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runAskParse(ask) } }} />
+              {qaError
+                ? <p role="alert" className="text-xs text-neg">{qaError}</p>
+                : <p className="meta">Type a sentence and I will show you what I would create, before anything is saved.</p>}
+            </>
+          )
+        )}
+
         {tab === 'note' && (<>
           <textarea data-autofocus aria-label="Note" className="field min-h-[7rem] resize-none leading-relaxed" value={text}
             placeholder="What is on your mind? The first line becomes the title." onChange={(e) => setText(e.target.value)} />
@@ -330,6 +386,7 @@ export function Capture() {
           {error ? <span role="alert" className="text-neg">{error}</span>
             : flash ? <span role="status" className="flex items-center gap-1 text-pos"><Check size={13} aria-hidden="true" />{flash}</span>
             : tab === 'habit' ? <span>Click a habit to check it off. <kbd className="kbd">Esc</kbd> closes</span>
+            : tab === 'ask' ? <span>Type a sentence. <kbd className="kbd">Esc</kbd> closes</span>
             : <span><kbd className="kbd">{MOD}+Enter</kbd> saves, <kbd className="kbd">Esc</kbd> closes · <kbd className="kbd">{MOD}+1–5</kbd> switches type</span>}
         </div>
         <button className="section-link" onClick={() => window.api.capture.openMain()}>Open app</button>

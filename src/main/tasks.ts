@@ -38,6 +38,7 @@
 import type Database from 'better-sqlite3'
 import { filterTasks, nextTaskDate, TASK_FIELD_ORDER, taskInputProblems } from '../shared/tasks'
 import { cleanTags, localDate } from './util'
+import { emitAutomation } from './automations'
 import type { Task, TaskInput, TaskStatus } from '../shared/types'
 
 interface TaskRow extends TaskRowBase {
@@ -207,7 +208,12 @@ export function setTaskStatus(db: Database.Database, id: number, status: TaskSta
   const task = getTask(db, id)
   if (status !== 'done' || task.status === 'done') {
     db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?').run(status, status === 'done' ? task.completedAt : null, id)
-    return getTask(db, id)
+    const updated = getTask(db, id)
+    // Task completed (automation event) — only on the todo/in-progress -> done move, never on repeats.
+    if (status === 'done' && task.status !== 'done') {
+      void emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
+    }
+    return updated
   }
   const now = new Date().toISOString()
   db.transaction(() => {
@@ -217,5 +223,6 @@ export function setTaskStatus(db: Database.Database, id: number, status: TaskSta
       subtasks: task.subtasks.map((subtask, index) => ({ ...subtask, done: false, sortOrder: index }))
     }, now)
   })()
+  void emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
   return getTask(db, id)
 }

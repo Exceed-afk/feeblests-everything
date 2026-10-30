@@ -28,7 +28,7 @@ interface Tip { label: string; hint: string | null; top: number }
 //  - a "Pinned" section on top (the user's own pins), then one collapsible group per category
 //  - full width with labels, or an icons-only rail (collapse button, Ctrl+B, or automatically in a narrow window)
 // What is pinned, which groups are closed and whether the rail is icons-only are saved in the settings.
-export function Sidebar({ active, onSelect }: { active: string; onSelect: (id: string) => void }) {
+export function Sidebar({ active, onSelect, tools: visible = TOOLS }: { active: string; onSelect: (id: string) => void; tools?: ToolDef[] }) {
   const settings = useSettings()
   const narrow = useNarrow()
   const collapsed = settings.sidebarCollapsed || narrow
@@ -36,7 +36,7 @@ export function Sidebar({ active, onSelect }: { active: string; onSelect: (id: s
   const navRef = useRef<HTMLElement>(null)
   const [tip, setTip] = useState<Tip | null>(null)
 
-  const layout = useMemo(() => sidebarLayout(TOOLS, settings.pinnedTools), [settings.pinnedTools])
+  const layout = useMemo(() => sidebarLayout(visible, settings.pinnedTools), [visible, settings.pinnedTools])
   const closed = useMemo(() => new Set(settings.sidebarClosedGroups), [settings.sidebarClosedGroups])
   const pinnedIds = new Set(layout.pinned.map((t) => t.id))
 

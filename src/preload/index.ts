@@ -62,6 +62,9 @@ const api: EverythingApi = {
   calendar: {
     month: (month, today) => ipcRenderer.invoke('calendar:month', month, today)
   },
+  briefing: {
+    build: (today) => ipcRenderer.invoke('briefing:build', today)
+  },
   capture: {
     status: () => ipcRenderer.invoke('capture:status'),
     configure: (patch) => ipcRenderer.invoke('capture:configure', patch),
@@ -89,6 +92,32 @@ const api: EverythingApi = {
     exportTradesCsv: (today) => ipcRenderer.invoke('backup:exportTradesCsv', today),
     chooseImport: () => ipcRenderer.invoke('backup:chooseImport'),
     applyImport: () => ipcRenderer.invoke('backup:applyImport')
+  },
+  intelligence: {
+    get: () => ipcRenderer.invoke('intelligence:get'),
+    set: (features) => ipcRenderer.invoke('intelligence:set', features),
+    setAiProvider: (provider) => ipcRenderer.invoke('intelligence:setAiProvider', provider),
+    automations: {
+      get: () => ipcRenderer.invoke('automations:get'),
+      set: (patch) => ipcRenderer.invoke('automations:set', patch),
+      activity: () => ipcRenderer.invoke('automations:activity'),
+      deleteActivity: (id) => ipcRenderer.invoke('automations:activity:delete', id),
+      clearActivity: () => ipcRenderer.invoke('automations:activity:clear'),
+      staleTasks: () => ipcRenderer.invoke('automations:staleTasks')
+    },
+    insights: {
+      build: (today) => ipcRenderer.invoke('insights:build', today),
+      dismiss: (id, dismissed) => ipcRenderer.invoke('insights:dismiss', id, dismissed)
+    },
+    assistant: {
+      get: () => ipcRenderer.invoke('assistant:get'),
+      set: (patch) => ipcRenderer.invoke('assistant:set', patch),
+      keyStatus: () => ipcRenderer.invoke('assistant:keyStatus'),
+      setKey: (key) => ipcRenderer.invoke('assistant:setKey', key),
+      clearKey: () => ipcRenderer.invoke('assistant:clearKey'),
+      functions: () => ipcRenderer.invoke('assistant:functions'),
+      ask: (question, today) => ipcRenderer.invoke('assistant:ask', question, today)
+    }
   }
 }
 

@@ -6,6 +6,7 @@ import type { ParsedQuery } from '../shared/search'
 import { logStreak } from '../shared/dashboard'
 import { MOODS } from '../shared/types'
 import type { LogEntry, LogEntryInput, LogFilter, LogSummary, Mood, SearchGroup, TagCount } from '../shared/types'
+import { emitAutomation } from './automations'
 
 interface Row {
   id: number; date: string; title: string; body: string; mood: string | null
@@ -69,7 +70,13 @@ export function createEntry(db: Database.Database, input: LogEntryInput): LogEnt
     `INSERT INTO logbook_entries (date, title, body, mood, tags, created_at, updated_at)
      VALUES (@date, @title, @body, @mood, @tags, @now, @now)`
   ).run({ ...e, now })
-  return getEntry(db, Number(info.lastInsertRowid))
+  const entry = getEntry(db, Number(info.lastInsertRowid))
+  // Journal entry saved (automation event). Fires only for USER-written entries:
+  // automation drafts carry the #automation tag and skip their own trigger — loop prevention.
+  if (!e.tags.includes('automation')) {
+    void emitAutomation(db, 'journal-entry-saved', `entry:${entry.id}`, { entryId: entry.id })
+  }
+  return entry
 }
 
 export function updateEntry(db: Database.Database, id: number, input: LogEntryInput): LogEntry {

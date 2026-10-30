@@ -11,6 +11,10 @@ interface R { [k: string]: any } // raw database rows
 export function collectBackup(db: Database.Database): BackupFile {
   const settings = Object.fromEntries(
     (db.prepare('SELECT key, value FROM settings ORDER BY key').all() as { key: string; value: string }[])
+      // The assistant's encrypted key blob stays out of backups: a backup file should
+      // never carry credential material, even encrypted. The user re-pastes the key
+      // after a restore (see src/main/assistant.ts).
+      .filter((r) => r.key !== 'assistantKeyBlob')
       .map((r) => [r.key, JSON.parse(r.value)])
   )
   return {

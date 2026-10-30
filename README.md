@@ -132,6 +132,91 @@ Title, due date, priority and status are up top; project, tags, notes, checklist
 - **Deleting a parent** unlinks the child (it becomes a standalone task with its own rule and keeps the series going); subtasks are deleted with their task.
 - **Backups** keep ids and links exactly as they were. The import check refuses (with a plain message, before anything is replaced) a file whose task points at a parent not in the file, is its own parent, or has two children sharing one parent; importing never runs the completion logic, so restoring creates no extra occurrences.
 
+## Daily briefing
+The **Daily briefing** page (sidebar, top; also `Ctrl+K` > "daily briefing", and a card on the Dashboard) is a quiet summary of **today only**: tasks due and overdue, habits still to do with their streaks, savings goals with progress and the last deposit, open trades or yesterday's result, and yesterday's mood / your last journal entry — plus one rule-written line at the top ("You have 3 tasks due and 2 habits left today."). Rule-based and fully offline; no AI, no network.
+- Each section **hides itself** when it has nothing to show. The Journal section always appears, because even empty it offers "Write today's entry".
+- The feature can be switched off on the **Intelligence** page (`intelligence.features.dailyBriefing`, default on), which removes it from the sidebar and the palette and hides the Dashboard card.
+- **Where things live**: every rule is a pure function in `src/shared/briefing.ts` (data in, sections out, all dates local `YYYY-MM-DD`; covered by `tests/briefing.ts`); `src/main/briefing.ts` only fetches the rows for the whole briefing in one round trip (`briefing:build`); `modules/Briefing.tsx` is the page.
+
+## Natural-language quick add (step 4)
+Type a sentence in the command palette (`Ctrl+K`) or the Quick capture window's **Ask** tab, and the parser proposes what to create. The parser is pure pattern-matching (`src/shared/quickAdd.ts`) — no AI, no network, dates computed from the local date. **Nothing saves until you confirm**: the preview card shows exactly what would be created, every field editable, and Cancel saves nothing. When the parse is not confident (unknown goal name, ambiguous habit prefix, no date found), the card says "Did you mean…?" instead of guessing.
+- The feature is off until you turn on **Smart quick-add** on the Intelligence page.
+
+### Supported phrases
+- **Deposits / withdrawals**: `deposit 200 to vacation fund`, `add 25.50 into trip fund`, `save 10 to emergency`, `put 10 to emergency`, `withdraw 10 from car`. A currency symbol is ignored; "for/because/note …" after the goal becomes the note. An amount of 0 or a missing amount is refused.
+- **Recurring tasks**: `task pay rent every month on the 1st`, `task water plants weekly`, `task stretch every 3 days`, `task jog daily`, `task report every monday`, `task clean every 2 weeks`.
+- **One-off tasks**: `task call dentist friday high priority`, `task file taxes today`, `task book flight tomorrow`, `task submit report in 3 days`, `task review budget next monday`. Priorities: `high priority`, `priority low`, or a bare `high` / `medium` / `low`. The title is whatever is left after date and priority words come out.
+- **Habit check-ins**: `habit check in meditation`, `habit checkin meditation`, `habit check off meditation`, `checked meditation`, `did meditation`. A unique prefix matches (`medi` → Meditation); an ambiguous prefix asks which one you meant.
+- **Notes**: `note feeling tired today`; a `:` or `.` after the first words splits title from body.
+
+### Dates (computed here, no library)
+`today`, `tomorrow`, `in N days`, `next monday` (always next week's), and bare weekday names (`friday` = the next Friday, including later this week). Everything is arithmetic on the `YYYY-MM-DD` text with UTC helpers, so time zones and DST cannot shift a day.
+
+### How to add a new pattern (one small change)
+1. Open `src/shared/quickAdd.ts`.
+2. Add a pattern to `PATTERNS`: an `id`, a `triggers` regex matching the whole trimmed lowercase line, and a `build(line, ctx)` returning either `{ ok: true, parse }` (the proposal), `null` (this pattern does not apply after all — later patterns get a turn), or `{ ok: false, error }` (recognised but bad input).
+3. If the proposal is a new shape, extend `QuickAddProposal`, `describeProposal` and `QuickAddPreview` with its fields.
+4. Wire saving in `src/renderer/src/lib/quickAddSave.ts` (one `if (proposal.kind === …)` branch).
+5. Add tests in `tests/quickAdd.ts` — the happy phrase, the ambiguous form, and something that should be rejected.
+
+## AI assistant (step 6)
+The **Assistant** page answers questions about your own data through a chat. **Off by default** — and the Intelligence master toggle ("AI assistant") must be on before the page even appears in the sidebar.
+
+### Modes, and exactly what leaves the computer
+- **Off (default):** nothing. There is no request to build or send; the page says so.
+- **Local model:** one short text block per question — the fixed instructions block (function names only, no data) plus a user turn reading `Today is <date>. Question: <your words>` — sent to an OpenAI-compatible endpoint that **must be loopback** (`localhost`, `127.0.0.1` or `[::1]`; anything else is refused). Nothing crosses your network. No key needed.
+- **Cloud:** the same one text block, plus your API key in an `Authorization` header, over **https** (required; loopback is not allowed in cloud mode) to the address you set (default `https://api.openai.com/v1`). Enabling it requires typing "I understand". Under **every** answer, an expandable "What was sent, exactly" section shows the verbatim user turn, the instructions block's size, the function the model chose, its date range, and the number computed locally — plus the line "Rows sent to the provider: None." The numeric result never travels back to the provider.
+
+In **all** modes the model never sees rows, SQL, history, or the database: it replies with one function call from a fixed list (`savings_total`, `trade_pnl`, `habit_completion_rate`, `tasks_completed`, `mood_average`, `journal_entries`), each taking only a from/to date range; the app runs it locally on the shared data layer. One call per question, no chaining. Read-only by construction — there is no write path.
+
+### Key storage
+Cloud keys are encrypted with **Electron `safeStorage`** (Windows DPAPI / macOS Keychain / desktop keyring) and stored only as a ciphertext blob. If the OS cannot encrypt (e.g. Linux without a keyring backend), saving is **refused** with an explanation rather than writing plain text. The key is never sent to the renderer, never logged, never shown back, and **excluded from JSON backups**.
+
+### Safety and failure handling
+Plain, specific errors for: assistant off, cloud not confirmed, no key, unreachable server, rejected key, timeout (30 s), unusable model replies. Chats exist only in the page's memory — "Clear history" empties them and nothing is persisted anywhere, not even the question list.
+
+**Where things live:** every testable rule — function table, prompt, reply parsing, endpoint validation, readiness, failure wording — is pure in `src/shared/assistant.ts` (29 checks in `tests/assistant.ts`). `src/main/assistant.ts` owns safeStorage, the single `fetch` call (no SDK, no new dependency) and running the chosen function. `modules/Assistant.tsx` is the chat; the provider picker, key box and cloud confirmation live on the Intelligence page.
+
+## Insights
+The **Insights** page (sidebar, top; also `Ctrl+K` > "insights", and a "See patterns" card on the Dashboard) finds cross-tool patterns with **simple statistics only** — two-group averages and one Pearson correlation. No AI, no network. It respects the **Insights** toggle on the Intelligence page.
+
+### How each insight is calculated
+All maths lives in the pure module `src/shared/insights.ts` (tested in `tests/insights.ts`). It first builds one row per day in a rolling 6-week window (`buildInsightDays`): habits scheduled/done, average mood (1–5), closed-trade P&L, net savings, tasks completed that local day.
+
+- **Savings vs. habit completion** (`savings-by-habits`): scheduled-habit days are ranked by that day's completion rate; the top half is the "high" group, the bottom half the "low" group. The insight compares the average net savings of the two groups. Needs `MIN_DAYS` (4) days per side.
+- **Trade P&L vs. habit completion** (`trades-by-habits`): same grouping; compares average closed-trade P&L per day between the two groups.
+- **Mood vs. tasks completed** (`mood-by-tasks`): days with a logged mood are ranked by tasks completed; top half vs. bottom half, comparing average mood (1–5).
+- **Mood ↔ tasks correlation** (`mood-vs-tasks`): Pearson r between tasks-done and mood across all days with both. Reported with **n** and **r**; "no clear link / weak link / fairly strong link" by |r| (<0.3 / <0.6 / more).
+- **Tables**: habit completion rate by weekday, closed-trade P&L by weekday, and closed-trade P&L bucketed by the day's mood — each row shows its own counts, so every headline is checkable.
+
+**Honesty rules**: a comparison only appears when each side has ≥ `MIN_DAYS` (4) days; the window must span ≥ `MIN_WEEKS` (4) weeks; correlations need ≥ `MIN_MOODS` (4) joint days and non-zero variance; a difference under `SAME` (0.25) is reported as "about the same". Wording is descriptive ("was higher on", "might be a pattern") and never causal. Under every card sits the detail line: sample sizes and the raw averages (or n and r). When data is short, the page says exactly what is missing instead of guessing.
+
+**Dismissals**: the ✕ on a card remembers the id in `intelligence.dismissedInsights`, so it stays gone. The Dashboard card and the Review page's "Top insights" block (three strongest cards) honour the same list and the same toggle.
+
+### How to add a new insight
+1. In `src/shared/insights.ts`, extend `InsightDay` if you need a new per-day number, and fill it in `buildInsightDays`.
+2. Write the comparison with the existing `compare(...)` helper (two groups → averages + sample sizes) or `correlationInsight(...)` (a series pair → r + n). Give it a unique `id`, cautious wording, and a plain-`needText` for when data is short.
+3. Add the id to the `KNOWN` list in `src/main/insights.ts` so dismissal works.
+4. Render it in `modules/Insights.tsx` (and optionally the Review "Top insights" list — they read the same arrays).
+5. Tests in `tests/insights.ts`: the rich-window case, the tiny-data case, and a ties case.
+
+## Automations
+Automations are small, predictable helpers — **not** a general rule builder. Each one listens for one thing happening (a tool event), decides from its own toggle and a number, and either **creates a draft** or **shows a message**. All four are off by default, each with its own card on the Intelligence page.
+- **Loss reflection drafts**: a trade closing at a loss bigger than your threshold creates a draft logbook entry with reflection prompts. The entry is tagged `#automation`, its first line says "Created by an automation — safe to delete", and deleting it in the Logbook deletes it like any entry.
+- **Goal celebrations**: a savings goal reaching its target shows a celebration message and suggests setting a new goal.
+- **Broken streak notes**: a habit streak of 7 or more days breaking shows a gentle note (on the Daily briefing's "From your automations" area).
+- **Stale overdue tasks**: a task overdue for more than N days is surfaced in the Daily briefing.
+- **Transparency**: the Intelligence page's **Automation activity** list shows every action with its time, rule and — when one was made — a link straight to the entry. Rows can be deleted one by one or cleared; deleting a row never touches the entry it may have created.
+- **Safety**: rules can only create or show. The DB layer runs every action through `guardAction`, which drops anything else; there is no UPDATE or DELETE path an automation can reach. Loop prevention is three layers: rules never emit events; entries an automation made do not re-trigger `journal-entry-saved`; and `automation_events` has a unique `(rule, event_key)` row per trigger, so the same event can never fire a rule twice.
+- **Where things live**: the engine and all four rules are pure functions in `src/shared/automations.ts` (covered by `tests/automations.ts` — engine routing, each rule, off-toggles, loop prevention, the guard). `src/main/automations.ts` receives events, dedups them in the `automation_events` table (migration 8) and carries out actions. Tools emit events in one line each (see `updateTrade` in `src/main/trades.ts`, `addTransaction` in `savings.ts`, `setCheckin` in `habits.ts`, `setTaskStatus` in `tasks.ts`, `createEntry` in `logbook.ts`). The Daily briefing shows the automation trail under "From your automations".
+
+### How to add a new rule (one small change each)
+1. In `src/shared/automations.ts`: add the trigger's event kind to `AutomationEventKind` (if it is new) and write a rule function returning an `AutomationRule` — `id`, `label`, `description`, the `listensTo` kinds, and a pure `run(event, settings, ctx)` that returns `AutomationAction[]` (today: `create-draft-entry` or `message`).
+2. Add the rule to `defaultRules()` and a toggle key to `AutomationSettings` + `RULE_TOGGLE`, with a default of `false`.
+3. Add the toggle card in the Intelligence page (`modules/Intelligence.tsx`) reading/writing that key.
+4. Emit the event where it happens: `emitAutomation(db, kind, key, data)` in the tool's main-process query file. The `key` (e.g. `trade:12`) is what makes the trigger fire once, ever, per rule.
+5. Add tests in `tests/automations.ts` — off by default, fires on the event, ignores the rest.
+
 ## Add a tool
 Tools are defined once, in the registry `src/renderer/src/tools.ts`. The sidebar, the page router, the keyboard shortcuts and the Settings shortcut list all read it.
 1. Create the page component (a file in `src/renderer/src/modules/`, taking `ModuleProps`).
