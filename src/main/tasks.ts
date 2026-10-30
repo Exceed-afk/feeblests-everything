@@ -36,8 +36,8 @@
  */
 
 import type Database from 'better-sqlite3'
-import { filterTasks, nextTaskDate } from '../shared/tasks'
-import { cleanTags, isDate, localDate } from './util'
+import { filterTasks, nextTaskDate, TASK_FIELD_ORDER, taskInputProblems } from '../shared/tasks'
+import { cleanTags, localDate } from './util'
 import type { Task, TaskInput, TaskStatus } from '../shared/types'
 
 interface TaskRow {
@@ -91,22 +91,12 @@ export function listFilteredTasks(db: Database.Database, filter: Parameters<type
 }
 
 function normalize(input: TaskInput) {
+  // The same rules the task editor shows per field (src/shared/tasks.ts): throw the first
+  // message, so a bad save stops in one place with an actionable text.
+  const problems = taskInputProblems(input)
+  const firstProblem = TASK_FIELD_ORDER.find((field) => problems[field])
+  if (firstProblem) throw new Error(problems[firstProblem]!)
   const title = input.title.trim()
-  if (!title) throw new Error('Give the task a title')
-  if (!['todo', 'in-progress', 'done'].includes(input.status)) throw new Error('Choose a valid task status')
-  if (!['low', 'medium', 'high'].includes(input.priority)) throw new Error('Choose a valid task priority')
-  if (input.dueDate !== null && (!isDate(input.dueDate) || (() => {
-    const [year, month, day] = input.dueDate!.split('-').map(Number)
-    const date = new Date(year, month - 1, day)
-    return date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day
-  })())) throw new Error('Due date must be a valid local date like 2026-10-25')
-  if (input.recurrence) {
-    if (!['daily', 'weekly', 'monthly', 'custom'].includes(input.recurrence.frequency)) throw new Error('Choose a valid recurrence')
-    if (input.recurrence.frequency === 'custom' && (!Number.isInteger(input.recurrence.intervalDays) || input.recurrence.intervalDays < 1 || input.recurrence.intervalDays > 3650))
-      throw new Error('Custom recurrence must be between 1 and 3650 days')
-  }
-  if (!Array.isArray(input.tags) || !Array.isArray(input.subtasks)) throw new Error('Task tags and subtasks must be lists')
-  if (input.parentTaskId !== null && (!Number.isInteger(input.parentTaskId) || input.parentTaskId <= 0)) throw new Error('Parent task id is invalid')
   const subtasks = input.subtasks.map((s) => ({ title: s.title.trim(), done: Boolean(s.done) })).filter((s) => s.title)
   return {
     title, notes: input.notes, status: input.status, priority: input.priority, dueDate: input.dueDate,

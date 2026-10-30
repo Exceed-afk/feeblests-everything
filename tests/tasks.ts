@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import { MIGRATIONS, applyMigrations } from '../src/main/migrations'
-import { addTaskMonths, applyColumnOrder, filterTasks, groupTasksForBoard, nextTaskDate, taskReview } from '../src/shared/tasks'
+import { addTaskMonths, applyColumnOrder, filterTasks, groupTasksForBoard, nextTaskDate, taskInputProblems, taskReview } from '../src/shared/tasks'
 import { normalizeSettings } from '../src/shared/appearance'
 import { createTask, deleteTask, deleteTasks, setTaskStatus, setTasksStatus, updateTask, listTasks } from '../src/main/tasks'
 import { collectBackup, restoreBackup } from '../src/main/backup'
@@ -300,6 +300,43 @@ test('backup export/import round trips recurrence links and spawns nothing extra
   assert.equal(next.length, 1)
   assert.equal(next[0].dueDate, '2026-11-16')
   target.close()
+})
+
+// ---- task editor input validation (src/shared/tasks.ts) ----
+
+const validTaskInput = {
+  title: 'Water plants', notes: '', status: 'todo', priority: 'medium', dueDate: null,
+  project: null, tags: [], recurrence: null, parentTaskId: null, subtasks: []
+} as unknown as Parameters<typeof taskInputProblems>[0]
+
+test('task input validation returns one exact, visible fix per bad field', () => {
+  assert.deepEqual(taskInputProblems(validTaskInput), {})
+  const bad = taskInputProblems({ ...validTaskInput, title: '   ', status: 'later', priority: 'urgent', dueDate: '2026-02-30',
+    recurrence: { frequency: 'hourly', intervalDays: 1 }, tags: 'work', subtasks: 'kit', parentTaskId: -2 } as never)
+  assert.deepEqual(bad, {
+    title: 'Give the task a title.',
+    status: 'Choose a valid task status.',
+    priority: 'Choose a valid task priority.',
+    dueDate: 'Due date must be a real calendar date, like 2026-10-25.',
+    recurrence: 'Choose a valid recurrence.',
+    tags: 'Tags must be a list of tag names.',
+    subtasks: 'Subtasks must be a list of checklist items with a title each.',
+    parentTaskId: 'Parent task id is invalid.'
+  })
+})
+
+test('custom recurrence interval bounds are refused with an exact fix', () => {
+  const withCustom = (intervalDays: number) =>
+    taskInputProblems({ ...validTaskInput, recurrence: { frequency: 'custom', intervalDays } } as unknown as never)
+  assert.equal(withCustom(0).recurrence, 'Custom repeat must be between 1 and 3650 days.')
+  assert.equal(withCustom(3651).recurrence, 'Custom repeat must be between 1 and 3650 days.')
+  assert.deepEqual(withCustom(90), {})
+})
+
+test('an impossible due date is refused; a past one stays allowed because overdue tasks are a real view', () => {
+  assert.deepEqual(taskInputProblems({ ...validTaskInput, dueDate: '2025-10-25' } as unknown as never), {})
+  assert.ok(taskInputProblems({ ...validTaskInput, dueDate: '2026-02-30' } as unknown as never).dueDate)
+  assert.ok(taskInputProblems({ ...validTaskInput, dueDate: 'not-a-date' } as unknown as never).dueDate)
 })
 
 console.log(`\n${n} task checks passed`)

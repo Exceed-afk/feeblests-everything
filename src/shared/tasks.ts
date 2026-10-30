@@ -1,5 +1,5 @@
 // Task rules as plain functions, with calendar dates kept as YYYY-MM-DD text.
-import type { Task, TaskDashboard, TaskFilter, TaskStatus, TaskView } from './types'
+import type { Task, TaskDashboard, TaskFilter, TaskInput, TaskStatus, TaskView } from './types'
 
 const DAY_MS = 86_400_000
 const toUtc = (iso: string): number => {
@@ -109,4 +109,45 @@ export function taskDashboard(tasks: Task[], today: string): TaskDashboard {
       return task.status === 'done' && day !== null && day >= weekStart && day <= weekEnd
     }).length
   }
+}
+
+// ---------- Task input validation ----------
+// One plain, actionable message per bad field (empty object = fine). The task editor shows
+// each message next to its field, and the main process throws the first one, so the UI and
+// the database layer run identical rules from this one function. Past due dates stay allowed:
+// an overdue task is a real state here (the Overdue view).
+export type TaskField = 'title' | 'status' | 'priority' | 'dueDate' | 'recurrence' | 'tags' | 'subtasks' | 'parentTaskId'
+// The order messages surface in; the first bad field is the one the editor focuses.
+export const TASK_FIELD_ORDER: TaskField[] = ['title', 'status', 'priority', 'dueDate', 'recurrence', 'tags', 'subtasks', 'parentTaskId']
+
+export function taskInputProblems(input: TaskInput): Partial<Record<TaskField, string>> {
+  const problems: Partial<Record<TaskField, string>> = {}
+  if (typeof input.title !== 'string' || !input.title.trim()) problems.title = 'Give the task a title.'
+  if (!['todo', 'in-progress', 'done'].includes(String(input.status))) problems.status = 'Choose a valid task status.'
+  if (!['low', 'medium', 'high'].includes(String(input.priority))) problems.priority = 'Choose a valid task priority.'
+  if (input.dueDate !== null) {
+    const [year, month, day] = typeof input.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)
+      ? input.dueDate.split('-').map(Number) : [NaN, NaN, NaN]
+    const date = new Date(year, month - 1, day)
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day)
+      problems.dueDate = 'Due date must be a real calendar date, like 2026-10-25.'
+  }
+  const recurrence = input.recurrence
+  if (recurrence !== null && recurrence !== undefined) {
+    if (typeof recurrence !== 'object' || !['daily', 'weekly', 'monthly', 'custom'].includes(String(recurrence.frequency)))
+      problems.recurrence = 'Choose a valid recurrence.'
+    else if (recurrence.frequency === 'custom' &&
+      (!Number.isInteger(recurrence.intervalDays) || recurrence.intervalDays < 1 || recurrence.intervalDays > 3650))
+      problems.recurrence = 'Custom repeat must be between 1 and 3650 days.'
+  }
+  if (!Array.isArray(input.tags) || !(input.tags as unknown[]).every((tag: unknown) => typeof tag === 'string'))
+    problems.tags = 'Tags must be a list of tag names.'
+  if (!Array.isArray(input.subtasks) ||
+    !(input.subtasks as unknown[]).every((subtask: unknown) =>
+      subtask !== null && typeof subtask === 'object' && typeof (subtask as { title: unknown }).title === 'string'))
+    problems.subtasks = 'Subtasks must be a list of checklist items with a title each.'
+  if (input.parentTaskId !== null &&
+    (typeof input.parentTaskId !== 'number' || !Number.isInteger(input.parentTaskId) || input.parentTaskId <= 0))
+    problems.parentTaskId = 'Parent task id is invalid.'
+  return problems
 }
