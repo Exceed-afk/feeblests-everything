@@ -25,6 +25,22 @@ export function PnlChart({ points }: { points: PnlPoint[] }) {
   const pad = (hi - lo || 1) * 0.1
   const yMin = lo - pad, yMax = hi + pad
   const n = values.length - 1 // number of trades
+
+  // Guard: no trades to display
+  if (n <= 0) {
+    return (
+      <div>
+        <div className="flex min-h-[2.5rem] flex-wrap items-baseline justify-between gap-x-4 text-sm" aria-live="polite">
+          <span className="text-muted">No closed trades</span>
+        </div>
+        <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 w-full text-muted"
+          aria-label="No closed trades to display"
+        />
+        <p className="mt-1 text-xs text-muted">Closed trades only, in date order.</p>
+      </div>
+    )
+  }
+
   const x = (i: number) => PAD.l + (i / n) * (W - PAD.l - PAD.r)
   const y = (v: number) => PAD.t + (1 - (v - yMin) / (yMax - yMin)) * (H - PAD.t - PAD.b)
 
@@ -48,7 +64,7 @@ export function PnlChart({ points }: { points: PnlPoint[] }) {
 
   return (
     <div>
-      <div className="flex min-h-[2.5rem] flex-wrap items-baseline justify-between gap-x-4 text-sm" aria-live="polite">
+      <div className="flex min-h-[2.5rem] flex-wrap items-baseline justify-between gap-x-4 text-sm" aria-live="polite" aria-label={`Running P&L chart, ${n} closed ${n === 1 ? 'trade' : 'trades'}`}>
         <span className="text-muted">
           {p ? <>{formatDate(p.date)} · {p.asset} · <span className={pnlColor(p.pnl)}>{fmtPnl(p.pnl)}</span></>
               : 'Start'}

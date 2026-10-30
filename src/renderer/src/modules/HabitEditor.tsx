@@ -100,7 +100,7 @@ export function HabitEditor({ habit, today, onToggleDay, onSaved, onClose }: Pro
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {stat('Current streak', String(s.current))}
               {stat('Best streak', String(s.best))}
-              {stat('Last 30 days', s.rate30 === null ? '-' : `${Math.round(s.rate30)}%`)}
+              {stat('Last 30 days', s.rate30 !== null ? `${Math.round(s.rate30)}%` : '0% scheduled')}
               {stat('Check-ins', String(s.total))}
             </div>
             <h3 className="mb-2 mt-5 text-sm font-medium">Last 12 weeks</h3>

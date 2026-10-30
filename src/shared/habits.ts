@@ -1,6 +1,7 @@
 // Habit rules as plain functions (no database, no Electron), used by the main
 // process and the UI. Dates are "YYYY-MM-DD" text; the arithmetic below works
 // on the calendar date itself, so time zones and daylight saving cannot shift it.
+import { round8 } from './math'
 import type { HabitStats } from './types'
 
 export const WEEKDAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -38,8 +39,22 @@ const MAX_DAYS = 3660 // look back at most ten years
 //  - Days before the habit existed are not counted as missed.
 export function computeHabitStats(habit: { days: number[]; startDate: string }, checkins: string[], today: string): HabitStats {
   const done = new Set(checkins)
-  const first = [habit.startDate, ...checkins].sort()[0]
-  const span = Math.min(MAX_DAYS, Math.round((toUtc(today) - toUtc(first)) / DAY_MS))
+  const habitStart = habit.startDate
+
+  if (!habitStart) return { current: 0, best: 0, rate30: null, total: done.size }
+
+  const todayUtc = toUtc(today)
+  const habitStartUtc = toUtc(habitStart)
+
+  // Determine the effective start date for the span calculation.
+  // Use the earlier of habitStart and the first check-in, to account for
+  // streak breaks between habit start and first check-in, but don't go
+  // backwards further than necessary. Cap at MAX_DAYS (3660 / 10 years).
+  const earliestCheckin = checkins.length > 0 ? [...checkins].sort()[0] : null
+  const firstDate = earliestCheckin
+    ? (toUtc(earliestCheckin) < habitStartUtc ? earliestCheckin : habitStart)
+    : habitStart
+  const span = Math.min(MAX_DAYS, Math.round((todayUtc - toUtc(firstDate)) / DAY_MS))
   const windowStart = addDays(today, -29)
 
   let run = 0, best = 0, due = 0, hit = 0
@@ -55,5 +70,5 @@ export function computeHabitStats(habit: { days: number[]; startDate: string }, 
       if (d >= windowStart) due++
     }
   }
-  return { current: run, best, rate30: due > 0 ? (hit / due) * 100 : null, total: done.size }
+  return { current: run, best, rate30: due > 0 ? round8((hit / due) * 100) : null, total: done.size }
 }

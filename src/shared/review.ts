@@ -293,7 +293,7 @@ function insightsOf(trades: ReviewTrades, habits: ReviewHabits, mood: ReviewMood
   return out
 }
 
-// Questions for the reflection. The ones about this period's numbers come first, then two that always apply.
+// The order of prompts returned from promptsOf is:\n//   1. Trades loss/win/open prompts (if applicable) - triggered by trade stats\n//   2. Habit weakness/strong prompts - triggered by habit completion stats\n//   3. Mood low prompt - triggered if a low mood day is found\n//   4. Savings up/down prompt - triggered if savings changed\n//   5. Generic prompts: 'went well' and 'change' - always the last two\n//\n// This ordering ensures that period-specific insights come first,\n// followed by habit/mood/savings observations, and ends with\n// two universal reflection questions that always apply.\n//\n// The array order matters for UI rendering - prompts are displayed in the\n// order they appear here, with the first ones being most period-specific.\n//\n// Original: The ones about this period's numbers come first, then two that always apply.\n//\n// Questions for the reflection. The ones about this period's numbers come first, then two that always apply.
 function promptsOf(d: Pick<ReviewData, 'kind' | 'complete' | 'trades' | 'savings' | 'habits' | 'mood'>): ReviewData['prompts'] {
   const word = d.kind === 'week' ? 'week' : 'month'
   const when = `${d.complete ? 'that' : 'this'} ${word}`

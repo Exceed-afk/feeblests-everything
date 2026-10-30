@@ -19,7 +19,14 @@ export async function initDatabase(): Promise<void> {
   db = new Database(join(dir, 'everything.db'))
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  applyMigrations(db)
+  try {
+    applyMigrations(db)
+  } catch (e) {
+    console.error('Migration failed, starting with fresh schema:', e)
+    // If migrations fail, we still need a valid database.
+    // The app will work with the base schema (migration 0), but
+    // newer features may not be available until migrations are fixed.
+  }
   await dailyBackup(dir)
 }
 

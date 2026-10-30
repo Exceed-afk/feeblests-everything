@@ -3,6 +3,7 @@ import { Sidebar, SIDEBAR_NARROW } from './components/Sidebar'
 import { PaletteHost } from './components/PaletteHost'
 import { START_TOOL, findTool, toolByShortcut } from './tools'
 import { getCurrentSettings, loadSettings, updateSettings } from './lib/settingsStore'
+import { ErrorBoundary } from './lib/error-boundary'
 import type { OpenTarget } from './lib/navigation'
 import { pushRecent } from '../../shared/palette'
 
@@ -23,7 +24,7 @@ export default function App() {
     const next = pushRecent(recent, t.id)
     if (next !== recent) updateSettings({ recentTools: next }) // unchanged (already the newest) = nothing to save
   }, [])
-  const open = useCallback((t: OpenTarget) => { setTarget(t); navigate(t.module) }, [navigate])
+  const open = useCallback((t: OpenTarget) => { setTarget(t); navigate(t.module) }, [])
   const clearTarget = useCallback(() => setTarget(null), [])
 
   // Load the saved look (theme, colours, tag colours) once at startup.
@@ -54,12 +55,17 @@ export default function App() {
   }, [navigate])
 
   const Page = (findTool(active) ?? START_TOOL).component
+
   return (
-    <div className="flex h-full">
-      <Sidebar active={active} onSelect={navigate} />
-      {/* tabIndex -1: the palette can hand focus to the page when the element that had it is gone */}
-      <main tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none"><Page target={target} onTargetHandled={clearTarget} onOpen={open} onNavigate={navigate} /></main>
-      {paletteOpen && <PaletteHost active={active} navigate={navigate} open={open} onClose={closePalette} />}
-    </div>
+    <ErrorBoundary fallback={<div className="p-6 text-center text-muted">An error occurred. The app will continue running.</div>}>
+      <div className="flex h-full">
+        <Sidebar active={active} onSelect={navigate} />
+        {/* tabIndex -1: the palette can hand focus to the page when the element that had it is gone */}
+        <main tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
+          <Page target={target} onTargetHandled={clearTarget} onOpen={open} onNavigate={navigate} />
+        </main>
+        {paletteOpen && <PaletteHost active={active} navigate={navigate} open={open} onClose={closePalette} />}
+      </div>
+    </ErrorBoundary>
   )
-}
+}

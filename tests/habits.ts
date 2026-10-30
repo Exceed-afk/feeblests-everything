@@ -2,6 +2,7 @@
 //   npm test
 import assert from 'node:assert/strict'
 import { addDays, computeHabitStats, isScheduled, scheduleLabel, weekdayOf } from '../src/shared/habits'
+import { ErrorBoundary } from '../src/renderer/src/lib/error-boundary'
 
 let n = 0
 const test = (name: string, fn: () => void) => { fn(); n++; console.log('ok  ', name) }
@@ -89,6 +90,11 @@ test('30-day rate ignores a pending today, but counts a done one', () => {
 test('a very old habit is handled without trouble', () => {
   const s = stats(everyDay, '2000-01-01', [MON])
   assert.equal(s.current, 1)
+})
+
+test('error boundary can be imported', () => {
+  // Verify the error boundary component can be imported without error
+  assert.equal(typeof ErrorBoundary, 'function')
 })
 
 console.log(`ALL ${n} PASSED`)
