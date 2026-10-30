@@ -40,12 +40,21 @@ import { filterTasks, nextTaskDate, TASK_FIELD_ORDER, taskInputProblems } from '
 import { cleanTags, localDate } from './util'
 import type { Task, TaskInput, TaskStatus } from '../shared/types'
 
-interface TaskRow {
-  id: number; title: string; notes: string; status: TaskStatus; priority: Task['priority']; due_date: string | null
-  created_at: string; completed_at: string | null; project: string | null; tags: string; sort_order: number
-  recurrence: string | null; parent_task_id: number | null
+interface TaskRow extends TaskRowBase {
+  due_date: string | null
+  created_at: string
+  completed_at: string | null
+  project: string | null
+  tags: string
+  sort_order: number
+  recurrence: string | null
+  parent_task_id: number | null
 }
 interface SubtaskRow { id: number; task_id: number; title: string; done: number; sort_order: number }
+
+interface TaskRowBase {
+  id: number; title: string; notes: string; status: TaskStatus; priority: Task['priority']
+}
 
 function parseTags(value: string | null): string[] {
   if (!value) return []
@@ -91,8 +100,6 @@ export function listFilteredTasks(db: Database.Database, filter: Parameters<type
 }
 
 function normalize(input: TaskInput) {
-  // The same rules the task editor shows per field (src/shared/tasks.ts): throw the first
-  // message, so a bad save stops in one place with an actionable text.
   const problems = taskInputProblems(input)
   const firstProblem = TASK_FIELD_ORDER.find((field) => problems[field])
   if (firstProblem) throw new Error(problems[firstProblem]!)
@@ -120,8 +127,6 @@ function replaceSubtasks(db: Database.Database, taskId: number, values: { title:
 
 function createRecurringOccurrence(db: Database.Database, task: Task, now: string): void {
   if (!task.recurrence) return
-  // At most one child per row, ever. The early return inside the completion transaction
-  // keeps repeated completions quiet; the unique index from migration 7 is the backstop.
   if (db.prepare('SELECT 1 FROM tasks WHERE parent_task_id = ? LIMIT 1').get(task.id)) return
   const dueDate = nextTaskDate(task.dueDate ?? localDate(), task.recurrence)
   if (!dueDate) return
@@ -186,7 +191,6 @@ function checkTaskIds(ids: number[]): void {
   if (!Array.isArray(ids) || ids.length === 0 || ids.some((id) => !Number.isInteger(id) || id <= 0)) throw new Error('Choose one or more tasks')
 }
 
-// Bulk status change: one transaction, so a bad id leaves every task as it was.
 export function setTasksStatus(db: Database.Database, ids: number[], status: TaskStatus): void {
   checkTaskIds(ids)
   if (!['todo', 'in-progress', 'done'].includes(status)) throw new Error('Choose a valid task status')
