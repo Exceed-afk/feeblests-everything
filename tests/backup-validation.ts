@@ -2,9 +2,10 @@
 //   npm test
 import assert from 'node:assert/strict'
 import { parseBackup } from '../src/shared/backup'
+import { MIGRATIONS } from '../src/main/migrations'
 import { moodStyle } from '../src/renderer/src/lib/moods'
 
-const SCHEMA = 5
+const SCHEMA = MIGRATIONS.length
 const stamp = { createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' }
 
 // A small, valid backup that each test then damages in one specific way.
@@ -105,6 +106,34 @@ test('a check-in with a bad date is rejected', () => {
 })
 test('habit lists that are not lists are rejected', () => {
   const b = withHabits(); (b as { habits: unknown }).habits = 'nope'; rejects(b, /missing its "habits" list/)
+})
+// ---- tasks / recurrence ----
+const stampRow = (over: Record<string, unknown>): Record<string, unknown> =>
+  ({ notes: '', status: 'todo', priority: 'medium', dueDate: null, completedAt: null, project: null, tags: [], sortOrder: 0, recurrence: null, parentTaskId: null, ...over })
+const series = () => ({
+  ...base(),
+  tasks: [
+    stampRow({ id: 1, title: 'Parent', status: 'done', dueDate: '2026-10-26', completedAt: '2026-10-26T12:00:00Z', recurrence: { frequency: 'weekly', intervalDays: 1 }, ...stamp }),
+    stampRow({ id: 2, title: 'Next time', dueDate: '2026-11-02', recurrence: { frequency: 'weekly', intervalDays: 1 }, parentTaskId: 1, ...stamp })
+  ],
+  taskSubtasks: []
+})
+
+test('a recurring series with its parent link and rule is accepted as stored', () => {
+  const round = parse(series()) as { tasks: { id: number; parentTaskId: number | null; recurrence: unknown }[] }
+  assert.equal(round.tasks[1].parentTaskId, 1)
+  assert.deepEqual(round.tasks[1].recurrence, { frequency: 'weekly', intervalDays: 1 })
+})
+test('a task whose parent is not in the file is rejected, naming both', () => {
+  const b = series(); (b.tasks[1] as { parentTaskId: number }).parentTaskId = 9; rejects(b, /Task 2 has a parent 9/)
+})
+test('a task that is its own parent is rejected', () => {
+  const b = series(); (b.tasks[0] as { parentTaskId: number }).parentTaskId = 1; rejects(b, /its own parent/)
+})
+test('two children sharing one parent are rejected (the schema keeps one child, ever)', () => {
+  const b = series()
+  ;(b.tasks as unknown[]).push(stampRow({ id: 3, title: 'Again', dueDate: '2026-11-09', sortOrder: 2, recurrence: { frequency: 'weekly', intervalDays: 1 }, parentTaskId: 1, ...stamp }))
+  rejects(b, /Tasks 2 and 3 both have the parent 1.*at most one child/)
 })
 
 console.log(`ALL ${n} PASSED`)

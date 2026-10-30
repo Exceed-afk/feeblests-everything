@@ -2,6 +2,7 @@
 //   npm test
 import assert from 'node:assert/strict'
 import { habitsToday, logStreak, prevDay } from '../src/shared/dashboard'
+import { taskDashboard } from '../src/shared/tasks'
 import { computeHabitStats } from '../src/shared/habits'
 import type { Habit } from '../src/shared/types'
 
@@ -71,6 +72,16 @@ test('prevDay crosses month and leap-year boundaries', () => {
   assert.equal(prevDay('2026-03-01'), '2026-02-28')
   assert.equal(prevDay('2028-03-01'), '2028-02-29')
   assert.equal(prevDay('2027-01-01'), '2026-12-31')
+})
+
+test('task dashboard counts due today, overdue and locally completed this week', () => {
+  const tasks = [
+    { id: 1, title: 'today', status: 'todo' as const, dueDate: MON, completedAt: null },
+    { id: 2, title: 'late', status: 'in-progress' as const, dueDate: '2026-10-24', completedAt: null },
+    { id: 3, title: 'completed', status: 'done' as const, dueDate: null, completedAt: '2026-10-26T12:00:00-07:00' },
+    { id: 4, title: 'last week', status: 'done' as const, dueDate: null, completedAt: '2026-10-18T12:00:00Z' }
+  ] as Parameters<typeof taskDashboard>[0]
+  assert.deepEqual(taskDashboard(tasks, MON), { dueToday: 1, overdue: 1, completedThisWeek: 1 })
 })
 
 console.log(`\n${n} dashboard checks passed`)

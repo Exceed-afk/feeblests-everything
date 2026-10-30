@@ -4,7 +4,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { mkdirSync, readdirSync, unlinkSync, existsSync } from 'fs'
 import { DEFAULT_SETTINGS, type Settings } from '../shared/types'
-import { MIGRATIONS } from './migrations'
+import { applyMigrations } from './migrations'
 import { localDate } from './util'
 
 let db: Database.Database
@@ -19,18 +19,8 @@ export async function initDatabase(): Promise<void> {
   db = new Database(join(dir, 'everything.db'))
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  migrate()
+  applyMigrations(db)
   await dailyBackup(dir)
-}
-
-function migrate(): void {
-  const current = db.pragma('user_version', { simple: true }) as number
-  for (let v = current; v < MIGRATIONS.length; v++) {
-    db.transaction(() => {
-      db.exec(MIGRATIONS[v])
-      db.pragma(`user_version = ${v + 1}`)
-    })()
-  }
 }
 
 // One backup copy per day, keeping the newest 14, in data/backups.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BookOpen, CalendarCheck, CandlestickChart, Check, ChevronRight, Circle, ClipboardCheck, Flame, PiggyBank, TrendingUp } from 'lucide-react'
+import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, ChevronRight, Circle, ClipboardCheck, Flame, PiggyBank, TrendingUp } from 'lucide-react'
 import type { DashboardData, SavingsGoal } from '../../../shared/types'
 import { progressPercent } from '../../../shared/savings'
 import { moodStyle } from '../lib/moods'
@@ -90,6 +90,13 @@ export function Dashboard({ onOpen, onNavigate }: ModuleProps) {
           </span>
         </span>
         <ChevronRight size={14} className="shrink-0 text-muted" />
+      </button>
+
+      <button className="card card-pad-sm card-interactive mt-4 flex w-full items-center justify-between gap-4 text-left" onClick={() => onNavigate('tasks')}
+        aria-label={`Tasks: ${data.tasks.dueToday} due today, ${data.tasks.overdue} overdue, ${data.tasks.completedThisWeek} completed this week`}>
+        <span className="flex items-center gap-3"><CheckSquare size={18} className="text-muted" /><span><span className="block text-sm font-medium">Tasks</span>
+          <span className="meta">{data.tasks.dueToday} due today · {data.tasks.overdue} overdue · {data.tasks.completedThisWeek} completed this week</span></span></span>
+        <ChevronRight size={14} className="text-muted" />
       </button>
 
       {/* Today + the P&L curve */}

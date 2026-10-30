@@ -8,7 +8,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/backup-validation.ts && tsx tests/habits.ts && tsx tests/trades.ts && tsx tests/savings.ts && tsx tests/dashboard.ts && tsx tests/appearance.ts && tsx tests/url.ts && tsx tests/tools.ts && tsx tests/palette.ts && tsx tests/registry.ts && tsx tests/review.ts && tsx tests/capture.ts && tsx tests/calendar.ts",
+    "test": "tsx tests/backup-validation.ts && tsx tests/habits.ts && tsx tests/trades.ts && tsx tests/savings.ts && tsx tests/dashboard.ts && tsx tests/appearance.ts && tsx tests/url.ts && tsx tests/tools.ts && tsx tests/palette.ts && tsx tests/registry.ts && tsx tests/review.ts && tsx tests/capture.ts && tsx tests/calendar.ts && tsx tests/tasks.ts && tsx tests/migrations.ts",
     "postinstall": "electron-builder install-app-deps",
     "dist": "electron-vite build && electron-builder --win"
   },

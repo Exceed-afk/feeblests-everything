@@ -1,4 +1,4 @@
-// The Quick capture window: a small always-on-top page for logging a note, trade, deposit or habit check-in without
+// The Quick capture window: a small always-on-top page for logging a note, trade, deposit, habit check-in or task without
 // opening the app. It runs in its own window (src/main/capture.ts) but is part of the same renderer bundle: main.tsx
 // shows this instead of <App /> when the address ends in #capture.
 //
@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { BookOpen, CalendarCheck, CandlestickChart, Check, Flame, PiggyBank } from 'lucide-react'
+import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, Flame, PiggyBank } from 'lucide-react'
 import { MOODS, type CaptureKind, type Direction, type Mood, type SavingsGoal, type TxKind } from '../../../shared/types'
 import { buildDeposit, buildNote, buildTrade, habitsForToday, type CaptureHabit } from '../../../shared/capture'
 import { today } from '../lib/dates'
@@ -20,7 +20,8 @@ const TABS: { id: CaptureKind; label: string; icon: LucideIcon }[] = [
   { id: 'note', label: 'Note', icon: BookOpen },
   { id: 'trade', label: 'Trade', icon: CandlestickChart },
   { id: 'deposit', label: 'Deposit', icon: PiggyBank },
-  { id: 'habit', label: 'Habits', icon: CalendarCheck }
+  { id: 'habit', label: 'Habits', icon: CalendarCheck },
+  { id: 'task', label: 'Task', icon: CheckSquare }
 ]
 
 // Small remembered conveniences (last tab, asset, goal). Only a speed-up: if storage is unavailable nothing breaks.
@@ -59,6 +60,8 @@ export function Capture() {
   const [habits, setHabits] = useState<{ items: CaptureHabit[]; rest: number }>({ items: [], rest: 0 })
   const [habitDay, setHabitDay] = useState('')
   const [busyHabit, setBusyHabit] = useState<number | null>(null)
+  // Task
+  const [taskTitle, setTaskTitle] = useState('')
 
   const [error, setError] = useState('')
   const [flash, setFlash] = useState('')
@@ -137,6 +140,14 @@ export function Capture() {
         memory.set(K.asset, r.value.asset); memory.set(K.direction, direction)
         setEntry(''); setExit(''); setQty(''); setFees('') // the asset and direction stay: the next trade is often the same market
         await finished(r.value.exitPrice === null ? 'Open trade saved' : 'Trade saved')
+      } else if (tab === 'task') {
+        const title = taskTitle.trim()
+        if (!title) return setError('Write a task first.')
+        setBusy(true)
+        await window.api.tasks.create({ title, notes: '', status: 'todo', priority: 'medium', dueDate: day,
+          project: '', tags: [], subtasks: [], recurrence: null, parentTaskId: null })
+        setTaskTitle('')
+        await finished('Task added for today')
       } else {
         const r = buildDeposit({ goalId, kind: txKind, amount, note: txNote, today: day })
         if (!r.ok) return setError(r.error)
@@ -164,7 +175,7 @@ export function Capture() {
     setBusyHabit(null)
   }
 
-  // Esc puts the window away; Ctrl+Enter saves; Ctrl+1 to 4 switch tab. The handler reads the latest state through a ref.
+  // Esc puts the window away; Ctrl+Enter saves; Ctrl+1 to 5 switch tab. The handler reads the latest state through a ref.
   const latest = useRef({ submit, setTab })
   latest.current = { submit, setTab }
   useEffect(() => {
@@ -173,7 +184,7 @@ export function Capture() {
       const mod = e.ctrlKey || e.metaKey
       if (e.key === 'Escape') { e.preventDefault(); window.api.capture.hide() }
       else if (mod && e.key === 'Enter') { e.preventDefault(); latest.current.submit() }
-      else if (mod && /^[1-4]$/.test(e.key)) { e.preventDefault(); latest.current.setTab(TABS[Number(e.key) - 1].id) }
+      else if (mod && /^[1-5]$/.test(e.key)) { e.preventDefault(); latest.current.setTab(TABS[Number(e.key) - 1].id) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -189,7 +200,7 @@ export function Capture() {
   const goal = goals.find((g) => g.id === goalId) ?? null
   const habitList = [...habits.items].sort((a, b) => a.name.localeCompare(b.name)) // alphabetical, so rows never jump when one is ticked
   const left = habits.items.filter((h) => !h.done).length
-  const saveLabel = tab === 'note' ? 'Save note' : tab === 'trade' ? 'Save trade' : txKind === 'deposit' ? 'Add deposit' : 'Add withdrawal'
+  const saveLabel = tab === 'note' ? 'Save note' : tab === 'trade' ? 'Save trade' : tab === 'task' ? 'Add task' : txKind === 'deposit' ? 'Add deposit' : 'Add withdrawal'
 
   return (
     <div ref={root} className="min-h-[200px] border border-line">
@@ -246,6 +257,14 @@ export function Capture() {
             </label>
           </div>
         </>)}
+
+        {tab === 'task' && (
+          <label className="flex flex-col text-xs text-muted">Task
+            <input data-autofocus aria-label="Task title" className="field mt-1" value={taskTitle} placeholder="What needs doing today?"
+              onChange={(e) => setTaskTitle(e.target.value)} />
+            <span className="meta mt-1">Added to Tasks with medium priority and today's due date.</span>
+          </label>
+        )}
 
         {tab === 'deposit' && (goals.length === 0 ? (
           <div className="py-4 text-center text-sm text-muted">
@@ -311,7 +330,7 @@ export function Capture() {
           {error ? <span role="alert" className="text-neg">{error}</span>
             : flash ? <span role="status" className="flex items-center gap-1 text-pos"><Check size={13} aria-hidden="true" />{flash}</span>
             : tab === 'habit' ? <span>Click a habit to check it off. <kbd className="kbd">Esc</kbd> closes</span>
-            : <span><kbd className="kbd">{MOD}+Enter</kbd> saves, <kbd className="kbd">Esc</kbd> closes</span>}
+            : <span><kbd className="kbd">{MOD}+Enter</kbd> saves, <kbd className="kbd">Esc</kbd> closes · <kbd className="kbd">{MOD}+1–5</kbd> switches type</span>}
         </div>
         <button className="section-link" onClick={() => window.api.capture.openMain()}>Open app</button>
         {tab !== 'habit' && !(tab === 'deposit' && goals.length === 0) && (

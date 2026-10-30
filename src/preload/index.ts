@@ -39,6 +39,16 @@ const api: EverythingApi = {
     updateTransaction: (id, input) => ipcRenderer.invoke('savings:updateTransaction', id, input),
     removeTransaction: (id) => ipcRenderer.invoke('savings:removeTransaction', id)
   },
+  tasks: {
+    list: (filter) => ipcRenderer.invoke('tasks:list', filter),
+    create: (input) => ipcRenderer.invoke('tasks:create', input),
+    update: (id, input) => ipcRenderer.invoke('tasks:update', id, input),
+    remove: (id) => ipcRenderer.invoke('tasks:remove', id),
+    setStatus: (id, status) => ipcRenderer.invoke('tasks:setStatus', id, status),
+    setStatusMany: (ids, status) => ipcRenderer.invoke('tasks:setStatusMany', ids, status),
+    removeMany: (ids) => ipcRenderer.invoke('tasks:removeMany', ids),
+    reorder: (ids) => ipcRenderer.invoke('tasks:reorder', ids)
+  },
   habits: {
     list: () => ipcRenderer.invoke('habits:list'),
     create: (input) => ipcRenderer.invoke('habits:create', input),

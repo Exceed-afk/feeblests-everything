@@ -11,13 +11,14 @@ import { listEntries, listTags, createEntry, updateEntry, deleteEntry } from './
 import { listTrades, tradeMeta, createTrade, updateTrade, deleteTrade } from './trades'
 import * as savings from './savings'
 import * as habits from './habits'
+import * as tasks from './tasks'
 import { runSearch } from './search'
 import { isWebUrl } from '../shared/url'
 import { getDashboard } from './dashboard'
 import { getReview } from './review'
 import { getCalendar } from './calendar'
 import { createCapture, type Capture } from './capture'
-import type { CaptureSettings, HabitInput, ReviewKind, ExportResult, ImportPreview, ImportResult, SavingsGoalInput, SavingsTxInput, LogEntryInput, LogFilter, TradeFilter, TradeInput } from '../shared/types'
+import type { CaptureSettings, HabitInput, ReviewKind, TaskInput, TaskStatus, TaskFilter, ExportResult, ImportPreview, ImportResult, SavingsGoalInput, SavingsTxInput, LogEntryInput, LogFilter, TradeFilter, TradeInput } from '../shared/types'
 
 const APP_NAME = "Feeblest's Everything"
 
@@ -142,6 +143,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('savings:addTransaction', (_e, i: SavingsTxInput) => savings.addTransaction(getDb(), i))
   ipcMain.handle('savings:updateTransaction', (_e, id: number, i: SavingsTxInput) => savings.updateTransaction(getDb(), id, i))
   ipcMain.handle('savings:removeTransaction', (_e, id: number) => savings.deleteTransaction(getDb(), id))
+  ipcMain.handle('tasks:list', (_e, f?: TaskFilter) => tasks.listFilteredTasks(getDb(), f ?? {}))
+  ipcMain.handle('tasks:create', (_e, i: TaskInput) => tasks.createTask(getDb(), i))
+  ipcMain.handle('tasks:update', (_e, id: number, i: TaskInput) => tasks.updateTask(getDb(), id, i))
+  ipcMain.handle('tasks:remove', (_e, id: number) => tasks.deleteTask(getDb(), id))
+  ipcMain.handle('tasks:setStatus', (_e, id: number, status: TaskStatus) => tasks.setTaskStatus(getDb(), id, status))
+  ipcMain.handle('tasks:setStatusMany', (_e, ids: number[], status: TaskStatus) => tasks.setTasksStatus(getDb(), ids, status))
+  ipcMain.handle('tasks:removeMany', (_e, ids: number[]) => tasks.deleteTasks(getDb(), ids))
+  ipcMain.handle('tasks:reorder', (_e, ids: number[]) => tasks.reorderTasks(getDb(), ids))
   ipcMain.handle('habits:list', () => habits.listHabits(getDb()))
   ipcMain.handle('habits:create', (_e, i: HabitInput) => habits.createHabit(getDb(), i))
   ipcMain.handle('habits:update', (_e, id: number, i: HabitInput) => habits.updateHabit(getDb(), id, i))
@@ -170,7 +179,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('backup:exportTradesCsv', async (e, today: string): Promise<ExportResult | null> => {
     const data = collectBackup(getDb())
     const path = await saveFile(e, `feeblests-trades-${today}.csv`, 'Trades (CSV)', 'csv', tradesToCsv(data.trades))
-    return path ? { path, counts: { entries: 0, trades: data.trades.length, goals: 0, transactions: 0, habits: 0, checkins: 0 } } : null
+    return path ? { path, counts: { entries: 0, trades: data.trades.length, goals: 0, transactions: 0, habits: 0, checkins: 0, tasks: 0, subtasks: 0 } } : null
   })
   ipcMain.handle('backup:chooseImport', async (e): Promise<ImportPreview | null> => {
     const win = parentOf(e)

@@ -3,7 +3,7 @@
 import { calcPnl } from './trades'
 import { round8 } from './math'
 import { signedAmount } from './savings'
-import { MOODS, type BackupCounts, type Direction, type TxKind } from './types'
+import { MOODS, type BackupCounts, type Direction, type TaskPriority, type TaskRecurrence, type TaskStatus, type TxKind } from './types'
 
 export const BACKUP_APP = 'feeblests-everything'
 export const BACKUP_FORMAT = 1
@@ -16,6 +16,8 @@ export interface BackupGoal { id: number; name: string; target: number | null; n
 export interface BackupHabit { id: number; name: string; notes: string; days: number[]; archived: boolean; startDate: string; createdAt: string; updatedAt: string }
 export interface BackupCheckin { habitId: number; date: string; createdAt: string }
 export interface BackupTx { id: number; goalId: number; date: string; kind: TxKind; amount: number; note: string; createdAt: string; updatedAt: string }
+export interface BackupTask { id: number; title: string; notes: string; status: TaskStatus; priority: TaskPriority; dueDate: string | null; createdAt: string; completedAt: string | null; project: string | null; tags: string[]; sortOrder: number; recurrence: TaskRecurrence | null; parentTaskId: number | null }
+export interface BackupTaskSubtask { id: number; taskId: number; title: string; done: boolean; sortOrder: number }
 
 export interface BackupFile {
   app: typeof BACKUP_APP
@@ -29,11 +31,13 @@ export interface BackupFile {
   savingsTransactions: BackupTx[]
   habits: BackupHabit[] // files made before habits existed have no list; it is read as empty
   habitCheckins: BackupCheckin[]
+  tasks: BackupTask[]
+  taskSubtasks: BackupTaskSubtask[]
 }
 
-export const countsOf = (b: Pick<BackupFile, 'logbook' | 'trades' | 'savingsGoals' | 'savingsTransactions' | 'habits' | 'habitCheckins'>): BackupCounts => ({
+export const countsOf = (b: Pick<BackupFile, 'logbook' | 'trades' | 'savingsGoals' | 'savingsTransactions' | 'habits' | 'habitCheckins' | 'tasks' | 'taskSubtasks'>): BackupCounts => ({
   entries: b.logbook.length, trades: b.trades.length, goals: b.savingsGoals.length, transactions: b.savingsTransactions.length,
-  habits: b.habits.length, checkins: b.habitCheckins.length
+  habits: b.habits.length, checkins: b.habitCheckins.length, tasks: b.tasks.length, subtasks: b.taskSubtasks.length
 })
 
 // ---------- Checking an imported file ----------
@@ -53,8 +57,8 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
   if (data.format !== BACKUP_FORMAT) throw new Error('This backup was made by a different version of the app and cannot be read.')
   if (!isInt(data.schemaVersion) || data.schemaVersion > maxSchema)
     throw new Error('This backup comes from a newer version of the app. Update the app first, then import it.')
-  for (const k of ['habits', 'habitCheckins']) if (data[k] === undefined) data[k] = [] // older backups
-  for (const k of ['logbook', 'trades', 'savingsGoals', 'savingsTransactions', 'habits', 'habitCheckins'])
+  for (const k of ['habits', 'habitCheckins', 'tasks', 'taskSubtasks']) if (data[k] === undefined) data[k] = [] // older backups
+  for (const k of ['logbook', 'trades', 'savingsGoals', 'savingsTransactions', 'habits', 'habitCheckins', 'tasks', 'taskSubtasks'])
     if (!Array.isArray(data[k])) throw new Error(`The backup is missing its "${k}" list.`)
   if (!isObj(data.settings)) throw new Error('The backup is missing its settings.')
 
@@ -101,6 +105,23 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
         !isDate(r.startDate) || !Array.isArray(r.days) || r.days.length === 0 || new Set(r.days).size !== r.days.length ||
         !r.days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) bad('Habit', i, isObj(r) ? r.id : '?')
   })
+  const tasks = data.tasks as Record<string, unknown>[]
+  // Tasks have no inserted/updated stamp pair (the table only stores created_at), so they
+  // cannot use the shared common() check that logbook, trades, goals and habits do.
+  tasks.forEach((r, i) => {
+    if (!isObj(r) || !isInt(r.id) || !isStr(r.createdAt) || !isStr(r.title) || !r.title.trim() || !isStr(r.notes) ||
+      !['todo', 'in-progress', 'done'].includes(String(r.status)) || !['low', 'medium', 'high'].includes(String(r.priority)) ||
+      !(r.dueDate === null || isDate(r.dueDate)) || !(r.completedAt === null || isStr(r.completedAt)) ||
+      !(r.project === null || isStr(r.project)) || !isStrArray(r.tags) || !Number.isInteger(r.sortOrder) ||
+      !(r.recurrence === null || (isObj(r.recurrence) && ['daily', 'weekly', 'monthly', 'custom'].includes(String(r.recurrence.frequency)) &&
+        (r.recurrence.frequency !== 'custom' || (Number.isInteger(r.recurrence.intervalDays) && Number(r.recurrence.intervalDays) > 0)))) ||
+      !(r.parentTaskId === null || isInt(r.parentTaskId))) bad('Task', i, isObj(r) ? r.id : '?')
+  })
+  const taskSubtasks = data.taskSubtasks as Record<string, unknown>[]
+  taskSubtasks.forEach((r, i) => {
+    if (!isObj(r) || !isInt(r.id) || !isInt(r.taskId) || !isStr(r.title) || !r.title.trim() || typeof r.done !== 'boolean' || !Number.isInteger(r.sortOrder))
+      bad('Task subtask', i, isObj(r) ? r.id : '?')
+  })
   const checkins = data.habitCheckins as Record<string, unknown>[]
   checkins.forEach((r, i) => {
     if (!isObj(r) || !isInt(r.habitId) || !isDate(r.date) || !isStr(r.createdAt)) bad('Habit check-in', i, '?')
@@ -110,6 +131,24 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
   const goalIds = seen(goals as never, 'The savings goals'); seen(txs as never, 'The savings transactions')
   for (const t of txs as unknown as BackupTx[])
     if (!goalIds.has(t.goalId)) throw new Error(`Savings transaction ${t.id} belongs to goal ${t.goalId}, which is not in the file.`)
+
+  const taskIds = seen(tasks as never, 'The tasks')
+  for (const t of tasks as unknown as BackupTask[]) {
+    if (t.parentTaskId === t.id) throw new Error(`Task ${t.id} cannot be its own parent.`)
+    if (t.parentTaskId !== null && !taskIds.has(t.parentTaskId)) throw new Error(`Task ${t.id} has a parent ${t.parentTaskId}, which is not in the file.`)
+  }
+  // The app's rule (top of src/main/tasks.ts): a task can have at most one child occurrence,
+  // ever, so a file carrying two under the same parent would break that database the moment
+  // it is restored — reject it here with a plain message instead of an import that fails halfway.
+  const childOf = new Map<number, number>()
+  for (const t of tasks as unknown as BackupTask[]) {
+    if (t.parentTaskId === null) continue
+    const first = childOf.get(t.parentTaskId)
+    if (first !== undefined) throw new Error(`Tasks ${first} and ${t.id} both have the parent ${t.parentTaskId}; a task can have at most one child occurrence.`)
+    childOf.set(t.parentTaskId, t.id)
+  }
+  seen(taskSubtasks as never, 'The task subtasks')
+  for (const s of taskSubtasks as unknown as BackupTaskSubtask[]) if (!taskIds.has(s.taskId)) throw new Error(`Task subtask ${s.id} belongs to task ${s.taskId}, which is not in the file.`)
 
   const habitIds = seen(habits as never, 'The habits')
   const checked = new Set<string>()

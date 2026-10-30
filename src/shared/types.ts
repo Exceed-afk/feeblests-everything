@@ -5,6 +5,7 @@ export type UiStyle = 'modern' | 'minimal'              // overall look: rounded
 export type Radius = 'sharp' | 'soft' | 'round'         // corner roundness
 export type Density = 'compact' | 'comfortable' | 'spacious' // padding, margins and gaps
 export type TextSize = 'small' | 'default' | 'large'
+export type TaskLayout = 'list' | 'board' // how the Tasks tool shows its tasks
 export type FontChoice = 'system' | 'clean' | 'serif' | 'mono'
 
 // Hand-picked colours that replace part of the chosen palette (#rrggbb). Kept per mode,
@@ -26,13 +27,14 @@ export interface Settings {
   pinnedTools: string[] // tool ids pinned to the top of the sidebar, in pin order
   sidebarClosedGroups: string[] // ids of sidebar groups the user has collapsed (all others are open)
   recentTools: string[] // tool ids, most recently opened first (at most 8); shown when the command palette is empty
+  taskLayout: TaskLayout // Tasks: the list or the board, remembered between sessions
 }
 
 // These defaults reproduce the look of version 0.7.0 exactly.
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark', accent: '#8b5cf6', tagColors: {},
   palette: 'default', uiStyle: 'modern', radius: 'soft', density: 'comfortable', textSize: 'default', font: 'system',
-  colors: { light: {}, dark: {} }, sidebarCollapsed: false, pinnedTools: [], sidebarClosedGroups: [], recentTools: []
+  colors: { light: {}, dark: {} }, sidebarCollapsed: false, pinnedTools: [], sidebarClosedGroups: [], recentTools: [], taskLayout: 'list'
 }
 
 // The API the renderer can call. The preload script implements it and
@@ -86,6 +88,17 @@ export interface EverythingApi {
     // Idempotent: checking an already-checked day (or unchecking an unchecked one) changes nothing.
     setCheckin(habitId: number, date: string, done: boolean): Promise<void>
   }
+  tasks: {
+    list(filter?: TaskFilter): Promise<Task[]>
+    create(input: TaskInput): Promise<Task>
+    update(id: number, input: TaskInput): Promise<Task>
+    remove(id: number): Promise<void>
+    setStatus(id: number, status: TaskStatus): Promise<Task>
+    // Bulk actions: every id is changed in one transaction, so a failure changes nothing.
+    setStatusMany(ids: number[], status: TaskStatus): Promise<void>
+    removeMany(ids: number[]): Promise<void>
+    reorder(ids: number[]): Promise<void>
+  }
   calendar: {
     // The month grid (Monday to Sunday weeks, including the days of the neighbouring months that fill the first and last row)
     // with what happened on each day across the logbook, trades, savings and habits. `month` is "YYYY-MM"; `today` the user's local date.
@@ -123,7 +136,7 @@ export interface EverythingApi {
 // ---------- Backup (export / import) ----------
 export interface ExportResult { path: string; counts: BackupCounts }
 
-export interface BackupCounts { entries: number; trades: number; goals: number; transactions: number; habits: number; checkins: number }
+export interface BackupCounts { entries: number; trades: number; goals: number; transactions: number; habits: number; checkins: number; tasks: number; subtasks: number }
 
 export interface ImportPreview {
   fileName: string
@@ -274,6 +287,7 @@ export interface DashboardData {
   totalSaved: number // sum of every goal's balance
   log: LogSummary
   habits: HabitsToday
+  tasks: TaskDashboard
 }
 
 // ---------- Habits ----------
@@ -300,6 +314,24 @@ export type HabitInput = Pick<Habit, 'name' | 'notes' | 'days' | 'archived'>
 
 // `today` comes from the main process, so the stats and the screen always agree on the date.
 export interface HabitsOverview { today: string; habits: Habit[] }
+
+// ---------- Tasks ----------
+export type TaskStatus = 'todo' | 'in-progress' | 'done'
+export type TaskPriority = 'low' | 'medium' | 'high'
+export type TaskView = 'today' | 'upcoming' | 'overdue' | 'all' | 'completed'
+export interface TaskRecurrence { frequency: 'daily' | 'weekly' | 'monthly' | 'custom'; intervalDays: number }
+export interface TaskSubtask { id: number; taskId: number; title: string; done: boolean; sortOrder: number }
+export interface Task {
+  id: number; title: string; notes: string; status: TaskStatus; priority: TaskPriority; dueDate: string | null
+  createdAt: string; completedAt: string | null; project: string | null; tags: string[]; sortOrder: number
+  recurrence: TaskRecurrence | null; parentTaskId: number | null; subtasks: TaskSubtask[]
+}
+export type TaskInput = Pick<Task, 'title' | 'notes' | 'status' | 'priority' | 'dueDate' | 'project' | 'tags' | 'recurrence' | 'parentTaskId'> & {
+  subtasks: Pick<TaskSubtask, 'title' | 'done'>[]
+}
+export interface TaskFilter { view?: TaskView; text?: string; priority?: TaskPriority; project?: string; tag?: string }
+export interface TaskDashboard { dueToday: number; overdue: number; completedThisWeek: number }
+export interface TaskReview { created: number; completed: number }
 
 // ---------- Review (weekly / monthly) ----------
 // Everything here is CALCULATED from the other tools' data each time (nothing new is stored). A written
@@ -387,6 +419,7 @@ export interface ReviewData {
   trades: ReviewTrades
   savings: ReviewSavings
   habits: ReviewHabits
+  tasks: TaskReview
   mood: ReviewMood
   journal: ReviewJournal
   insights: { id: string; text: string }[] // links between tools, only when there is enough data to say something
@@ -394,7 +427,7 @@ export interface ReviewData {
 }
 
 // ---------- Quick capture ----------
-export type CaptureKind = 'note' | 'trade' | 'deposit' | 'habit'
+export type CaptureKind = 'note' | 'trade' | 'deposit' | 'habit' | 'task'
 
 // Stored as three separate settings rows (captureEnabled, captureHotkey, captureKeepRunning), read by src/shared/capture.ts.
 export interface CaptureSettings {

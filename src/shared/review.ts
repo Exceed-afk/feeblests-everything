@@ -8,9 +8,10 @@ import { addDays, isScheduled, weekdayOf, WEEKDAY_NAMES } from './habits'
 import { round8 } from './math'
 import { signedAmount } from './savings'
 import { computeStats } from './trades'
+import { taskReview } from './tasks'
 import { MOODS } from './types'
 import type {
-  Habit, LogEntry, Mood, ReviewData, ReviewGoal, ReviewHabit, ReviewHabits, ReviewJournal, ReviewKind, ReviewMood,
+  Habit, LogEntry, Mood, ReviewData, ReviewGoal, ReviewHabit, ReviewHabits, ReviewJournal, ReviewKind, ReviewMood, Task, TaskReview,
   ReviewSavings, ReviewTrades, SavingsGoal, SavingsTx, Trade
 } from './types'
 
@@ -359,6 +360,7 @@ export interface ReviewInput {
   goals: SavingsGoal[]
   txs: SavingsTx[] // every transaction
   habits: Habit[] // with stats worked out for `today`
+  tasks: Task[]
   entries: LogEntry[] // entries in the period and the one before, plus every review reflection
 }
 
@@ -370,13 +372,14 @@ export function buildReview(i: ReviewInput): ReviewData {
   const trades = tradesSection(i.trades, range, prev, days)
   const savings = savingsSection(i.goals, i.txs, range, prev)
   const habits = habitsSection(i.habits, range, prev, i.today, days)
+  const tasks = taskReview(i.tasks, range.start, range.end)
   const mood = moodSection(i.entries, range, prev, days)
   const complete = i.today > range.end
   return {
     kind: i.kind, start: range.start, end: range.end, today: i.today, complete,
     prevStart: prev.start, prevEnd: prev.end,
     label: periodLabel(i.kind, range.start, range.end), title,
-    trades, savings, habits, mood,
+    trades, savings, habits, tasks, mood,
     journal: journalSection(i.entries, range, title),
     insights: insightsOf(trades, habits, mood),
     prompts: promptsOf({ kind: i.kind, complete, trades, savings, habits, mood })

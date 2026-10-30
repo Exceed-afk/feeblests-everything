@@ -6,7 +6,7 @@
 // To add a colour scheme: add one entry to PALETTES (a light and a dark set). Nothing else to change.
 import {
   DEFAULT_SETTINGS,
-  type ColorOverrides, type Density, type FontChoice, type Radius, type Settings, type TextSize, type ThemeMode, type UiStyle
+  type ColorOverrides, type Density, type FontChoice, type Radius, type Settings, type TaskLayout, type TextSize, type ThemeMode, type UiStyle
 } from './types'
 import { MAX_RECENT_TOOLS } from './palette'
 
@@ -156,7 +156,8 @@ export function normalizeSettings(raw: Partial<Record<keyof Settings, unknown>> 
     sidebarCollapsed: r.sidebarCollapsed === true,
     pinnedTools: cleanIds(r.pinnedTools),
     sidebarClosedGroups: cleanIds(r.sidebarClosedGroups),
-    recentTools: cleanIds(r.recentTools, MAX_RECENT_TOOLS)
+    recentTools: cleanIds(r.recentTools, MAX_RECENT_TOOLS),
+    taskLayout: pick<TaskLayout>(r.taskLayout, ['list', 'board'], d.taskLayout)
   }
 }
 

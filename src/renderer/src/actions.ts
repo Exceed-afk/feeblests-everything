@@ -14,7 +14,7 @@
 //   run       called when the user presses Enter on it; the palette closes right after.
 //             It receives { navigate, open } for actions that go somewhere (see ActionContext).
 import type { LucideIcon } from 'lucide-react'
-import { PenLine } from 'lucide-react'
+import { CheckSquare, LayoutGrid, PenLine } from 'lucide-react'
 import { validateActions, type ActionMeta } from '../../shared/palette'
 import type { OpenTarget } from './lib/navigation'
 
@@ -31,7 +31,13 @@ export interface ActionDef extends ActionMeta {
 
 export const ACTIONS: ActionDef[] = [
   { id: 'quick-capture', title: 'Quick capture', icon: PenLine, keywords: ['note', 'log', 'add', 'trade', 'deposit', 'habit', 'check in', 'window'],
-    run: () => { window.api.capture.open() } }
+    run: () => { window.api.capture.open() } },
+  { id: 'new-task', title: 'New task', icon: CheckSquare, keywords: ['add', 'create', 'todo'],
+    run: ({ navigate }) => { navigate('tasks'); window.dispatchEvent(new CustomEvent('tasks:new')) } },
+  { id: 'today-tasks', title: "Go to Today's tasks", icon: CheckSquare, keywords: ['today', 'due', 'task list'],
+    run: ({ navigate }) => { navigate('tasks'); window.dispatchEvent(new CustomEvent('tasks:today')) } },
+  { id: 'tasks-board', title: 'Switch to Board view', icon: LayoutGrid, keywords: ['kanban', 'columns', 'task board', 'tasks'],
+    run: ({ navigate }) => { navigate('tasks'); window.dispatchEvent(new CustomEvent('tasks:board')) } }
 ]
 
 // A mistake in an entry stops the app at start-up with a readable message (see shared/palette.ts for the rules).

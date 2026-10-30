@@ -6,6 +6,7 @@ import { listEntries } from './logbook'
 import { listTrades } from './trades'
 import { listAllTransactions, listGoals } from './savings'
 import { listHabits } from './habits'
+import { listTasks } from './tasks'
 import { isDate } from './util'
 import type { LogEntry, ReviewData, ReviewKind } from '../shared/types'
 
@@ -26,6 +27,7 @@ export function getReview(db: Database.Database, kind: ReviewKind, anchor: strin
     goals: listGoals(db),
     txs: listAllTransactions(db),
     habits: listHabits(db, today).habits,
+    tasks: listTasks(db, today),
     entries: [...byId.values()]
   })
 }

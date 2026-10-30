@@ -2,6 +2,14 @@
 
 Local-only logbook, trade tracker and savings tracker for Windows (Electron + React + Tailwind + SQLite).
 
+## Conventions for this project
+- No new dependencies without asking me first.
+- Business rules live in pure functions in src/shared/ with tests in tests/ (run with tsx). Main process code only fetches/saves.
+- Run `npm run typecheck && npm test` before saying anything is done.
+- Use theme tokens/classes only, no hardcoded colors. Keep everything local-only.
+- If a change alters existing behaviour, list it explicitly in your report. Never change behaviour silently.
+- Update README.md for anything a user or future maintainer needs to know.
+
 ## Run it
 1. Install Node.js 20+ and, if the install step complains about compiling, the "Desktop development with C++" tools from Visual Studio Build Tools.
 2. In this folder: `npm install` then `npm run dev`
@@ -107,6 +115,19 @@ Add habits you want to do regularly and check them off day by day. Each habit ha
 - Streaks and rates are always calculated from the check-ins (`src/shared/habits.ts`), never stored. The queries are in `src/main/habits.ts`.
 - The Dashboard's "Habits today" tile uses the same rules, computed for the date the page sends.
 - Habits and check-ins are in the JSON export and import. Backups made before habits existed still import (they just contain no habits).
+
+## Tasks
+Tasks live in one SQLite list with views (Today / Upcoming / Overdue / All / Completed), a board, filters, checklists, status, tags and projects. Queries: `src/main/tasks.ts` (tests in `tests/tasks.ts`); shared rules: `src/shared/tasks.ts`.
+
+### Recurring tasks: the contract
+A recurring task is a row whose `recurrence` field holds `{ frequency, intervalDays }`. Occurrences are ordinary task rows linked by `parent_task_id`. The rules are also written as a comment at the top of `src/main/tasks.ts`; the one-child rule is enforced by a unique index (migration 7).
+- **Completion creates the next occurrence.** Completing a row (tick, or saving the editor from a not-done status to done) adds one child occurrence — same title, notes, priority, project, tags and checklist (reset to unchecked) — dated the completed row's due date advanced by one interval, or today's local date when it has no due date. Daily = the day after, weekly = the week after, monthly = the same day next month (clamped to the month's end), custom = every N days.
+- **One child, ever.** A row can never gain a second child. The completion re-checks for an existing child inside the same transaction, and the database itself forbids a second `parent_task_id` link to the same parent — so double-clicks, repeated calls and done → undone → done all change nothing beyond the status they set.
+- **A child behaves exactly like any other task.** When completed it may spawn at most its one successor, decided by the rule copied into it when it was created. A series is therefore a straight line, one link per completion, never a fork, and it never runs ahead of you: nothing is generated in the background.
+- **No end date or limit exists yet.** The rule has no end date or occurrence count, so a series keeps going as long as its occurrences keep being completed.
+- **Editing a parent** touches only that row and rows created later. A child that already exists keeps everything it was created with, and editing (or removing the repeat from) a parent that already spawned changes no future occurrence.
+- **Deleting a parent** unlinks the child (it becomes a standalone task with its own rule and keeps the series going); subtasks are deleted with their task.
+- **Backups** keep ids and links exactly as they were. The import check refuses (with a plain message, before anything is replaced) a file whose task points at a parent not in the file, is its own parent, or has two children sharing one parent; importing never runs the completion logic, so restoring creates no extra occurrences.
 
 ## Add a tool
 Tools are defined once, in the registry `src/renderer/src/tools.ts`. The sidebar, the page router, the keyboard shortcuts and the Settings shortcut list all read it.

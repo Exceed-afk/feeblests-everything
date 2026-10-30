@@ -2,6 +2,7 @@
 //   npm test
 import assert from 'node:assert/strict'
 import { buildReview, periodDays, periodLabel, reviewRange, reviewTitle, shiftRange, summaryText, MOOD_SCORE, REVIEW_TAG } from '../src/shared/review'
+import type { Task } from '../src/shared/types'
 import { computeHabitStats } from '../src/shared/habits'
 import { calcPnl } from '../src/shared/trades'
 import type { Habit, LogEntry, Mood, SavingsGoal, SavingsTx, Trade, TxKind } from '../src/shared/types'
@@ -32,7 +33,7 @@ const habit = (name: string, days: number[], checkins: string[], o: { start?: st
 const entry = (date: string, mood: Mood | null, o: { title?: string; tags?: string[] } = {}): LogEntry =>
   ({ id: id++, date, title: o.title ?? 'A day', body: '', mood, tags: o.tags ?? [], createdAt: '', updatedAt: '' })
 
-const empty = { trades: [], goals: [], txs: [], habits: [], entries: [] }
+const empty = { trades: [], goals: [], txs: [], habits: [], tasks: [], entries: [] }
 const week = (over: Partial<Parameters<typeof buildReview>[0]> = {}) =>
   buildReview({ kind: 'week', anchor: '2026-10-21', today: DONE, ...empty, ...over })
 
@@ -382,6 +383,15 @@ test('the wording says "this" while the period runs and "that" once it is over; 
 })
 
 // ---- the numbers as text ----
+test('created and completed task counts are included in a period and completed task tile data', () => {
+  const task = (id: number, createdAt: string, completedAt: string | null): Task => ({
+    id, title: `Task ${id}`, notes: '', status: completedAt ? 'done' : 'todo', priority: 'medium', dueDate: null,
+    createdAt, completedAt, project: null, tags: [], sortOrder: id, recurrence: null, parentTaskId: null, subtasks: []
+  })
+  const r = week({ tasks: [task(1, '2026-10-20T23:00:00-07:00', null), task(2, '2026-10-21T00:30:00+02:00', '2026-10-22T23:00:00-07:00'), task(3, '2026-10-26T00:00:00Z', null)] })
+  assert.deepEqual(r.tasks, { created: 2, completed: 1 })
+})
+
 test('the summary text lists each tool on one line', () => {
   const g = goal('Trip')
   const r = week({

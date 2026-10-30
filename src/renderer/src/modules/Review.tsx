@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BookOpen, CalendarCheck, CandlestickChart, ChevronLeft, ChevronRight, Flame, Lightbulb, PiggyBank, Plus, Smile, TrendingDown, TrendingUp } from 'lucide-react'
+import { BookOpen, CalendarCheck, CheckSquare, CandlestickChart, ChevronLeft, ChevronRight, Flame, Lightbulb, PiggyBank, Plus, Smile, TrendingDown, TrendingUp } from 'lucide-react'
 import { MOODS, type Mood, type ReviewData, type ReviewKind } from '../../../shared/types'
 import { REVIEW_TAG, reviewRange, shiftRange, periodLabel, summaryText } from '../../../shared/review'
 import { progressPercent } from '../../../shared/savings'
@@ -117,7 +117,7 @@ export function ReviewBody({ data, onOpen, onNavigate, draft, onDraft, onSaved }
   const before = data.kind === 'week' ? 'last week' : 'last month'
   const ts = trades.stats
 
-  const nothing = ts.total === 0 && savings.txCount === 0 && habits.due === 0 && habits.bonus === 0 && mood.logged === 0 && journal.entries.length === 0
+  const nothing = ts.total === 0 && savings.txCount === 0 && habits.due === 0 && habits.bonus === 0 && data.tasks.created === 0 && data.tasks.completed === 0 && mood.logged === 0 && journal.entries.length === 0
 
   // The "against the period before" line. While the period is still running the earlier one is shown as plain context,
   // because a half week set against a whole week would look like a drop that is not one.
@@ -154,6 +154,7 @@ export function ReviewBody({ data, onOpen, onNavigate, draft, onDraft, onSaved }
         {tile('Habit consistency', habits.rate === null ? '-' : `${Math.round(habits.rate)}%`,
           habits.rate === null ? 'Nothing scheduled yet' : `${habits.done} of ${habits.due} days done`,
           versusRate(data), 'habits')}
+        {tile('Tasks completed vs. created', `${data.tasks.completed} / ${data.tasks.created}`, 'completed / created', null, 'tasks')}
         {tile('Mood', mood.average === null ? '-' : `${mood.average.toFixed(1)} / 5`,
           mood.average === null ? 'No moods logged' : `${MOOD_STYLE[moodNear(mood.average)].label}, ${mood.logged} ${mood.logged === 1 ? 'entry' : 'entries'}`,
           versus(mood.average, mood.previousAverage, (n) => n.toFixed(1)), 'logbook')}
