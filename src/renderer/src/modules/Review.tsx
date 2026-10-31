@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  ArrowDownRight, ArrowUpRight, BookOpen, CalendarCheck, CandlestickChart, Flame, Lightbulb, PiggyBank,
+  AlertCircle, ArrowDownRight, ArrowUpRight, BookOpen, CalendarCheck, CandlestickChart, Flame, Lightbulb, PiggyBank,
   Plus, Smile, Sparkles, TrendingDown, TrendingUp
 } from 'lucide-react'
 import { MOODS, DEFAULT_INTELLIGENCE, type InsightsPayload, type Mood, type ReviewData, type ReviewGoal, type ReviewKind, type ReviewTx } from '../../../shared/types'
@@ -113,7 +113,9 @@ export function Review({ onOpen, onNavigate }: ModuleProps) { // eslint-disable-
       </div>
       <PeriodArrows onPrev={() => step(-1)} onNext={() => step(1)} nextDisabled={range.end >= now}
         prevLabel={`Previous ${word}`} nextLabel={`Next ${word}`} />
-      {!isCurrent && <button className="btn btn-sm" onClick={() => setAnchor(now)}>This {word}</button>}
+      {/* Always rendered, so stepping between periods never moves the controls beside it. */}
+      <button className={`btn btn-sm ${isCurrent ? 'invisible' : ''}`} onClick={() => setAnchor(now)} disabled={isCurrent}
+        aria-hidden={isCurrent}>This {word}</button>
     </PageHeader>
   )
 
@@ -121,7 +123,9 @@ export function Review({ onOpen, onNavigate }: ModuleProps) { // eslint-disable-
     return (
       <div className="page page-lg" aria-busy={!error}>
         {header}
-        {error && <p role="alert" className="text-sm text-neg">{error}</p>}
+        {error
+          ? <ReviewError message={error} onRetry={() => { void load() }} />
+          : <ReviewLoading />}
       </div>
     )
   }
@@ -140,7 +144,7 @@ export function Review({ onOpen, onNavigate }: ModuleProps) { // eslint-disable-
   return (
     <div className="page page-lg" aria-busy={stale}>
       {header}
-      {error && <p role="alert" className="mb-4 text-sm text-neg">{error}</p>}
+      {error && <ReviewError message={error} onRetry={() => { void load() }} compact />}
       <div className={stale ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
         <DraftContext.Provider value={{ draft: drafts[draftKey] ?? null, set: setDraft, reload: () => load(true) }}>
           <ReviewBody data={data} onOpen={onOpen} onNavigate={onNavigate} />
@@ -318,7 +322,7 @@ function HabitCard({ data, onNavigate }: GoTo) {
           {h.rate === null ? 'Nothing scheduled yet' : `${h.done} of ${h.due} days done${h.bonus > 0 ? `, +${h.bonus} bonus` : ''}`}
         </span>
       </span>
-      {h.rate === null ? <div className="h-10" /> : <span className="block pt-1.5"><WeekStrip days={h.days.slice(0, 7)} today={data.today} /></span>}
+      {h.rate === null ? <div className="h-10" /> : <span className="block pt-1.5"><WeekStrip days={h.days.slice(0, 7)} today={data.today} trackedFrom={h.trackedFrom} /></span>}
       <span className="kpi-foot">
         <Versus data={data} now={h.rate === null ? null : Math.round(h.rate)} before={h.previousRate === null ? null : Math.round(h.previousRate)}
           format={(n) => `${n}%`} points={1} prevWord="previous period" />
@@ -538,6 +542,15 @@ function HabitsPanel({ data, onNavigate }: GoTo) {
               <div className="flex items-center justify-end gap-1 text-sm font-semibold text-fg"><Flame size={14} className="warn" />{Math.max(...h.habits.map((x) => x.streak), 0)}</div>
             </div>
           </div>
+          <div className="mt-3">
+            <WeekStrip days={h.days.slice(0, 7)} today={data.today} trackedFrom={h.trackedFrom} />
+            <div className="legend mt-2">
+              <span><span className="hs-swatch" data-state="done" aria-hidden="true" />Completed</span>
+              <span><span className="hs-swatch" data-state="partial" aria-hidden="true" />Incomplete</span>
+              <span><span className="hs-swatch" data-state="rest" aria-hidden="true" />Not scheduled</span>
+              <span><span className="hs-swatch" data-state="untracked" aria-hidden="true" />Not tracked</span>
+            </div>
+          </div>
           <ul className="mt-3 flex flex-col">
             {h.habits.slice(0, MAX_HABITS).map((habit) => (
               <li key={habit.id} className="border-b border-line/60 py-2 last:border-0">
@@ -567,6 +580,8 @@ function HabitsPanel({ data, onNavigate }: GoTo) {
 
 function MoodPanel({ data, onNavigate }: GoTo) {
   const m = data.mood
+  const word = data.kind === 'week' ? 'week' : 'month'
+  const diff = m.average !== null && m.previousAverage !== null ? round8(m.average - m.previousAverage) : null
   return (
     <Panel title="Mood" icon={<Smile size={15} />} link={{ label: 'Open logbook', onClick: () => onNavigate('logbook') }}>
       {m.logged === 0 ? (
@@ -587,6 +602,15 @@ function MoodPanel({ data, onNavigate }: GoTo) {
             )}
           </div>
           <div className="mt-3"><MoodTrend days={m.days} kind={data.kind} today={data.today} /></div>
+          {/* A comparison only when BOTH periods have logged moods; otherwise there is nothing to compare. */}
+          {m.average !== null && m.previousAverage !== null && diff !== null && (
+            <p className="meta mt-2">
+              Previous {word}: {m.previousAverage.toFixed(1)} of 5
+              {data.complete && (Math.abs(diff) < 0.05
+                ? ' (about the same)'
+                : ` (${diff > 0 ? '+' : ''}${diff.toFixed(1)} pts)`)}
+            </p>
+          )}
           {/* The five-point scale, always shown, with the count for each word. */}
           <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
             <div className="legend">
@@ -611,25 +635,73 @@ const TOPIC_ICON = { trades: CandlestickChart, savings: PiggyBank, habits: Calen
 
 function WeeklyInsights({ data }: { data: ReviewData }) {
   const lines = weeklyInsights(data)
-  if (lines.length === 0) return null
+  const word = data.kind === 'week' ? 'week' : 'month'
   return (
     <section className="card card-pad mt-4" aria-label="Weekly insights">
       <div className="card-head">
-        <h2 className="card-head-title"><span className="card-head-icon"><Sparkles size={15} /></span>This {data.kind}</h2>
+        <h2 className="card-head-title"><span className="card-head-icon"><Sparkles size={15} /></span>This {word}</h2>
         <span className="meta">From your own records</span>
       </div>
-      <ul className="mt-3 grid gap-3 sm:grid-cols-2">
-        {lines.map((line) => {
-          const Icon = TOPIC_ICON[line.topic]
-          return (
-            <li key={line.id} className="flex items-start gap-2.5 text-sm">
-              <span className="card-head-icon mt-0.5"><Icon size={14} /></span>
-              <span className="leading-relaxed">{line.text}</span>
-            </li>
-          )
-        })}
-      </ul>
+      {lines.length === 0 ? (
+        <p className="mt-3 text-sm text-muted">Not enough data yet for this {word}. Log a trade, a saving, a habit check-in or a mood and the summary appears here.</p>
+      ) : (
+        <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+          {lines.map((line) => {
+            const Icon = TOPIC_ICON[line.topic]
+            return (
+              <li key={line.id} className="flex items-start gap-2.5 text-sm">
+                <span className="card-head-icon mt-0.5"><Icon size={14} /></span>
+                <span className="leading-relaxed">{line.text}</span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </section>
+  )
+}
+
+// The page's own loading and failure states. They sit under the header, so the controls never jump.
+function ReviewLoading() {
+  return (
+    <div aria-busy="true">
+      <p role="status" className="sr-only">Loading review…</p>
+      <div aria-hidden="true" className="animate-pulse">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="card card-pad-sm h-36">
+              <div className="h-3 w-24 rounded bg-fg/10" />
+              <div className="mt-3 h-8 w-32 rounded bg-fg/10" />
+              <div className="mt-2 h-3 w-20 rounded bg-fg/10" />
+              <div className="mt-5 h-7 w-full rounded bg-fg/[0.06]" />
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+          {[0, 1].map((i) => (
+            <div key={i} className="card card-pad h-64">
+              <div className="h-4 w-28 rounded bg-fg/10" />
+              <div className="mt-5 h-24 w-full rounded bg-fg/[0.06]" />
+              <div className="mt-4 h-3 w-3/4 rounded bg-fg/10" />
+              <div className="mt-2 h-3 w-1/2 rounded bg-fg/10" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ReviewError({ message, onRetry, compact = false }: { message: string; onRetry: () => void; compact?: boolean }) {
+  return (
+    <div role="alert" className={compact ? 'card card-pad-sm mb-4 flex flex-wrap items-center gap-3' : 'card card-pad' }>
+      <span className="empty-icon mt-0 shrink-0"><AlertCircle size={18} aria-hidden="true" /></span>
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">Could not load this review</p>
+        <p className="mt-1 break-words text-sm text-muted">{message}</p>
+      </div>
+      <button className="btn btn-sm" onClick={onRetry}>Try again</button>
+    </div>
   )
 }
 

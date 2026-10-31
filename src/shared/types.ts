@@ -443,6 +443,9 @@ export interface ReviewHabits {
   rate: number | null
   bonus: number
   previousRate: number | null
+  // The first day any active habit existed (its start date, or an earlier check-in). Before it, a day was
+  // not tracked at all; after it, a day with nothing due is a scheduled rest day. null = no active habits.
+  trackedFrom: string | null
   habits: ReviewHabit[] // active habits with something scheduled or checked in this period, weakest first
   days: ReviewHabitDay[] // one per day of the period
 }

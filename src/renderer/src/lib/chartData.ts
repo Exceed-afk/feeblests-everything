@@ -68,11 +68,13 @@ export function moodPoints(days: ReviewMood['days'], width: number, height: numb
 
 // ---------- Habits strip ----------
 
-// done / partial / missed / rest / future / today-pending, decided in one place so the Review card and any other
-// page agree. `today` is the main process's date (the same one the review used).
-export type DayState = 'done' | 'partial' | 'missed' | 'rest' | 'future' | 'pending'
-export function habitDayState(d: ReviewHabits['days'][number], today: string): DayState {
+// done / partial / missed / rest / untracked / future / today-pending, decided in one place so the Review card
+// and any other page agree. `today` is the main process's date (the same one the review used); `trackedFrom` is
+// the first day any active habit existed, so a day before it is not tracked rather than a rest day.
+export type DayState = 'done' | 'partial' | 'missed' | 'rest' | 'untracked' | 'future' | 'pending'
+export function habitDayState(d: ReviewHabits['days'][number], today: string, trackedFrom: string | null): DayState {
   if (d.date > today) return 'future'
+  if (trackedFrom === null || d.date < trackedFrom) return 'untracked'
   if (d.due === 0) return 'rest'
   if (d.done === d.due) return 'done'
   if (d.date === today && d.done === 0) return 'pending'

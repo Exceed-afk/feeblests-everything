@@ -101,14 +101,18 @@ test('only logged days are plotted, on the fixed 1 to 5 scale', () => {
 })
 
 // ---- habit days ----
-test('a habit day is done, partial, missed, rest, pending or future - and nothing else', () => {
+test('a habit day is done, partial, missed, rest, untracked, pending or future - and nothing else', () => {
   const today = '2026-10-29'
-  assert.equal(habitDayState({ date: '2026-10-26', due: 3, done: 3 }, today), 'done')
-  assert.equal(habitDayState({ date: '2026-10-27', due: 3, done: 1 }, today), 'partial')
-  assert.equal(habitDayState({ date: '2026-10-28', due: 3, done: 0 }, today), 'missed')
-  assert.equal(habitDayState({ date: '2026-10-28', due: 0, done: 0 }, today), 'rest')
-  assert.equal(habitDayState({ date: today, due: 3, done: 0 }, today), 'pending') // today is not missed yet
-  assert.equal(habitDayState({ date: '2026-10-30', due: 3, done: 0 }, today), 'future')
+  const tracked = '2026-10-01'
+  assert.equal(habitDayState({ date: '2026-10-26', due: 3, done: 3 }, today, tracked), 'done')
+  assert.equal(habitDayState({ date: '2026-10-27', due: 3, done: 1 }, today, tracked), 'partial')
+  assert.equal(habitDayState({ date: '2026-10-28', due: 3, done: 0 }, today, tracked), 'missed')
+  assert.equal(habitDayState({ date: '2026-10-28', due: 0, done: 0 }, today, tracked), 'rest')
+  // Before the first active habit existed there was nothing to track, which is not a rest day.
+  assert.equal(habitDayState({ date: '2026-10-26', due: 0, done: 0 }, today, '2026-10-28'), 'untracked')
+  assert.equal(habitDayState({ date: '2026-10-26', due: 0, done: 0 }, today, null), 'untracked')
+  assert.equal(habitDayState({ date: today, due: 3, done: 0 }, today, tracked), 'pending') // today is not missed yet
+  assert.equal(habitDayState({ date: '2026-10-30', due: 3, done: 0 }, today, tracked), 'future')
 })
 
 // ---- weekly insights ----
@@ -118,7 +122,7 @@ const base = (over: Partial<ReviewData>): ReviewData => ({
   label: '', title: '',
   trades: { stats: { ...STATS }, days: days.map((d) => ({ ...d })), best: null, worst: null, previous: { closed: 0, totalPnl: 0 } },
   savings: { deposits: 0, withdrawals: 0, net: 0, txCount: 0, startBalance: 0, endBalance: 0, goals: [], previousNet: 0, recent: [] },
-  habits: { due: 0, done: 0, rate: null, bonus: 0, previousRate: null, habits: [], days: [] },
+  habits: { due: 0, done: 0, rate: null, bonus: 0, previousRate: null, trackedFrom: null, habits: [], days: [] },
   tasks: { created: 0, completed: 0 }, mood: { logged: 0, average: null, previousAverage: null, counts: { great: 0, good: 0, okay: 0, low: 0, rough: 0 }, days: [], lowest: null, trend: null },
   journal: { entries: [], daysWritten: 0, reflection: null }, insights: [], prompts: [],
   ...over
@@ -130,16 +134,40 @@ test('the best and worst trading days come from the real per-day figures', () =>
   const d = base({})
   d.trades.stats = { ...d.trades.stats, closed: 5, totalPnl: -12.2 }
   const out = weeklyInsights(d)
-  assert.equal(out.length, 1) // one line for trades
+  assert.deepEqual(out.map((i) => i.id), ['best-day', 'worst-day']) // both facts, not one replacing the other
   assert.equal(out[0].topic, 'trades')
   assert.match(line(out[0].text), /Best trading day was Wed 28 Oct, \+7\.80 from 1 closed trade\./)
+  assert.match(line(out[1].text), /Worst trading day was Fri 30 Oct, -18\.00\./)
 })
-test('a losing day only is still reported as the worst day', () => {
+test('a one-day period names the day instead of calling it best and worst', () => {
   const d = base({})
   d.trades.days = [{ date: '2026-10-29', pnl: -18, closed: 1 }]
   d.trades.stats = { ...d.trades.stats, closed: 1, totalPnl: -18 }
   const out = weeklyInsights(d)
+  assert.deepEqual(out.map((i) => i.id), ['one-day'])
+  assert.match(out[0].text, /All 1 closed trade was on Thu 29 Oct \(-18\.00\)\./)
+})
+test('a whole losing week reports its worst day and no invented winner', () => {
+  const d = base({})
+  d.trades.days = [
+    { date: '2026-10-26', pnl: -10, closed: 1 },
+    { date: '2026-10-29', pnl: -18, closed: 1 }
+  ]
+  d.trades.stats = { ...d.trades.stats, closed: 2, totalPnl: -28 }
+  const out = weeklyInsights(d)
+  assert.deepEqual(out.map((i) => i.id), ['worst-day'])
   assert.match(out[0].text, /Worst trading day was Thu 29 Oct, -18\.00\./)
+})
+test('a tie between best days stays deterministic and does not invent a worst day', () => {
+  const d = base({})
+  d.trades.days = [
+    { date: '2026-10-27', pnl: 10, closed: 1 },
+    { date: '2026-10-28', pnl: 10, closed: 1 }
+  ]
+  d.trades.stats = { ...d.trades.stats, closed: 2, totalPnl: 20 }
+  const out = weeklyInsights(d)
+  assert.deepEqual(out.map((i) => i.id), ['best-day']) // first day wins the tie, as the data is ordered
+  assert.match(out[0].text, /Best trading day was Tue 27 Oct, \+10\.00/)
 })
 test('savings, habits and mood each get one short line', () => {
   const d = base({})

@@ -50,7 +50,7 @@ export function EntryEditor({ entry, knownTags, onSaved, onClose }: Props) {
   })
 
   return (
-    <div className="fixed inset-0 z-10 flex justify-end bg-black/40" onMouseDown={onClose}>
+    <div className="scrim fixed inset-0 z-10 flex justify-end" onMouseDown={onClose}>
       <aside onMouseDown={(e) => e.stopPropagation()}
         className="flex h-full w-[min(34rem,100%)] flex-col gap-4 overflow-y-auto border-l border-line bg-panel p-6 shadow-card">
         <div className="flex items-center justify-between">

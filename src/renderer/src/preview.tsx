@@ -39,7 +39,7 @@ const data: ReviewData = {
     ]
   },
   habits: {
-    due: 18, done: 13, rate: (13 / 18) * 100, bonus: 1, previousRate: 61,
+    due: 18, done: 13, rate: (13 / 18) * 100, bonus: 1, previousRate: 61, trackedFrom: days[0],
     habits: [
       { id: 1, name: 'Read 20 pages', due: 7, done: 5, rate: (5 / 7) * 100, bonus: 0, streak: 2, missed: ['2026-10-27', '2026-10-30'] },
       { id: 2, name: 'Train', due: 4, done: 3, rate: 75, bonus: 1, streak: 3, missed: ['2026-10-29'] },

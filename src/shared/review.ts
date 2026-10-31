@@ -152,7 +152,7 @@ function savingsSection(goals: SavingsGoal[], txs: SavingsTx[], range: PeriodRan
 
 // ---------- Habits ----------
 
-interface HabitPeriod { rows: ReviewHabit[]; days: Map<string, { due: number; done: number }>; due: number; done: number; bonus: number }
+interface HabitPeriod { rows: ReviewHabit[]; days: Map<string, { due: number; done: number }>; due: number; done: number; bonus: number; trackedFrom: string | null }
 
 // The same rules as the Habits page (src/shared/habits.ts): only scheduled days count, days before the habit
 // existed are not missed, today is not missed until it is over, and a check-in on a rest day is a bonus.
@@ -161,10 +161,13 @@ function habitPeriod(habits: Habit[], range: PeriodRange, today: string): HabitP
   const days = new Map<string, { due: number; done: number }>()
   const rows: ReviewHabit[] = []
   let due = 0, done = 0, bonus = 0
+  let trackedFrom: string | null = null
   for (const h of habits) {
     if (h.archived) continue
     const checked = new Set(h.checkins)
     const first = [h.startDate, ...h.checkins].sort()[0]
+    // Tracking begins with the earliest active habit, including a check-in made before its start date.
+    if (trackedFrom === null || first < trackedFrom) trackedFrom = first
     const from = range.start > first ? range.start : first
     const missed: string[] = []
     let hDue = 0, hDone = 0, hBonus = 0
@@ -183,7 +186,7 @@ function habitPeriod(habits: Habit[], range: PeriodRange, today: string): HabitP
   }
   // Weakest first, so the habit that needs attention is on top. Habits with nothing due go last.
   rows.sort((a, b) => (a.rate ?? 101) - (b.rate ?? 101) || a.name.localeCompare(b.name))
-  return { rows, days, due, done, bonus }
+  return { rows, days, due, done, bonus, trackedFrom }
 }
 
 function tally(days: Map<string, { due: number; done: number }>, date: string, done: boolean): void {
@@ -200,7 +203,7 @@ function habitsSection(habits: Habit[], range: PeriodRange, prev: PeriodRange, t
   const before = habitPeriod(habits, prev, today)
   return {
     due: now.due, done: now.done, rate: rateOf(now.done, now.due), bonus: now.bonus,
-    previousRate: rateOf(before.done, before.due), habits: now.rows,
+    previousRate: rateOf(before.done, before.due), trackedFrom: now.trackedFrom, habits: now.rows,
     days: days.map((date) => ({ date, ...(now.days.get(date) ?? { due: 0, done: 0 }) }))
   }
 }
@@ -386,9 +389,12 @@ export function weeklyInsights(d: Pick<ReviewData, 'kind' | 'complete' | 'trades
       if (day.pnl > (best?.pnl ?? -Infinity)) best = day
       if (day.pnl < (worst?.pnl ?? Infinity)) worst = day
     }
-    if (best && best.pnl > 0) add('best-day', 'trades', `Best trading day was ${shortDate(best.date)}, ${fmtSigned(best.pnl)} from ${plural(best.closed, 'closed trade')}.`)
-    if (worst && worst.pnl < 0) add('worst-day', 'trades', `Worst trading day was ${shortDate(worst.date)}, ${fmtSigned(worst.pnl)}.`)
-    if (traded.length === 1) add('one-day', 'trades', `All ${plural(ts.closed, 'closed trade')} were on ${shortDate(traded[0].date)}.`)
+    // One trading day: say when it was instead of calling it both the best and the worst day.
+    if (traded.length === 1) add('one-day', 'trades', `All ${plural(ts.closed, 'closed trade')} ${ts.closed === 1 ? 'was' : 'were'} on ${shortDate(traded[0].date)} (${fmtSigned(traded[0].pnl)}).`)
+    else {
+      if (best && best.pnl > 0) add('best-day', 'trades', `Best trading day was ${shortDate(best.date)}, ${fmtSigned(best.pnl)} from ${plural(best.closed, 'closed trade')}.`)
+      if (worst && worst.pnl < 0) add('worst-day', 'trades', `Worst trading day was ${shortDate(worst.date)}, ${fmtSigned(worst.pnl)}.`)
+    }
     if (d.complete && d.trades.previous.closed > 0) {
       const diff = round8(ts.totalPnl - d.trades.previous.totalPnl)
       add('trades', 'trades', Math.abs(diff) < 0.005
@@ -424,10 +430,10 @@ export function weeklyInsights(d: Pick<ReviewData, 'kind' | 'complete' | 'trades
     add('mood', 'mood', `Mood averaged ${one(d.mood.average)} of 5 across ${plural(d.mood.logged, 'entry', 'entries')}.${same}`)
   }
 
-  // At most one line per topic, so the block stays a summary and not a second page: trading, savings, habits, mood.
-  const first: Partial<Record<InsightTopic, (typeof out)[number]>> = {}
-  for (const i of out) first[i.topic] ??= i
-  return (['trades', 'savings', 'habits', 'mood'] as const).flatMap((topic) => (first[topic] ? [first[topic]!] : []))
+  // Every line is a different fact, so best and worst can both appear. A repeated id would mean a duplicated
+  // sentence; there is none, but keeping the check here makes that a rule rather than a hope.
+  const seen = new Set<string>()
+  return out.filter((i) => (seen.has(i.id) ? false : (seen.add(i.id), true)))
 }
 
 const MIN_CHANGE = 0.1 // moods closer than this are "about the same"

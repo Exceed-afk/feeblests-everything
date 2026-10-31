@@ -2,6 +2,7 @@
 // The bigger charts (trading bars, mood trend, sparklines) live in components/Charts.tsx; their arithmetic is in
 // lib/chartData.ts. Everything here is plain SVG / CSS and theme colours only, and every day is also readable as
 // text: hover (or tab to) a day for its date and numbers, and each strip carries a one-line summary for screen readers.
+import { Check, X } from 'lucide-react'
 import type { ReviewHabit, ReviewHabitDay, ReviewHabits, ReviewKind, ReviewMood } from '../../../shared/types'
 import { WEEKDAY_NAMES, weekdayOf } from '../../../shared/habits'
 import { MOOD_STYLE, wordNear } from '../lib/moods'
@@ -16,24 +17,33 @@ const TODAY = 'font-semibold text-fg'
 const OTHER = 'text-muted'
 
 // ---------- Habits per day (summary card: a compact seven-day strip) ----------
-// Each day is a small tile filled from the bottom by the share of that day's scheduled habits done:
-// full = every one done, part = some, empty = none, dashed = nothing scheduled, dotted = has not happened yet.
-// The fill says it as well as the colour.
-export function WeekStrip({ days, today }: { days: ReviewHabits['days']; today: string }) {
+// Each day is a small tile with four clearly different states, said by shape as well as colour:
+//   completed    full success-green fill with a tick
+//   incomplete   a partial fill, or a red ring with a cross when nothing was done
+//   not scheduled a dashed, empty tile (a rest day)
+//   not tracked  a faint dotted tile with a dash (no habit existed yet)
+// Today (solid outline) and future days (dotted) keep their own quiet shapes.
+export function WeekStrip({ days, today, trackedFrom }: { days: ReviewHabits['days']; today: string; trackedFrom: string | null }) {
   const full = days.filter((d) => d.due > 0 && d.done === d.due).length
   const counted = days.filter((d) => d.due > 0).length
   return (
     <div role="img" aria-label={`Habits by day: every habit done on ${full} of ${counted} ${counted === 1 ? 'day' : 'days'}`} className="flex gap-1.5">
       {days.map((d) => {
-        const state = habitDayState(d, today)
+        const state = habitDayState(d, today, trackedFrom)
         const pct = d.due > 0 ? (d.done / d.due) * 100 : 0
-        const text = state === 'future' ? `${formatDate(d.date)}: not yet`
-          : d.due === 0 ? `${formatDate(d.date)}: nothing scheduled`
-            : `${formatDate(d.date)}: ${d.done} of ${d.due} done`
+        const word = state === 'future' ? 'not yet'
+          : state === 'untracked' ? 'not tracked'
+            : state === 'rest' ? 'nothing scheduled'
+              : state === 'pending' ? 'not done yet'
+                : state === 'done' ? 'completed' : state === 'partial' ? 'partly done' : 'missed'
+        const text = `${formatDate(d.date)}: ${word}${d.due > 0 ? ` (${d.done} of ${d.due})` : ''}`
         return (
           <div key={d.date} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={text}>
-            <div className={`relative h-7 w-full overflow-hidden rounded ${state === 'future' ? 'border border-dotted border-line' : state === 'rest' ? 'border border-dashed border-line' : state === 'pending' ? 'border border-line bg-transparent' : 'bg-fg/[0.06]'}`}>
-              {pct > 0 && <div className={`absolute inset-x-0 bottom-0 ${d.done === d.due ? 'bg-pos' : 'bg-pos/45'}`} style={{ height: `${pct}%` }} />}
+            <div className="hs-cell" data-state={state}>
+              {state === 'partial' && <span className="hs-fill" style={{ height: `${pct}%` }} aria-hidden="true" />}
+              {state === 'done' && <Check size={12} strokeWidth={3} className="text-card" aria-hidden="true" />}
+              {state === 'missed' && <X size={12} strokeWidth={2.5} className="text-neg" aria-hidden="true" />}
+              {state === 'untracked' && <span className="hs-dash" aria-hidden="true" />}
             </div>
             <span className={`h-3 text-[10px] leading-3 ${d.date === today ? TODAY : OTHER}`}>{dayLabel('week', d.date)}</span>
           </div>
@@ -78,7 +88,7 @@ export function MoodDays({ days, kind, today }: { days: ReviewMood['days']; kind
               {kind === 'week'
                 ? mood === null
                   ? <span className="h-6 w-6 rounded-full border border-dashed border-line" />
-                  : <span className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold text-black/80 ${MOOD_STYLE[mood].dot}`}>{Math.round(d.average as number)}</span>
+                  : <span className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold text-bg ${MOOD_STYLE[mood].dot}`}>{Math.round(d.average as number)}</span>
                 : mood === null
                   ? <span className="h-2 w-2 rounded-full border border-dashed border-line" />
                   : <span className={`h-2.5 w-2.5 rounded-full ${MOOD_STYLE[mood].dot}`} />}

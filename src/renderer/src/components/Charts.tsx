@@ -10,15 +10,16 @@ import { formatDate } from '../lib/dates'
 import { fmtPnl } from '../lib/format'
 import { barTone, moodPoints, sparkPath, tradeBars, type TradeView } from '../lib/chartData'
 
-// Chart ink, as hsl() so it reaches an SVG presentation attribute reliably. The hue/saturation/lightness are the
-// design tokens' own (see src/shared/design.ts); the lightness matches the charts' meaning colours exactly.
-const POS = 'hsl(154 92% 25%)' // --pos in light mode
-const NEG = 'hsl(347 76% 44%)' // --neg in light mode
-const MUTED = 'hsl(217 19% 26% / 0.45)' // --fg at low strength
-const INK = 'hsl(120 8% 10%)' // --fg
-const AXIS = 'hsl(0 0% 45%)' // secondary axis labels
-const GRID = 'hsl(0 0% 50% / 0.14)' // the quiet grid line
-const ZERO = 'hsl(0 0% 40% / 0.3)' // the zero baseline
+// Chart ink comes from the theme variables (styles.css), so every palette and both modes are respected. These
+// are applied through style={} rather than a fill/stroke attribute: a CSS variable in a presentation attribute
+// can fall back to black, which is what a chart must never do.
+const POS = 'rgb(var(--pos))'
+const NEG = 'rgb(var(--neg))'
+const MUTED = 'rgb(var(--fg) / 0.45)'
+const INK = 'rgb(var(--fg))'
+const AXIS = 'var(--chart-axis)'
+const GRID = 'var(--chart-grid)'
+const ZERO = 'rgb(var(--fg) / 0.3)'
 
 const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 // Monday = 0, like src/shared/habits.ts. Computed from the calendar date itself (UTC), so a time zone cannot move it.
@@ -90,11 +91,9 @@ export function TradeBars({ days, kind, today, view }: DayBarProps) {
     <div className="chart">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" tabIndex={0} aria-label={view === 'count' ? 'Closed trades per day' : 'Profit and loss per day'}
         onPointerMove={onMove} onPointerLeave={() => setHover(null)} onBlur={() => setHover(null)} onKeyDown={onKey}>
-        {/* Colours are hsl() built in the component, not var(): a var() inside an SVG presentation attribute can fall
-            back to black, which is what a chart must never do. Same tokens as the rest of the page. */}
-        <line x1={pad.l} x2={W - pad.r} y1={zero} y2={zero} stroke={ZERO} strokeWidth="1" />
-        {hi > 0 && <line x1={pad.l} x2={W - pad.r} y1={y(hi)} y2={y(hi)} stroke={GRID} strokeWidth="1" />}
-        {lo < 0 && <line x1={pad.l} x2={W - pad.r} y1={y(lo)} y2={y(lo)} stroke={GRID} strokeWidth="1" />}
+        <line x1={pad.l} x2={W - pad.r} y1={zero} y2={zero} style={{ stroke: ZERO }} strokeWidth="1" />
+        {hi > 0 && <line x1={pad.l} x2={W - pad.r} y1={y(hi)} y2={y(hi)} style={{ stroke: GRID }} strokeWidth="1" />}
+        {lo < 0 && <line x1={pad.l} x2={W - pad.r} y1={y(lo)} y2={y(lo)} style={{ stroke: GRID }} strokeWidth="1" />}
         {bars.map((b, i) => {
           const cx = pad.l + slot * (i + 0.5)
           const tone = barTone(b, view)
@@ -105,13 +104,13 @@ export function TradeBars({ days, kind, today, view }: DayBarProps) {
           return (
             <g key={b.date}>
               {b.closed === 0
-                ? <circle cx={cx} cy={zero} r={2} fill={MUTED} opacity={0.45} />
+                ? <circle cx={cx} cy={zero} r={2} style={{ fill: MUTED }} opacity={0.45} />
                 : <rect className="chart-hit" x={cx - width / 2} y={view === 'count' ? y(b.value) : top} width={width}
                   height={view === 'count' ? Math.max(2, H - pad.b - y(b.value)) : h} rx={3}
-                  fill={color} opacity={hover === null || hover === i ? 1 : 0.55} />}
+                  style={{ fill: color }} opacity={hover === null || hover === i ? 1 : 0.55} />}
               {hover === i && <rect x={pad.l + slot * i} y={pad.t - 6} width={slot} height={H - pad.t - pad.b + 6} fill="transparent" />}
               {label && (
-                <text x={cx} y={H - 8} textAnchor="middle" fontSize="11" fill={b.date === today ? INK : AXIS} fontWeight={b.date === today ? 600 : 400}>{label}</text>
+                <text x={cx} y={H - 8} textAnchor="middle" fontSize="11" style={{ fill: b.date === today ? INK : AXIS }} fontWeight={b.date === today ? 600 : 400}>{label}</text>
               )}
             </g>
           )
