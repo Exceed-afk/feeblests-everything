@@ -8,7 +8,7 @@ export function ProgressBar({ percent, tone = 'accent' }: { percent: number; ton
   return (
     <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(shown)}
       className="h-1.5 w-full overflow-hidden rounded-full bg-fg/10">
-      <div className={`h-full rounded-full transition-all duration-500 ${color}`} style={{ width: `${shown}%` }} />
+      <div className={`h-full rounded-full transition-all duration-200 ${color}`} style={{ width: `${shown}%` }} />
     </div>
   )
 }

@@ -50,7 +50,7 @@ function StylePreview({ minimal }: { minimal: boolean }) {
       </div>
       <div className="grid flex-1 grid-cols-2" style={{ gap: 6, padding: 8 }}>
         {[0, 1].map((i) => (
-          <i key={i} style={{ borderRadius: r, background: 'rgb(var(--card))', border: line, boxShadow: minimal ? 'none' : '0 3px 8px -3px rgb(0 0 0 / .35)' }} />
+          <i key={i} style={{ borderRadius: r, background: 'rgb(var(--card))', border: line, boxShadow: minimal ? 'none' : 'var(--shadow-pop)' }} />
         ))}
       </div>
     </div>

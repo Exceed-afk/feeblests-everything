@@ -18,7 +18,7 @@
   --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.04); /* soft: a card is a surface, not a floating panel */
   --shadow-pop: 0 6px 16px -6px rgb(0 0 0 / 0.14), 0 2px 4px rgb(0 0 0 / 0.06); /* menus, tooltips */
-  --chart-grid: rgb(var(--fg) / 0.07); --chart-axis: rgb(var(--muted) / 0.55);
+  --chart-grid: rgb(var(--fg) / 0.07); --chart-axis: rgb(var(--muted)); /* labels are text: full muted, 4.5:1 */
   color-scheme: light;
 }
 .dark {
@@ -29,7 +29,7 @@
   --mood: 116 178 216;
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.24), 0 1px 3px rgb(0 0 0 / 0.18);
   --shadow-pop: 0 8px 20px -8px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
-  --chart-grid: rgb(var(--fg) / 0.09); --chart-axis: rgb(var(--muted) / 0.6);
+  --chart-grid: rgb(var(--fg) / 0.09); --chart-axis: rgb(var(--muted)); /* labels are text: full muted, 4.5:1 */
   color-scheme: dark; /* dark date pickers and scrollbars */
 }
 /* Charts use HTML colours (var()), so the theme can change them without a rebuild. */
@@ -43,11 +43,15 @@ body { @apply bg-bg font-sans text-fg antialiased; transition: background-color 
 * { @apply transition-colors duration-150; scrollbar-width: thin; scrollbar-color: rgb(var(--fg) / .25) transparent; }
 /* accent-fg, not accent: it is darkened / lightened to stay readable, so the ring keeps 3:1+ with amber or orange accents too. */
 :focus-visible { outline: 2px solid rgb(var(--accent-fg)); outline-offset: 2px; }
+/* A field that holds other controls (the tag input) keeps the same visible ring for its inner input. */
+.field:focus-within { outline: 2px solid rgb(var(--accent-fg)); outline-offset: 2px; }
+/* Native boxes follow the chosen accent instead of the operating system's blue. */
+input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 @keyframes btn-spin { to { transform: rotate(360deg); } }
-@keyframes check-pop { 0% { transform: scale(.85); } 55% { transform: scale(1.1); } 100% { transform: scale(1); } }
+@keyframes check-pop { 0% { transform: scale(.85); } 55% { transform: scale(1.1); } 100% { transform: scale(1); } } /* 220ms, inside the motion budget */
 @keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -310,7 +314,7 @@ body { @apply bg-bg font-sans text-fg antialiased; transition: background-color 
     transition: background-color .15s, border-color .15s, color .15s, transform .08s; }
   .check:hover:not(:disabled) { border-color: rgb(var(--accent)); color: rgb(var(--accent-fg) / .55); }
   .check:active:not(:disabled) { transform: scale(.92); }
-  .check[aria-pressed='true'] { background: rgb(var(--accent)); border-color: rgb(var(--accent)); color: rgb(var(--on-accent)); animation: check-pop .26s ease-out; }
+  .check[aria-pressed='true'] { background: rgb(var(--accent)); border-color: rgb(var(--accent)); color: rgb(var(--on-accent)); animation: check-pop .22s ease-out; }
   .check[aria-busy='true'] { opacity: .6; pointer-events: none; }
   .check:disabled { opacity: .45; cursor: not-allowed; }
 

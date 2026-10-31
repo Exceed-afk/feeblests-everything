@@ -238,6 +238,12 @@ test('days before a habit existed are not missed', () => {
   assert.equal(r.habits.due, 3)
   assert.equal(r.habits.rate, 100)
 })
+test('the review knows when tracking began, so earlier days are not mistaken for rest days', () => {
+  const r = week({ habits: [habit('New', EVERY, ['2026-10-23'], { start: '2026-10-23' })] })
+  assert.equal(r.habits.trackedFrom, '2026-10-23')
+  const none = week({ habits: [habit('Old', EVERY, [], { archived: true })] })
+  assert.equal(none.habits.trackedFrom, null) // no active habit ever existed, so nothing was tracked
+})
 test('archived habits are ignored', () => {
   const r = week({ habits: [habit('Old', EVERY, [], { archived: true }), habit('Now', EVERY, ['2026-10-19'])] })
   assert.deepEqual(r.habits.habits.map((h) => h.name), ['Now'])

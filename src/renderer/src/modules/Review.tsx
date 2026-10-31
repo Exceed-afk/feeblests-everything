@@ -181,7 +181,7 @@ export function ReviewBody({ data, onOpen, onNavigate }: Nav & { data: ReviewDat
   return (
     <>
       {/* ---- Summary: the four headline figures, in one row on a wide screen ---- */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TradingCard data={data} onNavigate={onNavigate} />
         <SavingsCard data={data} onNavigate={onNavigate} />
         <HabitCard data={data} onNavigate={onNavigate} />
@@ -736,12 +736,14 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
 
 function TradeLine({ label, trade, onClick }: { label: string; trade: NonNullable<ReviewData['trades']['best']>; onClick: () => void }) {
   return (
-    <button className="row-link" onClick={onClick}>
-      <span className="flex min-w-0 items-center gap-2 text-sm">
+    <button className="row-link" onClick={onClick} title={`${trade.asset} · ${formatDate(trade.date)}`}>
+      <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
         <span className="meta w-10 shrink-0">{label}</span>
-        <span className="truncate font-semibold">{trade.asset}</span>
+        <span className="min-w-0 flex-1 truncate font-semibold">{trade.asset}</span>
         <span className={`badge capitalize ${trade.direction === 'long' ? 'badge-pos' : 'badge-neg'}`}>{trade.direction}</span>
-        <span className="meta shrink-0">{formatDate(trade.date)}</span>
+        {/* On a narrow screen the date is left out of the row (it stays in the title) instead of squeezing
+            the asset to nothing; from 640px it has room again. */}
+        <span className="meta hidden shrink-0 sm:inline">{formatDate(trade.date)}</span>
       </span>
       <span className="shrink-0 text-sm"><Pnl value={trade.pnl} /></span>
     </button>

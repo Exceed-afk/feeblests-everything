@@ -88,7 +88,7 @@ export function MoodDays({ days, kind, today }: { days: ReviewMood['days']; kind
               {kind === 'week'
                 ? mood === null
                   ? <span className="h-6 w-6 rounded-full border border-dashed border-line" />
-                  : <span className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold text-bg ${MOOD_STYLE[mood].dot}`}>{Math.round(d.average as number)}</span>
+                  : <span className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold ${MOOD_STYLE[mood].dot}`}>{Math.round(d.average as number)}</span>
                 : mood === null
                   ? <span className="h-2 w-2 rounded-full border border-dashed border-line" />
                   : <span className={`h-2.5 w-2.5 rounded-full ${MOOD_STYLE[mood].dot}`} />}

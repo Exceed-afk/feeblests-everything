@@ -1,4 +1,4 @@
-// The arithmetic behind the small charts, as plain functions (no React, no DOM), so tests/charts.ts can check it.
+// The arithmetic behind the small charts, as plain functions (no React, no DOM), so tests/design.ts can check it.
 // The components in components/Charts.tsx only draw what comes out of here.
 import type { ReviewTrades, ReviewHabits, ReviewMood } from '../../../shared/types'
 import { round8 } from '../../../shared/format'
