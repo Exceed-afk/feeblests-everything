@@ -3,6 +3,7 @@
 //   npm test
 import assert from 'node:assert/strict'
 import { PALETTES, accentText, contrast, hexToRgb, mix, type RGB } from '../src/shared/appearance'
+import { COLOR_TOKENS } from '../src/shared/design'
 
 let n = 0
 const test = (name: string, fn: () => void) => { fn(); n++; console.log('ok  ', name) }
@@ -27,7 +28,7 @@ for (const p of PALETTES) {
 // Accent-coloured text (active sidebar item, matched letters in the palette, tag chips) must be readable on every surface
 // it can sit on, for every accent the colour picker offers: the page, sidebar and cards, the active sidebar tile, and the
 // selected palette row in both styles (accent tint in Modern, grey tint in Classic minimal).
-const ACCENTS = ['#8b5cf6', '#10b981', '#f43f5e', '#f59e0b', '#64748b', '#0ea5e9', '#f97316'] // = ACCENT_PRESETS in lib/theme.ts
+const ACCENTS = ['#075b38', '#8b5cf6', '#10b981', '#f43f5e', '#f59e0b', '#64748b', '#0ea5e9', '#f97316'] // = ACCENT_PRESETS in lib/theme.ts
 for (const p of PALETTES) for (const mode of ['light', 'dark'] as const) {
   test(`${p.id} ${mode}: accent text reaches 4.5:1 on the sidebar tile and palette rows for every accent`, () => {
     const t = p[mode], [bg, panel, card, fg] = [t.bg, t.panel, t.card, t.fg].map(hexToRgb)
@@ -41,8 +42,10 @@ for (const p of PALETTES) for (const mode of ['light', 'dark'] as const) {
   })
 }
 
-// The same numbers as --pos / --neg / --warn in styles.css.
-const POS = { light: '#047857', dark: '#34d399' }, NEG = { light: '#be123c', dark: '#fd8b9d' }, WARN = { light: '#92400e', dark: '#fbbf24' }
+// The same numbers as --pos / --neg / --warn in styles.css (and the meaning colours of src/shared/design.ts).
+const POS = { light: COLOR_TOKENS.light.pos, dark: COLOR_TOKENS.dark.pos }
+const NEG = { light: COLOR_TOKENS.light.neg, dark: COLOR_TOKENS.dark.neg }
+const WARN = { light: COLOR_TOKENS.light.warn, dark: COLOR_TOKENS.dark.warn }
 for (const p of PALETTES) for (const mode of ['light', 'dark'] as const) {
   test(`${p.id} ${mode}: gain, loss and caution colours reach 4.5:1 on cards and page`, () => {
     for (const c of [POS[mode], NEG[mode], WARN[mode]]) for (const surface of [p[mode].card, p[mode].bg]) assert.ok(ratio(c, surface) >= 4.5, `${c} on ${surface}`)

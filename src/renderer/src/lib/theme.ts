@@ -2,6 +2,7 @@ import type { Settings } from '../../../shared/types'
 import { appearanceVars } from '../../../shared/appearance'
 
 export const ACCENT_PRESETS = [
+  { name: 'Green', hex: '#075b38' },
   { name: 'Violet', hex: '#8b5cf6' },
   { name: 'Emerald', hex: '#10b981' },
   { name: 'Rose', hex: '#f43f5e' },

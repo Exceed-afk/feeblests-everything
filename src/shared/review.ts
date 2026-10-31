@@ -5,6 +5,7 @@
 // Dates are "YYYY-MM-DD" text and the arithmetic works on the calendar date itself (UTC), so time zones and
 // daylight saving cannot shift a day.
 import { addDays, isScheduled, weekdayOf, WEEKDAY_NAMES } from './habits'
+import { shortDate } from './design'
 import { round8 } from './math'
 import { signedAmount } from './savings'
 import { computeStats } from './trades'
@@ -96,6 +97,18 @@ function tradesSection(trades: Trade[], range: PeriodRange, prev: PeriodRange, d
   }
 }
 
+const RECENT_TX = 5
+
+// The last few real transactions of the period, newest first, with the goal's name for context.
+function recentTx(txs: SavingsTx[], goals: SavingsGoal[], range: PeriodRange, max: number) {
+  const names = new Map(goals.map((g) => [g.id, g.name]))
+  return txs
+    .filter((t) => names.has(t.goalId) && inRange(t.date, range.start, range.end))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+    .slice(0, max)
+    .map((t) => ({ id: t.id, goalId: t.goalId, goalName: names.get(t.goalId) as string, date: t.date, kind: t.kind, amount: t.amount, note: t.note }))
+}
+
 // ---------- Savings ----------
 
 function savingsSection(goals: SavingsGoal[], txs: SavingsTx[], range: PeriodRange, prev: PeriodRange): ReviewSavings {
@@ -132,7 +145,8 @@ function savingsSection(goals: SavingsGoal[], txs: SavingsTx[], range: PeriodRan
   rows.sort((a, b) => Math.abs(b.net) - Math.abs(a.net) || a.name.localeCompare(b.name))
   return {
     deposits: round8(deposits), withdrawals: round8(withdrawals), net: round8(deposits - withdrawals), txCount: count,
-    startBalance: round8(startBalance), endBalance: round8(endBalance), goals: rows, previousNet: round8(previousNet)
+    startBalance: round8(startBalance), endBalance: round8(endBalance), goals: rows, previousNet: round8(previousNet),
+    recent: [] // filled in by buildReview (see recentTx)
   }
 }
 
@@ -352,6 +366,72 @@ export function summaryText(d: ReviewData): string {
 
 // ---------- The whole review ----------
 
+// ---------- Weekly insights ----------
+// Plain sentences about what the numbers say. Every one is worked out from the review data above, so nothing can
+// appear that the page does not also show as a number. `topic` lets the page pick a small glyph.
+export type InsightTopic = 'trades' | 'savings' | 'habits' | 'mood'
+
+export function weeklyInsights(d: Pick<ReviewData, 'kind' | 'complete' | 'trades' | 'savings' | 'habits' | 'mood'>): { id: string; topic: InsightTopic; text: string }[] {
+  const out: { id: string; topic: InsightTopic; text: string }[] = []
+  const add = (id: string, topic: InsightTopic, text: string) => out.push({ id, topic, text })
+  const fmtSigned = (n: number): string => `${n > 0 ? '+' : n < 0 ? '-' : ''}${two(Math.abs(n))}`
+  const word = d.kind === 'week' ? 'week' : 'month'
+
+  // Trades: best and worst DAY (a day, not a trade: the trade itself is named in the Trading card).
+  const ts = d.trades.stats
+  if (ts.closed > 0) {
+    const traded = d.trades.days.filter((x) => x.closed > 0)
+    let best: (typeof traded)[number] | null = null, worst: (typeof traded)[number] | null = null
+    for (const day of traded) {
+      if (day.pnl > (best?.pnl ?? -Infinity)) best = day
+      if (day.pnl < (worst?.pnl ?? Infinity)) worst = day
+    }
+    if (best && best.pnl > 0) add('best-day', 'trades', `Best trading day was ${shortDate(best.date)}, ${fmtSigned(best.pnl)} from ${plural(best.closed, 'closed trade')}.`)
+    if (worst && worst.pnl < 0) add('worst-day', 'trades', `Worst trading day was ${shortDate(worst.date)}, ${fmtSigned(worst.pnl)}.`)
+    if (traded.length === 1) add('one-day', 'trades', `All ${plural(ts.closed, 'closed trade')} were on ${shortDate(traded[0].date)}.`)
+    if (d.complete && d.trades.previous.closed > 0) {
+      const diff = round8(ts.totalPnl - d.trades.previous.totalPnl)
+      add('trades', 'trades', Math.abs(diff) < 0.005
+        ? `Net P&L was the same as the ${word} before (${fmtSigned(ts.totalPnl)}).`
+        : `Net P&L ${diff > 0 ? 'rose' : 'fell'} by ${two(Math.abs(diff))} against the ${word} before.`)
+    }
+  }
+
+  // Savings
+  const s = d.savings
+  if (s.txCount > 0) {
+    add('savings', 'savings', s.net === 0
+      ? `Savings held steady: ${two(s.deposits)} in, ${two(s.withdrawals)} out.`
+      : s.net > 0
+        ? `You put ${two(s.net)} more into savings than you took out.`
+        : `Savings went down ${two(Math.abs(s.net))} (${two(s.withdrawals)} withdrawn, ${two(s.deposits)} deposited).`)
+  }
+  // A goal reached this period is worth a line of its own.
+  for (const g of s.goals.filter((x) => x.reached)) add(`goal-${g.goalId}`, 'savings', `You reached your ${g.name} goal.`)
+
+  // Habits
+  if (d.habits.rate !== null) {
+    const full = d.habits.days.filter((x) => x.due > 0 && x.done === x.due).length
+    add('habits', 'habits', d.habits.rate >= 100
+      ? `Every scheduled habit day was done (${d.habits.done} of ${d.habits.due}).`
+      : `${Math.round(d.habits.rate)}% of scheduled habit days were done${full > 0 ? `, and every habit was done on ${plural(full, 'day')}` : ''}.`)
+  }
+
+  // Mood
+  if (d.mood.average !== null) {
+    const prev = d.mood.previousAverage
+    const same = prev !== null && d.complete ? ` It is ${Math.abs(d.mood.average - prev) < MIN_CHANGE ? 'about the same as' : d.mood.average > prev ? 'higher than' : 'lower than'} the ${word} before (${one(prev)}).` : ''
+    add('mood', 'mood', `Mood averaged ${one(d.mood.average)} of 5 across ${plural(d.mood.logged, 'entry', 'entries')}.${same}`)
+  }
+
+  // At most one line per topic, so the block stays a summary and not a second page: trading, savings, habits, mood.
+  const first: Partial<Record<InsightTopic, (typeof out)[number]>> = {}
+  for (const i of out) first[i.topic] ??= i
+  return (['trades', 'savings', 'habits', 'mood'] as const).flatMap((topic) => (first[topic] ? [first[topic]!] : []))
+}
+
+const MIN_CHANGE = 0.1 // moods closer than this are "about the same"
+
 export interface ReviewInput {
   kind: ReviewKind
   anchor: string // any date inside the period
@@ -370,7 +450,7 @@ export function buildReview(i: ReviewInput): ReviewData {
   const days = periodDays(range.start, range.end)
   const title = reviewTitle(i.kind, range.start, range.end)
   const trades = tradesSection(i.trades, range, prev, days)
-  const savings = savingsSection(i.goals, i.txs, range, prev)
+  const savings: ReviewSavings = { ...savingsSection(i.goals, i.txs, range, prev), recent: recentTx(i.txs, i.goals, range, RECENT_TX) }
   const habits = habitsSection(i.habits, range, prev, i.today, days)
   const tasks = taskReview(i.tasks, range.start, range.end)
   const mood = moodSection(i.entries, range, prev, days)

@@ -154,7 +154,7 @@ export function Tasks(_props: ModuleProps) {
         <button className="btn-primary" onClick={() => setEditing('new')} title="N"><Plus size={16} /> New task</button>
       </PageHeader>
       <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-        <div className="seg flex flex-wrap" role="tablist" aria-label="Task views">
+        <div className="seg seg-tabs flex flex-wrap" role="tablist" aria-label="Task views">
           {VIEWS.map((item) => <button key={item.id} role="tab" aria-selected={view === item.id} onClick={() => filters.setView(item.id)}>{item.label}</button>)}
         </div>
         <div className="seg flex flex-wrap" role="group" aria-label="Task layout">

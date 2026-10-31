@@ -9,6 +9,7 @@ import {
   type ColorOverrides, type Density, type FontChoice, type IntelligenceSettings, type Radius, type Settings, type TaskLayout, type TextSize, type ThemeMode, type UiStyle
 } from './types'
 import { MAX_RECENT_TOOLS } from './palette'
+import { COLOR_TOKENS, accentFor } from './design'
 
 // ---------- colour maths ----------
 
@@ -45,7 +46,7 @@ function ensureContrast(color: RGB, against: RGB[], min: number, target: RGB): R
 }
 
 const WHITE: RGB = [255, 255, 255]
-const INK: RGB = [15, 17, 23]
+const INK: RGB = [17, 23, 21] // the design system's dark page colour
 
 // Text colour for buttons filled with the accent: white, unless the accent is too light for it (amber, emerald).
 export const onAccent = (accent: RGB): RGB => (contrast(WHITE, accent) >= 3.5 ? WHITE : INK)
@@ -65,10 +66,10 @@ export interface Tokens { bg: string; panel: string; card: string; line: string;
 export interface Palette { id: string; name: string; light: Tokens; dark: Tokens }
 
 // bg = page, panel = sidebar, card = raised surfaces, line = borders, fg = text, muted = secondary text.
+// "Default" is the design system's own neutral set (src/shared/design.ts), so the two never drift apart.
 export const PALETTES: Palette[] = [
   { id: 'default', name: 'Default',
-    light: { bg: '#f4f5f8', panel: '#ffffff', card: '#ffffff', line: '#e2e5ec', fg: '#181c26', muted: '#687080' },
-    dark: { bg: '#0f1117', panel: '#14171f', card: '#1a1e28', line: '#2a2f3d', fg: '#e8ebf3', muted: '#8c94a6' } },
+    light: COLOR_TOKENS.light, dark: COLOR_TOKENS.dark },
   { id: 'midnight', name: 'Midnight',
     light: { bg: '#eef2fa', panel: '#ffffff', card: '#ffffff', line: '#d9e0ef', fg: '#121a2e', muted: '#5a6784' },
     dark: { bg: '#0b1020', panel: '#0f1629', card: '#141c33', line: '#25304f', fg: '#e6ebf7', muted: '#93a0bd' } },
@@ -107,7 +108,7 @@ export function resolveTokens(s: Pick<Settings, 'palette' | 'colors'>, dark: boo
 // ---------- shape, spacing, type ----------
 
 // Multipliers: radius scales every rounded-* corner, density every padding/margin/gap (see tailwind.config.js).
-export const RADIUS_SCALE: Record<Radius, number> = { sharp: 0.2, soft: 1, round: 1.7 }
+export const RADIUS_SCALE: Record<Radius, number> = { sharp: 0.2, soft: 1.3, round: 1.7 }
 export const DENSITY_SCALE: Record<Density, number> = { compact: 0.8, comfortable: 1, spacious: 1.2 }
 export const TEXT_SCALE: Record<TextSize, number> = { small: 0.9, default: 1, large: 1.12 }
 // System fonts only: the page may not load anything from the internet (see the CSP in index.html).
@@ -119,6 +120,7 @@ export const FONT_STACKS: Record<FontChoice, string> = {
 }
 
 // What picking a style also sets, so one click gives the whole look (each can then be fine-tuned).
+// "soft" is the scale 1.3 (see RADIUS_SCALE): a card lands on its designed 16px radius, a button and a field on 10px.
 export const STYLE_PRESETS: Record<UiStyle, Pick<Settings, 'radius' | 'density'>> = {
   modern: { radius: 'soft', density: 'comfortable' },
   minimal: { radius: 'sharp', density: 'compact' }
@@ -174,11 +176,12 @@ export function normalizeSettings(raw: Partial<Record<keyof Settings, unknown>> 
 // Every CSS variable the stylesheet reads. The renderer sets these on <html>.
 export function appearanceVars(s: Settings, dark: boolean): Record<string, string> {
   const t = resolveTokens(s, dark)
-  const accent = hexToRgb(s.accent)
+  const accent = hexToRgb(accentFor(s.accent, dark))
   return {
     '--bg': triple(hexToRgb(t.bg)), '--panel': triple(hexToRgb(t.panel)), '--card': triple(hexToRgb(t.card)),
     '--line': triple(hexToRgb(t.line)), '--fg': triple(hexToRgb(t.fg)), '--muted': triple(hexToRgb(t.muted)),
     '--accent': triple(accent), '--on-accent': triple(onAccent(accent)), '--accent-fg': triple(accentText(accent, t)),
+    '--mood': triple(hexToRgb(dark ? COLOR_TOKENS.dark.mood : COLOR_TOKENS.light.mood)), // neutral chart accent for mood
     '--rs': String(RADIUS_SCALE[s.radius]), '--d': String(DENSITY_SCALE[s.density]), '--ts': String(TEXT_SCALE[s.textSize]),
     '--font-ui': FONT_STACKS[s.font]
   }

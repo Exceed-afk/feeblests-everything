@@ -1,5 +1,5 @@
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react'
-import { fmtPnl } from '../lib/format'
+import { fmtAmount, fmtPnl } from '../lib/format'
 
 // A profit or loss figure. The sign and an arrow carry the meaning, so colour is never the only cue.
 // `null` means the trade is still open.
@@ -9,7 +9,7 @@ export function Pnl({ value, open = 'Open' }: { value: number | null; open?: str
   return (
     <span className={`pnl ${cls}`}>
       {value > 0 ? <ArrowUpRight size={13} aria-hidden="true" /> : value < 0 ? <ArrowDownRight size={13} aria-hidden="true" /> : null}
-      {fmtPnl(value)}
+      {value === 0 ? fmtAmount(0) : fmtPnl(value)}
     </span>
   )
 }

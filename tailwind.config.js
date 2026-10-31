@@ -21,7 +21,9 @@ module.exports = {
         'on-accent': v('on-accent'), // readable text on an accent-filled button (white, or dark for light accents)
         'accent-fg': v('accent-fg'), // the accent used as text on the page background
         // Meaning colours (gains / losses / caution). Darker in light mode, lighter in dark mode, so text stays readable.
-        pos: v('pos'), neg: v('neg'), warn: v('warn')
+        pos: v('pos'), neg: v('neg'), warn: v('warn'),
+        // mood: the one neutral chart colour (mood trend, savings goal bar). Not a good / bad meaning.
+        mood: v('mood')
       },
       // Corner roundness: --rs is 0.2 (sharp), 1 (soft, the original look) or 1.7 (round).
       borderRadius: {

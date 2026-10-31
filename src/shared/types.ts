@@ -417,7 +417,11 @@ export interface ReviewSavings {
   endBalance: number // all goals together, at the end of the period
   goals: ReviewGoal[] // only goals that moved, biggest change first
   previousNet: number
+  recent: ReviewTx[] // the newest transactions of the period, as entered (at most 5), newest first
 }
+
+// One transaction of the period, for the "recent activity" list. Nothing is recalculated: these are the stored rows.
+export interface ReviewTx { id: number; goalId: number; goalName: string; date: string; kind: TxKind; amount: number; note: string }
 
 export interface ReviewHabit {
   id: number
@@ -430,6 +434,9 @@ export interface ReviewHabit {
   missed: string[] // scheduled days that passed unchecked
 }
 
+// One day of the period, with what the day's scheduled habits came to across every active habit.
+export interface ReviewHabitDay { date: string; due: number; done: number }
+
 export interface ReviewHabits {
   due: number
   done: number
@@ -437,7 +444,7 @@ export interface ReviewHabits {
   bonus: number
   previousRate: number | null
   habits: ReviewHabit[] // active habits with something scheduled or checked in this period, weakest first
-  days: { date: string; due: number; done: number }[] // one per day of the period
+  days: ReviewHabitDay[] // one per day of the period
 }
 
 export interface ReviewMood {
