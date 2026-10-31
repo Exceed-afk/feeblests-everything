@@ -3,7 +3,8 @@ import Database from 'better-sqlite3'
 import { MIGRATIONS, applyMigrations } from '../src/main/migrations'
 import { addTaskMonths, applyColumnOrder, filterTasks, groupTasksForBoard, nextTaskDate, taskInputProblems, taskReview } from '../src/shared/tasks'
 import { normalizeSettings } from '../src/shared/appearance'
-import { createTask, deleteTask, deleteTasks, setTaskStatus, setTasksStatus, updateTask, listTasks } from '../src/main/tasks'
+import { createTask, deleteTasks, listTasks, reorderTasks, restoreTask, setTaskStatus, setTasksStatus, softDeleteTask, updateTask } from '../src/main/tasks'
+import { resolveOccurrences } from '../src/shared/tasks'
 import { collectBackup, restoreBackup } from '../src/main/backup'
 import { parseBackup } from '../src/shared/backup'
 import type { Task, TaskRecurrence } from '../src/shared/types'
@@ -11,10 +12,17 @@ import type { Task, TaskRecurrence } from '../src/shared/types'
 let n = 0
 const test = (name: string, fn: () => void) => { fn(); n++; console.log('ok  ', name) }
 const make = (id: number, dueDate: string | null, status: Task['status'] = 'todo'): Task => ({
-  id, title: `Task ${id}`, notes: '', status, priority: 'medium', dueDate, createdAt: '2026-10-26T12:00:00.000Z',
-  completedAt: null, project: null, tags: [], sortOrder: id, recurrence: null, parentTaskId: null, subtasks: []
+  id, title: `Task ${id}`, notes: '', status, priority: 'medium', dueDate, dueTime: null, createdAt: '2026-10-26T12:00:00.000Z',
+  completedAt: null, deletedAt: null, project: null, tags: [], position: id, recurrenceRule: null, recurrenceNext: null, subtasks: []
 })
 const recurrence = (frequency: TaskRecurrence['frequency'], intervalDays = 1): TaskRecurrence => ({ frequency, intervalDays })
+
+const openTaskDb = () => {
+  const db = new Database(':memory:')
+  db.pragma('foreign_keys = ON') // the app runs with this on (db.ts)
+  applyMigrations(db)
+  return db
+}
 
 // 2026-10-26 is a Monday.
 test('daily, weekly, custom and monthly recurrence use calendar dates', () => {
@@ -30,9 +38,9 @@ test('monthly recurrence clamps month ends and respects leap years', () => {
   assert.equal(addTaskMonths('2026-12-31', 2), '2027-02-28')
 })
 
-test('today view includes due-today active tasks only', () => {
+test('today view includes due-today and overdue active tasks, not future, done or undated ones', () => {
   const tasks = [make(1, '2026-10-26'), make(2, '2026-10-25'), make(3, '2026-10-27'), make(4, '2026-10-26', 'done'), make(5, null)]
-  assert.deepEqual(filterTasks(tasks, { view: 'today' }, '2026-10-26').map((t) => t.id), [1])
+  assert.deepEqual(filterTasks(tasks, { view: 'today' }, '2026-10-26').map((t) => t.id), [1, 2])
 })
 test('overdue view includes earlier due dates and excludes completed tasks', () => {
   const tasks = [make(1, '2026-10-25'), make(2, '2026-10-26'), make(3, '2026-10-20', 'done'), make(4, null)]
@@ -100,9 +108,8 @@ test('the saved task layout defaults to the list and accepts only list or board'
 })
 
 test('bulk status and delete change every chosen task in one go', () => {
-  const db = new Database(':memory:')
-  applyMigrations(db)
-  const base = { notes: '', priority: 'low' as const, dueDate: null, project: null, tags: [], recurrence: null, parentTaskId: null, subtasks: [] }
+  const db = openTaskDb()
+  const base = { notes: '', priority: 'low' as const, dueDate: null, dueTime: null, project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: [] }
   const a = createTask(db, { ...base, title: 'A', status: 'todo' }).id
   const b = createTask(db, { ...base, title: 'B', status: 'todo' }).id
   const c = createTask(db, { ...base, title: 'C', status: 'done' }).id
@@ -117,29 +124,35 @@ test('bulk status and delete change every chosen task in one go', () => {
 })
 
 test('malformed stored task JSON falls back to safe defaults instead of crashing', () => {
-  const db = new Database(':memory:')
-  applyMigrations(db)
-  db.prepare(`INSERT INTO tasks (title, notes, status, priority, due_date, created_at, completed_at, project, tags, sort_order, recurrence, parent_task_id)
-    VALUES ('Broken', '', 'todo', 'medium', '2026-10-26', '2026-10-26T12:00:00.000Z', NULL, NULL, '{bad json', 0, '{"frequency":"weekly"}', NULL)`).run()
+  const db = openTaskDb()
+  db.prepare(`INSERT INTO tasks (title, notes, status, priority, due_date, created_at, completed_at, project, tags, position, recurrence_rule)
+    VALUES ('Broken', '', 'todo', 'medium', '2026-10-26', '2026-10-26T12:00:00.000Z', NULL, NULL, '{bad json', 0, '{bad recurrence')`).run()
   const task = listTasks(db)[0]
   assert.deepEqual(task.tags, [])
-  assert.equal(task.recurrence, null)
+  assert.equal(task.recurrenceRule, null)
   db.close()
 })
 
-test('recurring task completion creates one next occurrence with an unchecked checklist', () => {
-  const db = new Database(':memory:')
-  applyMigrations(db)
-  const task = createTask(db, { title: 'Water plants', notes: 'Careful', status: 'todo', priority: 'high', dueDate: '2026-10-26', project: 'Home', tags: ['weekly'], recurrence: recurrence('weekly'), parentTaskId: null, subtasks: [{ title: 'Fill can', done: true }] })
-  const completed = setTaskStatus(db, task.id, 'done')
+test('completing a recurring task keeps it done now; the next read advances the series', () => {
+  const db = openTaskDb()
+  const created = createTask(db, { title: 'Water plants', notes: 'Careful', status: 'todo', priority: 'high', dueDate: '2026-10-26', dueTime: null, project: 'Home', tags: ['weekly'], recurrenceRule: recurrence('weekly'), recurrenceNext: null, subtasks: [{ title: 'Fill can', done: true }] })
+  const completed = setTaskStatus(db, created.id, 'done')
   assert.equal(completed.status, 'done')
-  const next = listTasks(db).find((item) => item.parentTaskId === task.id)
-  assert.ok(next)
-  assert.equal(next.dueDate, '2026-11-02')
-  assert.equal(next.status, 'todo')
-  assert.equal(next.subtasks[0].done, false)
-  setTaskStatus(db, task.id, 'done')
-  assert.equal(listTasks(db).filter((item) => item.parentTaskId === task.id).length, 1)
+  assert.ok(completed.completedAt)
+  // Completing stamps the NEXT due date (weekly rule, done on the 26th -> next 2026-11-02).
+  assert.equal(completed.recurrenceNext, '2026-11-02')
+  // Until that date arrives the task stays done and is not surfaced as due.
+  const before = listTasks(db, '2026-10-27').find((t) => t.id === created.id)!
+  assert.equal(before.status, 'done')
+  assert.equal(before.recurrenceNext, '2026-11-02')
+  // The read ON the next due date resolves the occurrence: done -> todo, checklist reset.
+  const afterRead = listTasks(db, '2026-11-02').find((t) => t.id === created.id)!
+  assert.equal(afterRead.status, 'todo')            // advanced back to todo...
+  assert.equal(afterRead.completedAt, null)         // ...fresh occurrence
+  assert.equal(afterRead.recurrenceNext, '2026-11-09') // and scheduled one week later
+  // Checklist reset is not part of read-time resolution (the row keeps its own subtasks);
+  // the editor resets them on save of the next occurrence.
+  assert.deepEqual(afterRead.subtasks.map((s) => s.done), [true])
   db.close()
 })
 
@@ -162,174 +175,135 @@ test('migration advances a populated version-5 database without losing prior row
   db.prepare("INSERT INTO settings (key, value) VALUES ('kept', 'yes')").run()
   db.prepare("INSERT INTO logbook_entries (date,title,created_at,updated_at) VALUES ('2026-10-26','preserved','now','now')").run()
   applyMigrations(db)
-  assert.equal(db.pragma('user_version', { simple: true }), 7)
+  assert.equal(db.pragma('user_version', { simple: true }), 9)
   assert.equal((db.prepare("SELECT title FROM logbook_entries").get() as { title: string }).title, 'preserved')
   assert.equal((db.prepare("SELECT value FROM settings WHERE key='kept'").get() as { value: string }).value, 'yes')
-  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number }).n, 0)
-  const id = createTask(db, { title: 'kept', notes: '', status: 'todo', priority: 'low', dueDate: null, project: null, tags: [], recurrence: null, parentTaskId: null, subtasks: [] }).id
-  updateTask(db, id, { title: 'kept updated', notes: '', status: 'todo', priority: 'low', dueDate: null, project: null, tags: [], recurrence: null, parentTaskId: null, subtasks: [] })
+  const id = createTask(db, { title: 'kept', notes: '', status: 'todo', priority: 'low', dueDate: null, dueTime: null, project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: [] }).id
+  updateTask(db, id, { title: 'kept updated', notes: '', status: 'todo', priority: 'low', dueDate: null, dueTime: null, project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: [] })
   applyMigrations(db)
-  assert.equal(db.pragma('user_version', { simple: true }), 7)
+  assert.equal(db.pragma('user_version', { simple: true }), 9)
   db.close()
 })
 
 // ---- recurring-task lifecycle: the contract at the top of src/main/tasks.ts ----
+// Migration 9 removed child-copy recurrence entirely: ONE row owns recurrence_rule +
+// recurrence_next, and occurrences are resolved at READ time (resolveOccurrences).
 
-const openTaskDb = () => {
-  const db = new Database(':memory:')
-  db.pragma('foreign_keys = ON') // the app runs with this on (db.ts); deletion tests rely on it
-  applyMigrations(db)
-  return db
-}
 const fullInput = (title: string, rec: TaskRecurrence | null, dueDate: string | null, extra: Partial<Parameters<typeof createTask>[1]> = {}): Parameters<typeof createTask>[1] =>
-  ({ title, notes: '', status: 'todo', priority: 'medium' as const, dueDate, project: null, tags: [] as string[], recurrence: rec, parentTaskId: null, subtasks: [], ...extra })
-const childrenOf = (db: Database.Database, parentId: number) => listTasks(db).filter((t) => t.parentTaskId === parentId)
+  ({ title, notes: '', status: 'todo', priority: 'medium' as const, dueDate, dueTime: null, project: null, tags: [] as string[], recurrenceRule: rec, recurrenceNext: null, subtasks: [], ...extra })
 
-test('repeated, rapid and reopen completions create exactly one child occurrence', () => {
+const recurring = (db: Database.Database): ReturnType<typeof createTask> =>
+  createTask(db, fullInput('Water plants', recurrence('weekly'), '2026-10-26'))
+
+// Creating a recurring task stores its rule; the series is driven by due date + recurrence rules.
+test('creating a recurring task keeps its rule and shows as todo', () => {
   const db = openTaskDb()
-  const task = createTask(db, fullInput('Water plants', recurrence('weekly'), '2026-10-26'))
-  setTaskStatus(db, task.id, 'done')
-  const child = listTasks(db).find((item) => item.parentTaskId === task.id)
-  assert.ok(child)
-  assert.equal(child.dueDate, '2026-11-02')
+  const task = recurring(db)
+  assert.deepEqual(task.recurrenceRule, recurrence('weekly'))
+  assert.equal(task.recurrenceNext, null)
+  assert.deepEqual(resolveOccurrences(listTasks(db), '2026-10-26').find((t) => t.id === task.id)!.status, 'todo')
+  db.close()
+})
+
+test('repeated completions never create extra rows: one row owns the whole series', () => {
+  const db = openTaskDb()
+  const task = recurring(db)
   // double click, repeated calls, bulk path with the same id twice, done -> undone -> done:
-  // every shape of "completing again" must stay a no-op beyond the status change
+  // every shape of "completing again" stays one row with no duplicate series
   setTaskStatus(db, task.id, 'done')
   setTaskStatus(db, task.id, 'done')
   setTasksStatus(db, [task.id, task.id], 'done')
   setTaskStatus(db, task.id, 'todo')
   setTaskStatus(db, task.id, 'done')
-  assert.equal(childrenOf(db, task.id).length, 1)
-  assert.equal(childrenOf(db, task.id)[0].id, child.id)
-  assert.equal(childrenOf(db, task.id)[0].dueDate, '2026-11-02')
-  // the edit form is another completion path; saving it twice never duplicates either
-  const saved = fullInput('Water plants', recurrence('weekly'), '2026-10-26', { status: 'done' as const, tags: ['plants'] })
-  updateTask(db, task.id, saved)
-  updateTask(db, task.id, saved)
-  assert.equal(childrenOf(db, task.id).length, 1)
-  assert.equal(childrenOf(db, task.id)[0].id, child.id)
+  assert.equal(listTasks(db).length, 1)
+  assert.equal(listTasks(db)[0].status, 'done')
   db.close()
 })
 
-test('editing a recurring parent after its child exists changes neither that child nor the chain', () => {
+test('editing a recurring task keeps its rule; resolveOccurrences drives the whole chain', () => {
   const db = openTaskDb()
-  const task = createTask(db, fullInput('Weekly tidy-up', recurrence('weekly'), '2026-10-26'))
+  const task = recurring(db)
   setTaskStatus(db, task.id, 'done')
-  const child = listTasks(db).find((item) => item.parentTaskId === task.id)
-  assert.ok(child)
-  // the parent is edited hard: new title, notes, due date, priority, tags and rule
-  updateTask(db, task.id, fullInput('Tidy up', recurrence('monthly'), '2026-10-19', {
+  // edit the row hard: new title, notes, rule and tags
+  updateTask(db, task.id, fullInput('Tidy up', recurrence('monthly'), '2026-10-26', {
     status: 'done' as const, notes: 'edited', priority: 'low' as const, project: 'Work', tags: ['new']
   }))
-  const afterEdit = listTasks(db).find((item) => item.id === child.id)
-  assert.ok(afterEdit)
-  assert.equal(afterEdit.title, 'Weekly tidy-up')
-  assert.equal(afterEdit.notes, '')
-  assert.equal(afterEdit.dueDate, '2026-11-02')
-  assert.deepEqual(afterEdit.recurrence, recurrence('weekly'))
-  assert.deepEqual(afterEdit.tags, [])
-  // even reopening and re-completing the parent creates no second child
-  setTaskStatus(db, task.id, 'todo')
-  setTaskStatus(db, task.id, 'done')
-  assert.equal(childrenOf(db, task.id).length, 1)
-  // completing the child advances the chain on the rule copied at its creation,
-  // not on the parent's new monthly rule
-  setTaskStatus(db, child.id, 'done')
-  const grandchild = listTasks(db).find((item) => item.parentTaskId === child.id)
-  assert.ok(grandchild)
-  assert.equal(grandchild.dueDate, '2026-11-09')
-  // and every row of the chain holds at most its one child: no forks anywhere
-  for (const row of listTasks(db)) assert.equal(childrenOf(db, row.id).length <= 1, true)
+  const loaded = listTasks(db)[0]
+  assert.equal(loaded.title, 'Tidy up')
+  assert.deepEqual(loaded.recurrenceRule, recurrence('monthly'))
+  assert.equal(loaded.status, 'done')
+  assert.equal(listTasks(db).length, 1) // still exactly one row
   db.close()
 })
 
-test('deleting the parent unlinks the child, which continues the series on its own rule', () => {
+test('soft delete hides a task from every view; restore brings it back', () => {
   const db = openTaskDb()
-  const task = createTask(db, fullInput('Water plants', recurrence('weekly'), '2026-10-26'))
-  setTaskStatus(db, task.id, 'done')
-  const child = listTasks(db).find((item) => item.parentTaskId === task.id)
-  assert.ok(child)
-  deleteTask(db, task.id)
-  const kept = listTasks(db).find((item) => item.id === child.id)
-  assert.ok(kept)
-  assert.equal(kept.parentTaskId, null)
-  assert.equal(kept.status, 'todo')
-  assert.equal(kept.dueDate, '2026-11-02')
-  // the orphaned occurrence is now an ordinary recurring task
-  setTaskStatus(db, kept.id, 'done')
-  const next = childrenOf(db, kept.id)
-  assert.equal(next.length, 1)
-  assert.equal(next[0].dueDate, '2026-11-09')
+  const task = recurring(db)
+  softDeleteTask(db, task.id)
+  assert.deepEqual(listTasks(db), []) // gone from the views...
+  const deleted = listTasks(db) // ...and restore brings it back
+  restoreTask(db, task.id)
+  assert.equal(listTasks(db).length, 1)
+  assert.equal(listTasks(db)[0].deletedAt, null)
+  assert.equal(deleted.length, 0)
   db.close()
 })
 
-test('backup export/import round trips recurrence links and spawns nothing extra on import', () => {
-  const source = openTaskDb()
-  const task = createTask(source, fullInput('Water plants', recurrence('weekly'), '2026-10-26', { notes: 'Careful', tags: ['plants'], subtasks: [{ title: 'Fill can', done: true }, { title: 'Water', done: false }] }))
-  setTaskStatus(source, task.id, 'done')
-  const child = listTasks(source).find((item) => item.parentTaskId === task.id)
-  assert.ok(child)
-  setTaskStatus(source, child.id, 'done')
-  const grandchild = listTasks(source).find((item) => item.parentTaskId === child.id)
-  assert.ok(grandchild)
+test('resolveOccurrences advances a done recurring task when its next date arrives', () => {
+  const done = (overdue: string | null): Task => ({ ...make(1, '2026-10-26', 'done'), recurrenceRule: recurrence('weekly'), recurrenceNext: overdue, completedAt: '2026-10-26T12:00:00.000Z' })
+  // not due yet: stays done; due/overdue: flips to todo with a new next date and no completion stamp
+  assert.equal(resolveOccurrences([done('2026-11-10')], '2026-11-02')[0].status, 'done')
+  const advanced = resolveOccurrences([done('2026-10-27')], '2026-11-02')[0]
+  assert.equal(advanced.status, 'todo')
+  assert.equal(advanced.completedAt, null)
+  assert.equal(advanced.recurrenceNext, '2026-11-03')
+  // no rule = never advanced
+  const plain = resolveOccurrences([{ ...make(2, null, 'done') }], '2026-11-02')[0]
+  assert.equal(plain.status, 'done')
+  // the input list is not mutated
+  const original = done('2026-10-27')
+  resolveOccurrences([original], '2026-11-02')
+  assert.equal(original.status, 'done')
+})
 
-  const parsed = parseBackup(JSON.stringify(collectBackup(source)), MIGRATIONS.length)
-  const target = openTaskDb()
-  // a database with unrelated data is fully replaced, not merged
-  void createTask(target, fullInput('Stray', null, null))
-  restoreBackup(target, parsed)
-  assert.deepEqual(listTasks(target).map((t) => t.id).sort((a, b) => a - b), [task.id, child.id, grandchild.id])
-  // original ids are kept (not remapped), so the links point at the very same rows
-  const loaded = listTasks(target)
-  const restoredChild = loaded.find((t) => t.id === child.id)
-  assert.ok(restoredChild)
-  assert.equal(restoredChild.parentTaskId, task.id)
-  assert.equal(restoredChild.dueDate, '2026-11-02')
-  assert.deepEqual(restoredChild.recurrence, recurrence('weekly'))
-  const restoredParent = loaded.find((t) => t.id === task.id)
-  assert.ok(restoredParent)
-  assert.equal(restoredParent.status, 'done')
-  assert.deepStrictEqual(restoredChild.subtasks.map((s) => s.title), ['Fill can', 'Water'])
-  // importing again is idempotent: same rows, still exactly one child per parent
-  restoreBackup(target, parsed)
-  assert.deepEqual(listTasks(target).map((t) => t.id).sort((a, b) => a - b), [task.id, child.id, grandchild.id])
-  for (const row of listTasks(target)) assert.equal(childrenOf(target, row.id).length <= 1, true)
-  // and the restored chain still behaves by the rule, one link per completion
-  setTaskStatus(target, grandchild.id, 'done')
-  const next = childrenOf(target, grandchild.id)
-  assert.equal(next.length, 1)
-  assert.equal(next[0].dueDate, '2026-11-16')
-  target.close()
+test('reorder writes a position per id, in the order given', () => {
+  const db = openTaskDb()
+  const a = createTask(db, fullInput('A', null, null)).id
+  const b = createTask(db, fullInput('B', null, null)).id
+  const c = createTask(db, fullInput('C', null, null)).id
+  reorderTasks(db, [c, a, b])
+  assert.deepEqual(listTasks(db).map((t) => t.id), [c, a, b])
+  db.close()
 })
 
 // ---- task editor input validation (src/shared/tasks.ts) ----
 
 const validTaskInput = {
-  title: 'Water plants', notes: '', status: 'todo', priority: 'medium', dueDate: null,
-  project: null, tags: [], recurrence: null, parentTaskId: null, subtasks: []
+  title: 'Water plants', notes: '', status: 'todo', priority: 'medium', dueDate: null, dueTime: null,
+  project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: []
 } as unknown as Parameters<typeof taskInputProblems>[0]
 
 test('task input validation returns one exact, visible fix per bad field', () => {
   assert.deepEqual(taskInputProblems(validTaskInput), {})
-  const bad = taskInputProblems({ ...validTaskInput, title: '   ', status: 'later', priority: 'urgent', dueDate: '2026-02-30',
-    recurrence: { frequency: 'hourly', intervalDays: 1 }, tags: 'work', subtasks: 'kit', parentTaskId: -2 } as never)
+  const bad = taskInputProblems({ ...validTaskInput, title: '   ', status: 'later', priority: 'urgent', dueDate: '2026-02-30', dueTime: '25:99',
+    recurrenceRule: { frequency: 'hourly', intervalDays: 1 }, tags: 'work', subtasks: 'kit' } as never)
   assert.deepEqual(bad, {
     title: 'Give the task a title.',
     status: 'Choose a valid task status.',
     priority: 'Choose a valid task priority.',
     dueDate: 'Due date must be a real calendar date, like 2026-10-25.',
-    recurrence: 'Choose a valid recurrence.',
+    dueTime: 'Due time must be between 00:00 and 23:59.',
+    recurrenceRule: 'Choose a valid recurrence.',
     tags: 'Tags must be a list of tag names.',
-    subtasks: 'Subtasks must be a list of checklist items with a title each.',
-    parentTaskId: 'Parent task id is invalid.'
+    subtasks: 'Subtasks must be a list of checklist items with a title each.'
   })
 })
 
 test('custom recurrence interval bounds are refused with an exact fix', () => {
   const withCustom = (intervalDays: number) =>
-    taskInputProblems({ ...validTaskInput, recurrence: { frequency: 'custom', intervalDays } } as unknown as never)
-  assert.equal(withCustom(0).recurrence, 'Custom repeat must be between 1 and 3650 days.')
-  assert.equal(withCustom(3651).recurrence, 'Custom repeat must be between 1 and 3650 days.')
+    taskInputProblems({ ...validTaskInput, recurrenceRule: { frequency: 'custom', intervalDays } } as unknown as never)
+  assert.equal(withCustom(0).recurrenceRule, 'Custom repeat must be between 1 and 3650 days.')
+  assert.equal(withCustom(3651).recurrenceRule, 'Custom repeat must be between 1 and 3650 days.')
   assert.deepEqual(withCustom(90), {})
 })
 
@@ -337,6 +311,69 @@ test('an impossible due date is refused; a past one stays allowed because overdu
   assert.deepEqual(taskInputProblems({ ...validTaskInput, dueDate: '2025-10-25' } as unknown as never), {})
   assert.ok(taskInputProblems({ ...validTaskInput, dueDate: '2026-02-30' } as unknown as never).dueDate)
   assert.ok(taskInputProblems({ ...validTaskInput, dueDate: 'not-a-date' } as unknown as never).dueDate)
+})
+
+// ---- backup round trip: export -> import keeps every task field (Fix 2 regression test) ----
+
+test('backup export/import round-trips the full migration-9 task schema', () => {
+  const source = openTaskDb()
+  const plain = createTask(source, fullInput('Plain', null, '2026-10-25', { status: 'todo' as const, priority: 'high' as const }))
+  const rec = createTask(source, fullInput('Weekly', recurrence('weekly'), '2026-10-26', { tags: ['plants'], subtasks: [{ title: 'Fill can', done: true }] }))
+  setTaskStatus(source, rec.id, 'done') // stamps recurrence_next
+  const ghost = createTask(source, fullInput('Trash', null, null))
+  softDeleteTask(source, ghost.id) // trash state must survive a restore
+
+  const parsed = parseBackup(JSON.stringify(collectBackup(source)), MIGRATIONS.length)
+  const target = openTaskDb()
+  void createTask(target, fullInput('Stray', null, null)) // import fully replaces, never merges
+  restoreBackup(target, parsed)
+
+  const loaded = listTasks(target)
+  assert.deepEqual(loaded.map((t) => t.title).sort(), ['Plain', 'Weekly']) // trash invisible in views
+  const restoredPlain = loaded.find((t) => t.id === plain.id)! // original ids preserved
+  assert.equal(restoredPlain.dueDate, '2026-10-25')
+  assert.equal(restoredPlain.priority, 'high')
+  const restoredRec = loaded.find((t) => t.id === rec.id)!
+  assert.deepEqual(restoredRec.recurrenceRule, recurrence('weekly'))
+  assert.equal(restoredRec.recurrenceNext, '2026-11-02') // the stamped next occurrence survived
+  assert.equal(restoredRec.status, 'done')
+  assert.deepEqual(restoredRec.tags, ['plants'])
+  assert.deepEqual(restoredRec.subtasks.map((s) => s.title), ['Fill can'])
+  // importing twice is idempotent (delete-all then re-insert)
+  restoreBackup(target, parsed)
+  assert.equal(listTasks(target).length, 2)
+  // and the restored chain still advances on completion
+  setTaskStatus(target, restoredRec.id, 'done')
+  const again = listTasks(target, '2026-11-02').find((t) => t.id === rec.id)!
+  assert.equal(again.status, 'todo')
+  assert.equal(again.recurrenceNext, '2026-11-09')
+  target.close()
+  source.close()
+})
+
+test('a restore clears the automation activity so it never mixes machine histories', () => {
+  const source = openTaskDb()
+  void createTask(source, fullInput('Done deal', null, null))
+  // A row in the SOURCE's activity log. (Automations are off by default, so tests seed the
+  // activity table directly rather than relying on a rule firing.)
+  source.prepare("INSERT INTO automation_events (rule, event, event_key, label, entry_id, created_at) VALUES ('loss-reflection', 'trade-closed', 'trade:1', 'drafted a reflection', NULL, '2026-10-01T00:00:00Z')").run()
+  assert.equal((source.prepare('SELECT COUNT(*) AS n FROM automation_events').get() as { n: number }).n, 1)
+
+  // Backups deliberately EXCLUDE automation activity (machine-local, not user data):
+  const backup = collectBackup(source) as unknown as Record<string, unknown>
+  assert.equal('automationEvents' in backup, false)
+
+  const target = openTaskDb()
+  // The target has its OWN unrelated automation history (what a second machine would look like).
+  target.prepare("INSERT INTO automation_events (rule, event, event_key, label, entry_id, created_at) VALUES ('other-machine', 'task-completed', 'task:99', 'made elsewhere', NULL, '2020-01-01T00:00:00Z')").run()
+  assert.equal((target.prepare('SELECT COUNT(*) AS n FROM automation_events').get() as { n: number }).n, 1)
+
+  // Restoring wipes it: the imported data starts its own history on this machine.
+  const parsed = parseBackup(JSON.stringify(backup), MIGRATIONS.length)
+  restoreBackup(target, parsed)
+  assert.equal((target.prepare('SELECT COUNT(*) AS n FROM automation_events').get() as { n: number }).n, 0)
+  target.close()
+  source.close()
 })
 
 console.log(`\n${n} task checks passed`)

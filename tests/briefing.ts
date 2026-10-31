@@ -28,7 +28,7 @@ const WEEKEND = [5, 6]
 const task = (id: number, dueDate: string | null, opts: { status?: Task['status']; priority?: Task['priority']; completedAt?: string | null } = {}): Task => ({
   id, title: `Task ${id}`, notes: '', status: opts.status ?? 'todo',
   priority: opts.priority ?? 'medium', dueDate, createdAt: '2026-01-01', completedAt: opts.completedAt ?? null,
-  project: null, tags: [], sortOrder: id, recurrence: null, parentTaskId: null, subtasks: []
+  deletedAt: null, dueTime: null, project: null, tags: [], position: id, recurrenceRule: null, recurrenceNext: null, subtasks: []
 })
 
 const empty = { trades: [] as Trade[], goals: [] as SavingsGoal[], txs: [] as SavingsTx[], habits: [] as Habit[], tasks: [] as Task[], entries: [] as LogEntry[] }

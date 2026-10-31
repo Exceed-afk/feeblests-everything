@@ -31,7 +31,7 @@ const habit = (name: string, days: number[], checkins: string[]): Habit => ({
 const entry = (date: string, mood: Mood | null): LogEntry => ({ id: id++, date, title: 'A day', body: '', mood, tags: [], createdAt: '', updatedAt: '' })
 const task = (completedAt: string | null): Task => ({
   id: id++, title: 'T', notes: '', status: completedAt ? 'done' : 'todo', priority: 'medium', dueDate: null,
-  createdAt: ROWS_FROM, completedAt, project: null, tags: [], sortOrder: 0, recurrence: null, parentTaskId: null, subtasks: []
+  createdAt: ROWS_FROM, completedAt, deletedAt: null, dueTime: null, project: null, tags: [], position: 0, recurrenceRule: null, recurrenceNext: null, subtasks: []
 })
 
 const EVERY = [0, 1, 2, 3, 4, 5, 6]

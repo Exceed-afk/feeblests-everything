@@ -386,7 +386,7 @@ test('the wording says "this" while the period runs and "that" once it is over; 
 test('created and completed task counts are included in a period and completed task tile data', () => {
   const task = (id: number, createdAt: string, completedAt: string | null): Task => ({
     id, title: `Task ${id}`, notes: '', status: completedAt ? 'done' : 'todo', priority: 'medium', dueDate: null,
-    createdAt, completedAt, project: null, tags: [], sortOrder: id, recurrence: null, parentTaskId: null, subtasks: []
+    createdAt, completedAt, deletedAt: null, dueTime: null, project: null, tags: [], position: id, recurrenceRule: null, recurrenceNext: null, subtasks: []
   })
   const r = week({ tasks: [task(1, '2026-10-20T23:00:00-07:00', null), task(2, '2026-10-21T00:30:00+02:00', '2026-10-22T23:00:00-07:00'), task(3, '2026-10-26T00:00:00Z', null)] })
   assert.deepEqual(r.tasks, { created: 2, completed: 1 })

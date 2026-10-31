@@ -171,8 +171,8 @@ export function Capture() {
         const title = taskTitle.trim()
         if (!title) return setError('Write a task first.')
         setBusy(true)
-        await window.api.tasks.create({ title, notes: '', status: 'todo', priority: 'medium', dueDate: day,
-          project: '', tags: [], subtasks: [], recurrence: null, parentTaskId: null })
+        await window.api.tasks.create({ title, notes: '', status: 'todo', priority: 'medium', dueDate: day, dueTime: null,
+          project: '', tags: [], subtasks: [], recurrenceRule: null, recurrenceNext: null })
         setTaskTitle('')
         await finished('Task added for today')
       } else {

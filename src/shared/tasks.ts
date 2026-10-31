@@ -21,7 +21,7 @@ export function addTaskMonths(date: string, months: number): string {
   return first.toISOString().slice(0, 10)
 }
 
-export function nextTaskDate(date: string, recurrence: Task['recurrence']): string | null {
+export function nextTaskDate(date: string, recurrence: Task['recurrenceRule']): string | null {
   if (!recurrence) return null
   if (recurrence.frequency === 'daily') return addTaskDays(date, 1)
   if (recurrence.frequency === 'weekly') return addTaskDays(date, 7)
@@ -30,11 +30,15 @@ export function nextTaskDate(date: string, recurrence: Task['recurrence']): stri
 }
 
 export function taskMatchesView(task: Task, view: TaskView, today: string): boolean {
+  // Soft-deleted tasks never appear in any view.
+  if (task.deletedAt !== null) return false
   if (view === 'completed') return task.status === 'done'
   if (task.status === 'done') return false
-  if (view === 'today') return task.dueDate === today
-  if (view === 'upcoming') return task.dueDate !== null && task.dueDate > today
-  if (view === 'overdue') return task.dueDate !== null && task.dueDate < today
+  // A recurring task shows on its next due date (recurrenceNext), falling back to dueDate.
+  const due = task.recurrenceNext ?? task.dueDate
+  if (view === 'today') return due !== null && due <= today
+  if (view === 'upcoming') return due !== null && due > today
+  if (view === 'overdue') return due !== null && due < today
   return true
 }
 
@@ -64,6 +68,23 @@ export function filterTasks(tasks: Task[], filter: TaskFilter, today: string): T
     && (!filter.project || task.project === filter.project)
     && (!filter.tag || task.tags.includes(filter.tag))
     && taskMatchesText(task, filter.text ?? ''))
+}
+
+// Resolve recurring-task instances at read time. A task with a recurrenceRule and a
+// recurrenceNext on or before today is treated as due now; when its status is 'done'
+// the occurrence is advanced to the next date and the task returns to 'todo'.
+// Returns a new array; the original task objects are not mutated.
+export function resolveOccurrences(tasks: Task[], today: string): Task[] {
+  return tasks.map((task) => {
+    if (!task.recurrenceRule || task.recurrenceNext === null || task.recurrenceNext > today) return task
+    if (task.status === 'done') {
+      // Auto-advance: mark the completed occurrence as done for its due date and
+      // schedule the next one. The next read will show the new occurrence.
+      const next = nextTaskDate(task.recurrenceNext, task.recurrenceRule)
+      return { ...task, status: 'todo', completedAt: null, recurrenceNext: next ?? null }
+    }
+    return task
+  })
 }
 
 // The board shows the same filtered tasks as the list, split into its three status columns.
@@ -100,13 +121,19 @@ export function taskWeekStart(date: string): string {
 export function taskDashboard(tasks: Task[], today: string): TaskDashboard {
   const weekStart = taskWeekStart(today)
   const weekEnd = addTaskDays(weekStart, 6)
-  const active = tasks.filter((task) => task.status !== 'done')
+  const active = tasks.filter((task) => task.status !== 'done' && task.deletedAt === null)
   return {
-    dueToday: active.filter((task) => task.dueDate === today).length,
-    overdue: active.filter((task) => task.dueDate !== null && task.dueDate < today).length,
+    dueToday: active.filter((task) => {
+      const due = task.recurrenceNext ?? task.dueDate
+      return due !== null && due === today
+    }).length,
+    overdue: active.filter((task) => {
+      const due = task.recurrenceNext ?? task.dueDate
+      return due !== null && due < today
+    }).length,
     completedThisWeek: tasks.filter((task) => {
       const day = localDay(task.completedAt)
-      return task.status === 'done' && day !== null && day >= weekStart && day <= weekEnd
+      return task.status === 'done' && task.deletedAt === null && day !== null && day >= weekStart && day <= weekEnd
     }).length
   }
 }
@@ -116,9 +143,9 @@ export function taskDashboard(tasks: Task[], today: string): TaskDashboard {
 // each message next to its field, and the main process throws the first one, so the UI and
 // the database layer run identical rules from this one function. Past due dates stay allowed:
 // an overdue task is a real state here (the Overdue view).
-export type TaskField = 'title' | 'status' | 'priority' | 'dueDate' | 'recurrence' | 'tags' | 'subtasks' | 'parentTaskId'
+export type TaskField = 'title' | 'status' | 'priority' | 'dueDate' | 'dueTime' | 'recurrenceRule' | 'tags' | 'subtasks'
 // The order messages surface in; the first bad field is the one the editor focuses.
-export const TASK_FIELD_ORDER: TaskField[] = ['title', 'status', 'priority', 'dueDate', 'recurrence', 'tags', 'subtasks', 'parentTaskId']
+export const TASK_FIELD_ORDER: TaskField[] = ['title', 'status', 'priority', 'dueDate', 'dueTime', 'recurrenceRule', 'tags', 'subtasks']
 
 export function taskInputProblems(input: TaskInput): Partial<Record<TaskField, string>> {
   const problems: Partial<Record<TaskField, string>> = {}
@@ -132,13 +159,24 @@ export function taskInputProblems(input: TaskInput): Partial<Record<TaskField, s
     if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day)
       problems.dueDate = 'Due date must be a real calendar date, like 2026-10-25.'
   }
-  const recurrence = input.recurrence
-  if (recurrence !== null && recurrence !== undefined) {
-    if (typeof recurrence !== 'object' || !['daily', 'weekly', 'monthly', 'custom'].includes(String(recurrence.frequency)))
-      problems.recurrence = 'Choose a valid recurrence.'
-    else if (recurrence.frequency === 'custom' &&
-      (!Number.isInteger(recurrence.intervalDays) || recurrence.intervalDays < 1 || recurrence.intervalDays > 3650))
-      problems.recurrence = 'Custom repeat must be between 1 and 3650 days.'
+  const dueTime = input.dueTime
+  if (dueTime !== null && dueTime !== undefined && dueTime !== '') {
+    if (!/^\d{2}:\d{2}$/.test(dueTime))
+      problems.dueTime = 'Due time must be HH:MM, like 14:00.'
+    else {
+      const [h, m] = dueTime.split(':').map(Number)
+      if (h < 0 || h > 23 || m < 0 || m > 59)
+        problems.dueTime = 'Due time must be between 00:00 and 23:59.'
+    }
+  }
+
+  const recurrenceRule = input.recurrenceRule
+  if (recurrenceRule !== null && recurrenceRule !== undefined) {
+    if (typeof recurrenceRule !== 'object' || !['daily', 'weekly', 'monthly', 'custom'].includes(String(recurrenceRule.frequency)))
+      problems.recurrenceRule = 'Choose a valid recurrence.'
+    else if (recurrenceRule.frequency === 'custom' &&
+      (!Number.isInteger(recurrenceRule.intervalDays) || recurrenceRule.intervalDays < 1 || recurrenceRule.intervalDays > 3650))
+      problems.recurrenceRule = 'Custom repeat must be between 1 and 3650 days.'
   }
   if (!Array.isArray(input.tags) || !(input.tags as unknown[]).every((tag: unknown) => typeof tag === 'string'))
     problems.tags = 'Tags must be a list of tag names.'
@@ -146,8 +184,7 @@ export function taskInputProblems(input: TaskInput): Partial<Record<TaskField, s
     !(input.subtasks as unknown[]).every((subtask: unknown) =>
       subtask !== null && typeof subtask === 'object' && typeof (subtask as { title: unknown }).title === 'string'))
     problems.subtasks = 'Subtasks must be a list of checklist items with a title each.'
-  if (input.parentTaskId !== null &&
-    (typeof input.parentTaskId !== 'number' || !Number.isInteger(input.parentTaskId) || input.parentTaskId <= 0))
-    problems.parentTaskId = 'Parent task id is invalid.'
+
   return problems
 }
+

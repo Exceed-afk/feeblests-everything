@@ -32,9 +32,9 @@ export async function saveProposal(
   }
   if (proposal.kind === 'task') {
     await window.api.tasks.create({
-      title: proposal.title, notes: '', status: 'todo', priority: proposal.priority,
+      title: proposal.title, notes: '', status: 'todo', priority: proposal.priority, dueTime: null,
       dueDate: proposal.dueDate ?? day, project: '', tags: [], subtasks: [],
-      recurrence: proposal.recurrence, parentTaskId: null
+      recurrenceRule: proposal.recurrence ? { frequency: proposal.recurrence.frequency, intervalDays: proposal.recurrence.intervalDays } : null, recurrenceNext: null
     })
     const bits = proposal.recurrence
       ? ` repeats ${proposal.recurrence.frequency === 'custom' ? `every ${proposal.recurrence.intervalDays} days` : proposal.recurrence.frequency}`

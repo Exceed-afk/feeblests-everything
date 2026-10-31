@@ -269,7 +269,7 @@ export const testBuilders = (startId = 1): TestBuilders => {
     }),
     task: (id_, createdAt, completedAt, dueDate = null, status: Task['status'] = 'todo', priority: Task['priority'] = 'medium'): Task => ({
       id: id_, title: `Task ${id_}`, notes: '', status, priority, dueDate, createdAt, completedAt,
-      project: null, tags: [], sortOrder: id_, recurrence: null, parentTaskId: null, subtasks: []
+      dueTime: null, deletedAt: null, project: null, tags: [], position: id_, recurrenceRule: null, recurrenceNext: null, subtasks: []
     })
   }
 }

@@ -16,7 +16,13 @@ export interface BackupGoal { id: number; name: string; target: number | null; n
 export interface BackupHabit { id: number; name: string; notes: string; days: number[]; archived: boolean; startDate: string; createdAt: string; updatedAt: string }
 export interface BackupCheckin { habitId: number; date: string; createdAt: string }
 export interface BackupTx { id: number; goalId: number; date: string; kind: TxKind; amount: number; note: string; createdAt: string; updatedAt: string }
-export interface BackupTask { id: number; title: string; notes: string; status: TaskStatus; priority: TaskPriority; dueDate: string | null; createdAt: string; completedAt: string | null; project: string | null; tags: string[]; sortOrder: number; recurrence: TaskRecurrence | null; parentTaskId: number | null }
+export interface BackupTask {
+  id: number; title: string; notes: string; status: TaskStatus; priority: TaskPriority
+  dueDate: string | null; dueTime: string | null
+  createdAt: string; completedAt: string | null; deletedAt: string | null
+  project: string | null; tags: string[]; position: number
+  recurrenceRule: TaskRecurrence | null; recurrenceNext: string | null
+}
 export interface BackupTaskSubtask { id: number; taskId: number; title: string; done: boolean; sortOrder: number }
 
 export interface BackupFile {
@@ -52,7 +58,7 @@ const isStrArray = (v: unknown): boolean => Array.isArray(v) && v.every(isStr)
 // `maxSchema` is the newest database version this app understands.
 export function parseBackup(text: string, maxSchema: number): BackupFile {
   let data: unknown
-  try { data = JSON.parse(text.replace(/^﻿/, '')) } catch { throw new Error('This file is not valid JSON.') }
+  try { data = JSON.parse(text.replace(/^/, '')) } catch { throw new Error('This file is not valid JSON.') }
   if (!isObj(data) || data.app !== BACKUP_APP) throw new Error("This is not a Feeblest's Everything backup file.")
   if (data.format !== BACKUP_FORMAT) throw new Error('This backup was made by a different version of the app and cannot be read.')
   if (!isInt(data.schemaVersion) || data.schemaVersion > maxSchema)
@@ -108,14 +114,33 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
   const tasks = data.tasks as Record<string, unknown>[]
   // Tasks have no inserted/updated stamp pair (the table only stores created_at), so they
   // cannot use the shared common() check that logbook, trades, goals and habits do.
+  // Backward compatibility: files made before migration 9 may carry sortOrder/recurrence/
+  // parentTaskId instead of position/recurrenceRule; the old fields map onto the new ones
+  // and the extras (dueTime, deletedAt) default sensibly.
+  const numOrDefault = (v: unknown, fallback: number): number => (Number.isInteger(v) || typeof v === 'number' && Number.isFinite(v) ? (v as number) : fallback)
   tasks.forEach((r, i) => {
-    if (!isObj(r) || !isInt(r.id) || !isStr(r.createdAt) || !isStr(r.title) || !r.title.trim() || !isStr(r.notes) ||
+    if (!isObj(r)) bad('Task', i, '?')
+    if (!isInt(r.id) || !isStr(r.createdAt) || !isStr(r.title) || !r.title.trim() || !isStr(r.notes) ||
       !['todo', 'in-progress', 'done'].includes(String(r.status)) || !['low', 'medium', 'high'].includes(String(r.priority)) ||
-      !(r.dueDate === null || isDate(r.dueDate)) || !(r.completedAt === null || isStr(r.completedAt)) ||
-      !(r.project === null || isStr(r.project)) || !isStrArray(r.tags) || !Number.isInteger(r.sortOrder) ||
-      !(r.recurrence === null || (isObj(r.recurrence) && ['daily', 'weekly', 'monthly', 'custom'].includes(String(r.recurrence.frequency)) &&
-        (r.recurrence.frequency !== 'custom' || (Number.isInteger(r.recurrence.intervalDays) && Number(r.recurrence.intervalDays) > 0)))) ||
-      !(r.parentTaskId === null || isInt(r.parentTaskId))) bad('Task', i, isObj(r) ? r.id : '?')
+      !(r.dueDate === null || isDate(r.dueDate)) || !(r.dueTime === null || r.dueTime === undefined || isStr(r.dueTime)) ||
+      !(r.completedAt === null || isStr(r.completedAt)) ||
+      !(r.deletedAt === null || r.deletedAt === undefined || isStr(r.deletedAt)) ||
+      !(r.project === null || isStr(r.project)) || !isStrArray(r.tags) ||
+      !(r.recurrenceRule === null || r.recurrenceRule === undefined || (isObj(r.recurrenceRule) &&
+        ['daily', 'weekly', 'monthly', 'custom'].includes(String(r.recurrenceRule.frequency)) &&
+        (r.recurrenceRule.frequency !== 'custom' || (Number.isInteger(r.recurrenceRule.intervalDays) && Number(r.recurrenceRule.intervalDays) > 0)))) ||
+      !(r.recurrenceNext === null || r.recurrenceNext === undefined || isDate(r.recurrenceNext)))
+      bad('Task', i, typeof r.id === 'number' ? r.id : '?')
+    // Normalize old-shape files into the current shape so restoreBackup always sees the new columns.
+    const legacyRule = isObj(r.recurrence) ? r.recurrence : null
+    r.dueTime = r.dueTime ?? null
+    r.deletedAt = r.deletedAt ?? null
+    r.position = numOrDefault(r.position, numOrDefault(r.sortOrder, typeof r.id === 'number' ? r.id : 0))
+    r.recurrenceRule = r.recurrenceRule ?? legacyRule
+    r.recurrenceNext = r.recurrenceNext ?? null
+    r.sortOrder = undefined
+    r.recurrence = undefined
+    r.parentTaskId = undefined
   })
   const taskSubtasks = data.taskSubtasks as Record<string, unknown>[]
   taskSubtasks.forEach((r, i) => {
@@ -133,20 +158,6 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
     if (!goalIds.has(t.goalId)) throw new Error(`Savings transaction ${t.id} belongs to goal ${t.goalId}, which is not in the file.`)
 
   const taskIds = seen(tasks as never, 'The tasks')
-  for (const t of tasks as unknown as BackupTask[]) {
-    if (t.parentTaskId === t.id) throw new Error(`Task ${t.id} cannot be its own parent.`)
-    if (t.parentTaskId !== null && !taskIds.has(t.parentTaskId)) throw new Error(`Task ${t.id} has a parent ${t.parentTaskId}, which is not in the file.`)
-  }
-  // The app's rule (top of src/main/tasks.ts): a task can have at most one child occurrence,
-  // ever, so a file carrying two under the same parent would break that database the moment
-  // it is restored — reject it here with a plain message instead of an import that fails halfway.
-  const childOf = new Map<number, number>()
-  for (const t of tasks as unknown as BackupTask[]) {
-    if (t.parentTaskId === null) continue
-    const first = childOf.get(t.parentTaskId)
-    if (first !== undefined) throw new Error(`Tasks ${first} and ${t.id} both have the parent ${t.parentTaskId}; a task can have at most one child occurrence.`)
-    childOf.set(t.parentTaskId, t.id)
-  }
   seen(taskSubtasks as never, 'The task subtasks')
   for (const s of taskSubtasks as unknown as BackupTaskSubtask[]) if (!taskIds.has(s.taskId)) throw new Error(`Task subtask ${s.id} belongs to task ${s.taskId}, which is not in the file.`)
 
@@ -194,5 +205,5 @@ export function tradesToCsv(trades: BackupTrade[]): string {
       cell(t.tags.join(' '), true), cell(t.notes, true)
     ].join(','))
   }
-  return '﻿' + lines.join('\r\n') + '\r\n'
+  return '' + lines.join('\r\n') + '\r\n'
 }

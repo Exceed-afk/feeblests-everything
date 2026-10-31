@@ -366,10 +366,14 @@ export interface TaskRecurrence { frequency: 'daily' | 'weekly' | 'monthly' | 'c
 export interface TaskSubtask { id: number; taskId: number; title: string; done: boolean; sortOrder: number }
 export interface Task {
   id: number; title: string; notes: string; status: TaskStatus; priority: TaskPriority; dueDate: string | null
-  createdAt: string; completedAt: string | null; project: string | null; tags: string[]; sortOrder: number
-  recurrence: TaskRecurrence | null; parentTaskId: number | null; subtasks: TaskSubtask[]
+  dueTime: string | null // "HH:MM" or null
+  createdAt: string; completedAt: string | null; deletedAt: string | null // soft delete timestamp
+  project: string | null; tags: string[]; position: number // manual sort position (replaces sort_order)
+  recurrenceRule: TaskRecurrence | null // the repeat rule, one row owns it
+  recurrenceNext: string | null // next due date resolved from the rule, or null
+  subtasks: TaskSubtask[]
 }
-export type TaskInput = Pick<Task, 'title' | 'notes' | 'status' | 'priority' | 'dueDate' | 'project' | 'tags' | 'recurrence' | 'parentTaskId'> & {
+export type TaskInput = Pick<Task, 'title' | 'notes' | 'status' | 'priority' | 'dueDate' | 'dueTime' | 'project' | 'tags' | 'recurrenceRule' | 'recurrenceNext'> & {
   subtasks: Pick<TaskSubtask, 'title' | 'done'>[]
 }
 export interface TaskFilter { view?: TaskView; text?: string; priority?: TaskPriority; project?: string; tag?: string }
@@ -569,3 +573,5 @@ export interface CalendarData {
   weeks: CalendarDay[][] // 4 to 6 rows of 7
   summary: CalendarSummary
 }
+
+

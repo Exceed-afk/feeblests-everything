@@ -71,8 +71,8 @@ export function Tasks(_props: ModuleProps) {
   const add = async (title = quick) => {
     if (!title.trim()) return
     try {
-      await window.api.tasks.create({ title: title.trim(), notes: '', status: 'todo', priority: 'medium', dueDate: view === 'today' ? day : null,
-        project: '', tags: [], subtasks: [], recurrence: null, parentTaskId: null })
+      await window.api.tasks.create({ title: title.trim(), notes: '', status: 'todo', priority: 'medium', dueDate: view === 'today' ? day : null, dueTime: null,
+        project: '', tags: [], subtasks: [], recurrenceRule: null, recurrenceNext: null })
       setQuick(''); setEditing(null); await refresh()
     } catch (e) { setError(errMsg(e)) }
   }
@@ -221,7 +221,7 @@ export function Tasks(_props: ModuleProps) {
             text={tasks.length === 0 ? 'Add one small thing you would like to get done.' : 'Try another view, search term, or clear a filter.'}
             action={<button className="btn-primary" onClick={() => setEditing('new')}><Plus size={16} /> Create a task</button>} />}
           {filtered.map((task) => {
-            const overdue = task.dueDate !== null && task.dueDate < day && task.status !== 'done'
+            const overdue = (task.recurrenceNext ?? task.dueDate) !== null && ((task.recurrenceNext ?? task.dueDate) || '') < day && task.status !== 'done'
             const done = task.status === 'done'
             const picked = selected.has(task.id)
             return (
@@ -243,7 +243,7 @@ export function Tasks(_props: ModuleProps) {
                     {task.dueDate && <span className={`flex items-center gap-1 ${overdue ? 'text-neg font-medium' : ''}`}><CalendarDays size={12} />{overdue ? 'Overdue · ' : ''}{formatDate(task.dueDate)}</span>}
                     {task.project && <span>{task.project}</span>}
                     {task.tags.map((t) => <span key={t}>#{t}</span>)}
-                    {task.recurrence && <span title={`Repeats ${task.recurrence.frequency}`}><Repeat2 size={12} aria-label="Recurring" /></span>}
+                    {task.recurrenceRule && <span title={`Repeats ${task.recurrenceRule.frequency}`}><Repeat2 size={12} aria-label="Recurring" /></span>}
                     {task.subtasks.length > 0 && <span>{task.subtasks.filter((s) => s.done).length}/{task.subtasks.length} checklist</span>}
                   </span>
                 </button>

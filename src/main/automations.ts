@@ -19,6 +19,13 @@ import {
 import { getSettings, setSetting } from './db'
 import { getDb } from './db'
 
+// Reads settings from ANY database handle (the app's global one, or a test's in-memory one),
+// so emitAutomation works before the app's global handle exists.
+function getSettingsFrom(handle: Database.Database): ReturnType<typeof getSettings> {
+  const rows = handle.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
+  return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)])) as ReturnType<typeof getSettings>
+}
+
 interface Row { id: number; rule: string; event: string; event_key: string; label: string; entry_id: number | null; created_at: string }
 
 const toActivity = (r: Row) => ({
@@ -28,8 +35,8 @@ const toActivity = (r: Row) => ({
 
 // ---------- settings ----------
 
-export function automationSettings(): AutomationSettings {
-  const saved = getSettings().intelligence ?? { features: { dailyBriefing: true, automations: false, smartQuickAdd: false, insights: false, aiAssistant: false }, aiProvider: 'off' as const }
+export function automationSettings(handle?: Database.Database): AutomationSettings {
+  const saved = (handle ? getSettingsFrom(handle) : getSettings()).intelligence ?? { features: { dailyBriefing: true, automations: false, smartQuickAdd: false, insights: false, aiAssistant: false }, aiProvider: 'off' as const }
   const a = (saved as { automations?: Partial<AutomationSettings> }).automations
   return { ...DEFAULT_AUTOMATIONS, ...a }
 }
@@ -54,7 +61,7 @@ export function emitAutomation(
   data: Parameters<typeof runAutomation>[0]['data'] extends never ? never : import('../shared/automations').AutomationEventData,
   extra: { overdueTasks?: { id: number; title: string; daysOverdue: number }[]; date?: string } = {}
 ): EmitResult {
-  const settings = automationSettings()
+  const settings = automationSettings(db)
   const today = extra.date ?? new Date().toISOString().slice(0, 10)
   const outcomes = runAutomation({ kind: event, date: today, data }, {
     settings,

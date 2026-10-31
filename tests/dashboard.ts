@@ -80,7 +80,7 @@ test('task dashboard counts due today, overdue and locally completed this week',
     { id: 2, title: 'late', status: 'in-progress' as const, dueDate: '2026-10-24', completedAt: null },
     { id: 3, title: 'completed', status: 'done' as const, dueDate: null, completedAt: '2026-10-26T12:00:00-07:00' },
     { id: 4, title: 'last week', status: 'done' as const, dueDate: null, completedAt: '2026-10-18T12:00:00Z' }
-  ] as Parameters<typeof taskDashboard>[0]
+  ].map((t) => ({ deletedAt: null, dueTime: null, ...t })) as Parameters<typeof taskDashboard>[0]
   assert.deepEqual(taskDashboard(tasks, MON), { dueToday: 1, overdue: 1, completedThisWeek: 1 })
 })
 

@@ -33,12 +33,12 @@ export function TaskEditor({ task, onClose, onSaved }: Props) {
   const [tags, setTags] = useState<string[]>(task?.tags ?? [])
   const [tagInput, setTagInput] = useState('')
   const [subtasks, setSubtasks] = useState(task?.subtasks.map((s) => `${s.done ? '[x] ' : ''}${s.title}`).join('\n') ?? '')
-  const [frequency, setFrequency] = useState<TaskRecurrence['frequency'] | 'none'>(task?.recurrence?.frequency ?? 'none')
-  const [interval, setInterval] = useState(String(task?.recurrence?.intervalDays ?? 2))
+  const [frequency, setFrequency] = useState<TaskRecurrence['frequency'] | 'none'>(task?.recurrenceRule?.frequency ?? 'none')
+  const [interval, setInterval] = useState(String(task?.recurrenceRule?.intervalDays ?? 2))
   // Advanced holds what is usually set once or never, so nothing standard stays hidden behind it
   // either: a task that already has any advanced field opens the section from the start.
   const [advancedOpen, setAdvancedOpen] = useState(() => Boolean(task &&
-    (task.recurrence || task.project || task.notes || task.tags.length > 0 || task.subtasks.length > 0)))
+    (task.recurrenceRule || task.project || task.notes || task.tags.length > 0 || task.subtasks.length > 0)))
   const [busy, setBusy] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<TaskField, string>>>({})
   const [saveError, setSaveError] = useState('')
@@ -46,12 +46,12 @@ export function TaskEditor({ task, onClose, onSaved }: Props) {
   const fields = useRef<Partial<Record<TaskField, FieldElement | null>>>({})
 
   const input = (): TaskInput => ({
-    title, notes, dueDate: dueDate || null, priority, status, project,
+    title, notes, dueDate: dueDate || null, dueTime: null, priority, status, project,
     tags: addTag(tags, tagInput),
-    recurrence: frequency === 'none' ? null : {
+    recurrenceRule: frequency === 'none' ? null : {
       frequency, intervalDays: frequency === 'custom' ? Math.max(1, Number(interval) || 1) : 1
     },
-    parentTaskId: task?.parentTaskId ?? null,
+    recurrenceNext: null,
     subtasks: parseSubtasks(subtasks)
   })
 
@@ -64,7 +64,7 @@ export function TaskEditor({ task, onClose, onSaved }: Props) {
     setSaveError('')
     if (first) {
       // The failed field may sit inside the collapsed section: open it so the user sees the message.
-      if (first === 'recurrence' || first === 'tags' || first === 'subtasks') setAdvancedOpen(true)
+      if (first === 'recurrenceRule' || first === 'tags' || first === 'subtasks') setAdvancedOpen(true)
       setFocusField(first)
       return
     }
@@ -210,8 +210,8 @@ export function TaskEditor({ task, onClose, onSaved }: Props) {
               <div className="grid grid-cols-[1fr_7rem] gap-3">
                 <label className="flex flex-col text-xs text-muted">Repeat
                   <select id="task-recurrence" className="field mt-1" value={frequency}
-                    aria-invalid={Boolean(errorText('recurrence'))} aria-describedby={describedBy('recurrence')} ref={fieldRef('recurrence')}
-                    onChange={(e) => { setFrequency(e.target.value as typeof frequency); clearFieldError('recurrence') }}>
+                    aria-invalid={Boolean(errorText('recurrenceRule'))} aria-describedby={describedBy('recurrenceRule')} ref={fieldRef('recurrenceRule')}
+                    onChange={(e) => { setFrequency(e.target.value as typeof frequency); clearFieldError('recurrenceRule') }}>
                     <option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option>
                     <option value="monthly">Monthly</option><option value="custom">Every N days</option>
                   </select>
@@ -219,13 +219,13 @@ export function TaskEditor({ task, onClose, onSaved }: Props) {
                 {frequency === 'custom' && (
                   <label className="flex flex-col text-xs text-muted">Days
                     <input id="task-recurrence-interval" type="number" className="field mt-1" min="1" max="3650" value={interval}
-                      aria-invalid={Boolean(errorText('recurrence'))} aria-describedby={describedBy('recurrence')}
-                      ref={fieldRef('recurrence')}
-                      onChange={(e) => { setInterval(e.target.value); clearFieldError('recurrence') }} />
+                      aria-invalid={Boolean(errorText('recurrenceRule'))} aria-describedby={describedBy('recurrenceRule')}
+                      ref={fieldRef('recurrenceRule')}
+                      onChange={(e) => { setInterval(e.target.value); clearFieldError('recurrenceRule') }} />
                   </label>
                 )}
               </div>
-              {fieldError('recurrence')}
+              {fieldError('recurrenceRule')}
               <p className="text-xs text-muted">
                 Completing this task adds one occurrence — same title, notes, tags and checklist, unchecked —
                 dated this task's due date advanced by one interval, or today's date when it has none:

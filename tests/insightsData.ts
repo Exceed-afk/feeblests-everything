@@ -35,7 +35,7 @@ const entry = (date: string, mood: Mood | null, o: { title?: string; tags?: stri
   ({ id: id++, date, title: o.title ?? 'A day', body: '', mood, tags: o.tags ?? [], createdAt: '', updatedAt: '' })
 const task = (id_: number, createdAt: string, completedAt: string | null, dueDate: string | null = null, status: 'todo' | 'in-progress' | 'done' = 'todo'): Task => ({
   id: id_, title: `Task ${id_}`, notes: '', status, priority: 'medium', dueDate,
-  createdAt, completedAt, project: null, tags: [], sortOrder: id_, recurrence: null, parentTaskId: null, subtasks: []
+  createdAt, completedAt, deletedAt: null, dueTime: null, project: null, tags: [], position: id_, recurrenceRule: null, recurrenceNext: null, subtasks: []
 })
 
 const empty = { trades: [], goals: [], txs: [], habits: [], tasks: [], entries: [] }

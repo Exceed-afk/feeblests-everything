@@ -109,31 +109,39 @@ test('habit lists that are not lists are rejected', () => {
 })
 // ---- tasks / recurrence ----
 const stampRow = (over: Record<string, unknown>): Record<string, unknown> =>
-  ({ notes: '', status: 'todo', priority: 'medium', dueDate: null, completedAt: null, project: null, tags: [], sortOrder: 0, recurrence: null, parentTaskId: null, ...over })
+  ({ notes: '', status: 'todo', priority: 'medium', dueDate: null, completedAt: null, project: null, tags: [], position: 0, recurrenceRule: null, recurrenceNext: null, ...over })
 const series = () => ({
   ...base(),
   tasks: [
-    stampRow({ id: 1, title: 'Parent', status: 'done', dueDate: '2026-10-26', completedAt: '2026-10-26T12:00:00Z', recurrence: { frequency: 'weekly', intervalDays: 1 }, ...stamp }),
-    stampRow({ id: 2, title: 'Next time', dueDate: '2026-11-02', recurrence: { frequency: 'weekly', intervalDays: 1 }, parentTaskId: 1, ...stamp })
+    stampRow({ id: 1, title: 'Weekly', status: 'done', dueDate: '2026-10-26', completedAt: '2026-10-26T12:00:00Z', recurrenceRule: { frequency: 'weekly', intervalDays: 1 }, recurrenceNext: '2026-11-02', ...stamp }),
+    stampRow({ id: 2, title: 'Plain', dueDate: '2026-11-02', ...stamp })
   ],
   taskSubtasks: []
 })
 
-test('a recurring series with its parent link and rule is accepted as stored', () => {
-  const round = parse(series()) as { tasks: { id: number; parentTaskId: number | null; recurrence: unknown }[] }
-  assert.equal(round.tasks[1].parentTaskId, 1)
-  assert.deepEqual(round.tasks[1].recurrence, { frequency: 'weekly', intervalDays: 1 })
+test('recurring rules, next dates and soft-delete stamps are accepted and round-tripped', () => {
+  const round = parse(series()) as { tasks: { id: number; recurrenceRule: unknown; recurrenceNext: string | null; deletedAt: string | null }[] }
+  assert.deepEqual(round.tasks[0].recurrenceRule, { frequency: 'weekly', intervalDays: 1 })
+  assert.equal(round.tasks[0].recurrenceNext, '2026-11-02')
+  assert.equal(round.tasks[1].recurrenceRule, null)
+  assert.equal(round.tasks[1].deletedAt, null)
 })
-test('a task whose parent is not in the file is rejected, naming both', () => {
-  const b = series(); (b.tasks[1] as { parentTaskId: number }).parentTaskId = 9; rejects(b, /Task 2 has a parent 9/)
+test('an invalid recurrence rule is rejected', () => {
+  const b = series(); (b.tasks[0] as { recurrenceRule: unknown }).recurrenceRule = { frequency: 'hourly', intervalDays: 1 }; rejects(b, /Task #1/)
 })
-test('a task that is its own parent is rejected', () => {
-  const b = series(); (b.tasks[0] as { parentTaskId: number }).parentTaskId = 1; rejects(b, /its own parent/)
+test('a recurrenceNext that is not a date is rejected', () => {
+  const b = series(); (b.tasks[0] as { recurrenceNext: unknown }).recurrenceNext = 'soon'; rejects(b, /Task #1/)
 })
-test('two children sharing one parent are rejected (the schema keeps one child, ever)', () => {
-  const b = series()
-  ;(b.tasks as unknown[]).push(stampRow({ id: 3, title: 'Again', dueDate: '2026-11-09', sortOrder: 2, recurrence: { frequency: 'weekly', intervalDays: 1 }, parentTaskId: 1, ...stamp }))
-  rejects(b, /Tasks 2 and 3 both have the parent 1.*at most one child/)
+// ---- old-shape (pre-migration-9) backups still import ----
+test('an old-format backup maps sortOrder/recurrence onto the new task fields', () => {
+  const old = series()
+  ;(old.tasks as Record<string, unknown>[]).forEach((t) => { delete t.position; delete t.recurrenceRule; delete t.recurrenceNext
+    ;(t as Record<string, unknown>).sortOrder = 7; (t as Record<string, unknown>).recurrence = { frequency: 'weekly', intervalDays: 1 } })
+  const round = parse(old) as { tasks: { position: number; recurrenceRule: unknown; dueTime: unknown; deletedAt: unknown }[] }
+  assert.equal(round.tasks[0].position, 7)
+  assert.deepEqual(round.tasks[0].recurrenceRule, { frequency: 'weekly', intervalDays: 1 })
+  assert.equal(round.tasks[0].dueTime, null)
+  assert.equal(round.tasks[0].deletedAt, null)
 })
 
 console.log(`ALL ${n} PASSED`)

@@ -33,7 +33,7 @@ const tx = (date: string, kind: TxKind, amount: number): SavingsTx =>
   ({ id: id++, goalId: 1, date, kind, amount, note: '', createdAt: '', updatedAt: '' })
 const task = (id_: number, completedAt: string | null): Task => ({
   id: id_, title: `Task ${id_}`, notes: '', status: completedAt ? 'done' : 'todo', priority: 'medium', dueDate: null,
-  createdAt: '2026-08-01', completedAt, project: null, tags: [], sortOrder: id_, recurrence: null, parentTaskId: null, subtasks: []
+  createdAt: '2026-08-01', completedAt, deletedAt: null, dueTime: null, project: null, tags: [], position: id_, recurrenceRule: null, recurrenceNext: null, subtasks: []
 })
 
 const input = (over: Partial<InsightsInput> = {}): InsightsInput => ({

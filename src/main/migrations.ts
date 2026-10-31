@@ -125,7 +125,30 @@ export const MIGRATIONS: string[] = [
      entry_id   INTEGER,
      created_at TEXT NOT NULL
    );
-   CREATE UNIQUE INDEX idx_automation_once ON automation_events(rule, event_key);`
+   CREATE UNIQUE INDEX idx_automation_once ON automation_events(rule, event_key);`,
+  // 9: task-manager rework (see docs/task-manager-improvement-plan.md).
+  // Replaces parent_task_id / child-copy recurrence with a single rule per row
+  // (recurrence_rule + recurrence_next), adds due_time alongside due_date,
+  // soft delete via deleted_at, and manual sort position (replaces sort_order).
+  // Old columns are dropped first so the migration is rerun-safe.
+  `DELETE FROM task_subtasks WHERE task_id IN (SELECT id FROM tasks WHERE parent_task_id IS NOT NULL);
+   DELETE FROM tasks WHERE parent_task_id IS NOT NULL;
+   DROP INDEX IF EXISTS idx_tasks_parent_once;
+   DROP INDEX IF EXISTS idx_tasks_parent;
+   ALTER TABLE tasks DROP COLUMN sort_order;
+   ALTER TABLE tasks DROP COLUMN parent_task_id;
+   ALTER TABLE tasks ADD COLUMN due_time TEXT;
+   ALTER TABLE tasks ADD COLUMN deleted_at TEXT;
+   ALTER TABLE tasks ADD COLUMN position REAL;
+   ALTER TABLE tasks ADD COLUMN recurrence_rule TEXT;
+   ALTER TABLE tasks ADD COLUMN recurrence_next TEXT;
+   -- Copy any stored rule into the new column BEFORE the old column is dropped.
+   UPDATE tasks SET recurrence_rule = recurrence WHERE recurrence IS NOT NULL;
+   ALTER TABLE tasks DROP COLUMN recurrence;
+   UPDATE tasks SET position = id WHERE position IS NULL;
+   CREATE INDEX IF NOT EXISTS idx_tasks_due_status ON tasks(status, due_date);
+   CREATE INDEX IF NOT EXISTS idx_tasks_deleted ON tasks(deleted_at);`,
+
 ]
 
 // Exposed for focused migration tests and used by the app's startup path.
