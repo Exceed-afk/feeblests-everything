@@ -372,10 +372,7 @@ export function normalizeSettings(raw: SettingsInput | null | undefined): Settin
     taskSavedViews: cleanTaskViews(r.taskSavedViews),
     intelligence: r.intelligence && typeof r.intelligence === 'object'
       ? {
-          features: { ...DEFAULT_INTELLIGENCE.features, ...((r.intelligence as { features?: Partial<IntelligenceSettings['features']> }).features ?? {}) },
-          aiProvider: (['off', 'local', 'cloud'] as const).includes((r.intelligence as { aiProvider?: unknown }).aiProvider as 'off')
-            ? (r.intelligence as { aiProvider: IntelligenceSettings['aiProvider'] }).aiProvider
-            : DEFAULT_INTELLIGENCE.aiProvider
+          features: { ...DEFAULT_INTELLIGENCE.features, ...((r.intelligence as { features?: Partial<IntelligenceSettings['features']> }).features ?? {}) }
         }
       : DEFAULT_INTELLIGENCE
   }

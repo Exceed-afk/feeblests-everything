@@ -166,7 +166,7 @@ All `ipcMain.handle` calls live in `src/main/index.ts`; all caller wrappers in `
 | app | `app:dataPath` / `app:openDataFolder` | – | `dataDir()` / `shell.openPath` | Settings |
 | backup | `backup:exportJson` / `exportTradesCsv` | today | `collectBackup` + save dialog (shared/backup.ts format) | Settings |
 | backup | `backup:chooseImport` / `applyImport` | – / file chosen earlier | `parseBackup` (validation) / `restoreBackup` after `safetyCopy()` | Settings |
-| intelligence | `intelligence:get` / `set` / `setAiProvider` | feature toggles | settings get/set (`intelligence` key) | Intelligence, Assistant |
+| intelligence | `intelligence:get` / `set` | feature toggles | settings get/set (`intelligence` key) | Intelligence |
 | assistant | `assistant:get` / `set` / `keyStatus` / `setKey` / `clearKey` / `functions` / `ask` | patch / plain key (encrypted immediately) / question | assistant.ts (key stored as encrypted blob via `safeStorage` in `settings.assistantKeyBlob`) | Assistant page |
 
 ### 4.4 The app shell and module switching

@@ -248,6 +248,7 @@ Cloud keys are encrypted with **Electron `safeStorage`** (Windows DPAPI / macOS 
 Plain, specific errors for: assistant off, cloud not confirmed, no key, unreachable server, rejected key, timeout (30 s), unusable model replies. Chats exist only in the page's memory — "Clear history" empties them and nothing is persisted anywhere, not even the question list.
 
 **Where things live:** every testable rule — function table, prompt, reply parsing, endpoint validation, readiness, failure wording — is pure in `src/shared/assistant.ts` (29 checks in `tests/assistant.ts`). `src/main/assistant.ts` owns safeStorage, the single `fetch` call (no SDK, no new dependency) and running the chosen function. `modules/Assistant.tsx` is the chat; the provider picker, key box and cloud confirmation live on the Intelligence page.
+The selected provider is stored once in `assistant.provider`; the Intelligence provider picker updates the same main-owned assistant settings used by the Assistant page.
 
 ## Insights
 The **Insights** page (sidebar, top; also `Ctrl+K` > "insights", and a "See patterns" card on the Dashboard) finds cross-tool patterns with **simple statistics only** — two-group averages and one Pearson correlation. No AI, no network. It respects the **Insights** toggle on the Intelligence page.

@@ -38,7 +38,10 @@ test('legacy automation and insight settings move once and preserve other intell
   })
   assert.deepEqual(JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'insightDismissals'").get() as { value: string }).value), ['mood-by-tasks'])
   assert.deepEqual(JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'intelligence'").get() as { value: string }).value), {
-    features: { insights: true }, aiProvider: 'local'
+    features: { insights: true }
+  })
+  assert.deepEqual(JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'assistant'").get() as { value: string }).value), {
+    provider: 'local'
   })
 
   const before = db.prepare('SELECT key, value FROM settings ORDER BY key').all()
@@ -53,9 +56,13 @@ test('legacy settings do not overwrite keys that already exist in the split layo
   applyMigrations(db)
   db.prepare("INSERT INTO settings (key, value) VALUES ('automations', ?)").run(JSON.stringify({ lossReflection: false }))
   db.prepare("INSERT INTO settings (key, value) VALUES ('insightDismissals', ?)").run(JSON.stringify(['mood-vs-tasks']))
+  db.prepare("INSERT INTO settings (key, value) VALUES ('assistant', ?)").run(JSON.stringify({
+    provider: 'cloud', cloudUrl: 'https://local.example'
+  }))
   db.prepare("INSERT INTO settings (key, value) VALUES ('intelligence', ?)").run(JSON.stringify({
     automations: { lossReflection: true },
-    dismissedInsights: ['mood-by-tasks']
+    dismissedInsights: ['mood-by-tasks'],
+    aiProvider: 'local'
   }))
 
   migrateSettingsKeys(db)
@@ -64,7 +71,28 @@ test('legacy settings do not overwrite keys that already exist in the split layo
     lossReflection: false
   })
   assert.deepEqual(JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'insightDismissals'").get() as { value: string }).value), ['mood-vs-tasks'])
+  assert.deepEqual(JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'assistant'").get() as { value: string }).value), {
+    provider: 'cloud', cloudUrl: 'https://local.example'
+  })
   assert.deepEqual(JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'intelligence'").get() as { value: string }).value), {})
+  db.close()
+})
+
+test('a legacy provider replaces an assistant setting that is still off', () => {
+  const db = openDatabase()
+  applyMigrations(db)
+  db.prepare("INSERT INTO settings (key, value) VALUES ('assistant', ?)").run(JSON.stringify({
+    provider: 'off', localUrl: 'http://localhost:9000/v1'
+  }))
+  db.prepare("INSERT INTO settings (key, value) VALUES ('intelligence', ?)").run(JSON.stringify({
+    aiProvider: 'local'
+  }))
+
+  migrateSettingsKeys(db)
+
+  assert.deepEqual(JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'assistant'").get() as { value: string }).value), {
+    provider: 'local', localUrl: 'http://localhost:9000/v1'
+  })
   db.close()
 })
 

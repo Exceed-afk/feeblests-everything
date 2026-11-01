@@ -36,6 +36,20 @@ export const DEFAULT_ASSISTANT: AssistantSettings = {
     cloudConfirmed: false
 }
 
+export function cleanAssistantSettingsPatch(patch: unknown): Partial<AssistantSettings> {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return {}
+    const values = patch as Record<string, unknown>
+    const clean: Partial<AssistantSettings> = {}
+    if (values.provider === 'off' || values.provider === 'local' || values.provider === 'cloud') {
+      clean.provider = values.provider
+    }
+    if (typeof values.localUrl === 'string') clean.localUrl = values.localUrl
+    if (typeof values.cloudUrl === 'string') clean.cloudUrl = values.cloudUrl
+    if (typeof values.model === 'string') clean.model = values.model
+    if (typeof values.cloudConfirmed === 'boolean') clean.cloudConfirmed = values.cloudConfirmed
+    return clean
+}
+
 export const CLOUD_CONFIRM_PHRASE = 'I understand'
 
 // The intelligence.features.aiAssistant master toggle must ALSO be on; these are the

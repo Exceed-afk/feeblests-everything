@@ -35,8 +35,7 @@ export interface Settings {
 
 // Default intelligence feature toggles. Daily briefing is on; everything else is off.
 export const DEFAULT_INTELLIGENCE: IntelligenceSettings = {
-  features: { dailyBriefing: true, automations: false, smartQuickAdd: false, insights: false, aiAssistant: false },
-  aiProvider: 'off'
+  features: { dailyBriefing: true, automations: false, smartQuickAdd: false, insights: false, aiAssistant: false }
 }
 
 // The shared defaults used before saved settings are loaded.
@@ -52,7 +51,6 @@ export const DEFAULT_SETTINGS: Settings = {
 interface IntelligenceApiInner {
   get(): Promise<IntelligenceSettings>
   set(features: Partial<IntelligenceFeatureToggles>): Promise<IntelligenceSettings>
-  setAiProvider(provider: 'off' | 'local' | 'cloud'): Promise<void>
   automations: {
     get(): Promise<AutomationSettings>
     set(patch: Partial<AutomationSettings>): Promise<AutomationSettings>
@@ -597,7 +595,6 @@ import type { AutomationSettings, AutomationActivity } from './automations'
 
 export interface IntelligenceSettings {
   features: IntelligenceFeatureToggles
-  aiProvider: 'off' | 'local' | 'cloud' // built in step 6
 }
 
 export type { AutomationSettings, AutomationActivity }

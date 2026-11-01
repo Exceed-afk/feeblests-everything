@@ -1,12 +1,12 @@
 import { useMemo, useEffect, useState, useCallback } from 'react'
 import { Brain, Trash2, Zap } from 'lucide-react'
-import { DEFAULT_INTELLIGENCE, type IntelligenceFeatureToggles, type IntelligenceSettings } from '../../../shared/types'
+import { DEFAULT_INTELLIGENCE, type IntelligenceFeatureToggles } from '../../../shared/types'
 import { DEFAULT_AUTOMATIONS, type AutomationSettings, type AutomationActivity } from '../../../shared/automations'
 import { CLOUD_CONFIRM_PHRASE, type AssistantSettings } from '../../../shared/assistant'
 import { errMsg } from '../lib/errors'
 
 const PLATFORM = typeof process !== 'undefined' ? process.platform : 'unknown'
-import { applyFromMain, getCurrentSettings, useSettings } from '../lib/settingsStore'
+import { applyFromMain, useSettings } from '../lib/settingsStore'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
 
@@ -69,17 +69,6 @@ export function Intelligence() {
   const setAutomation = (patch: Partial<AutomationSettings>) => {
     setAutomations((prev) => ({ ...prev, ...patch }))
     window.api.intelligence.automations.set(patch).then((next) => setAutomations(next)).catch(() => undefined)
-  }
-
-  const aiProvider = s.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider
-
-  const setAiProvider = (provider: IntelligenceSettings['aiProvider']) => {
-    setSaveError('')
-    void window.api.intelligence.setAiProvider(provider)
-      .then(() => applyFromMain({
-        intelligence: { ...getCurrentSettings().intelligence, aiProvider: provider }
-      }))
-      .catch((error) => setSaveError(errMsg(error)))
   }
 
   // Group features: everything except AI assistant comes first, then the AI section.
@@ -213,8 +202,6 @@ export function Intelligence() {
         {/* ---- AI provider (step 6) ---- */}
         {aiFeature.name && (
           <AssistantProviderSection
-            aiProvider={aiProvider}
-            setAiProvider={setAiProvider}
             features={features}
           />
         )}
@@ -225,9 +212,7 @@ export function Intelligence() {
 
 // The provider picker, key storage and the cloud confirmation. Settings changes go to
 // the main process (which owns safeStorage); the master toggle above stays separate.
-function AssistantProviderSection({ aiProvider, setAiProvider, features }: {
-  aiProvider: IntelligenceSettings['aiProvider']
-  setAiProvider: (p: IntelligenceSettings['aiProvider']) => void
+function AssistantProviderSection({ features }: {
   features: IntelligenceFeatureToggles
 }) {
   const [assistant, setAssistant] = useState<AssistantSettings | null>(null)
@@ -235,6 +220,7 @@ function AssistantProviderSection({ aiProvider, setAiProvider, features }: {
   const [keyInput, setKeyInput] = useState('')
   const [keyMsg, setKeyMsg] = useState('')
   const [keyError, setKeyError] = useState('')
+  const [settingsError, setSettingsError] = useState('')
   const [confirmText, setConfirmText] = useState('')
   const [model, setModel] = useState('')
   const [localUrl, setLocalUrl] = useState('')
@@ -251,6 +237,11 @@ function AssistantProviderSection({ aiProvider, setAiProvider, features }: {
     const next = await window.api.intelligence.assistant.set(p)
     setAssistant(next)
   }
+  const aiProvider = assistant.provider
+  const setAiProvider = (provider: AssistantSettings['provider']) => {
+    setSettingsError('')
+    void patch({ provider }).catch((error) => setSettingsError(errMsg(error)))
+  }
 
   return (
     <section className="card card-pad-lg" aria-labelledby="ai-provider-title">
@@ -262,6 +253,7 @@ function AssistantProviderSection({ aiProvider, setAiProvider, features }: {
         <button aria-pressed={aiProvider === 'local'} onClick={() => setAiProvider('local')}>Local model</button>
         <button aria-pressed={aiProvider === 'cloud'} onClick={() => setAiProvider('cloud')}>Cloud</button>
       </div>
+      {settingsError && <p role="alert" className="mt-2 text-sm text-neg">{settingsError}</p>}
 
       <dl className="mt-4 text-sm">
         <div>

@@ -251,21 +251,15 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('intelligence:get', () => {
     const saved = getSettings()
-    return { features: saved.intelligence?.features ?? DEFAULT_INTELLIGENCE.features, aiProvider: saved.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider }
+    return { features: mergeFeatures(saved.intelligence?.features, {}) }
   })
   ipcMain.handle('intelligence:set', (_e, features: Partial<IntelligenceFeatureToggles>): IntelligenceSettings => {
     const saved = getSettings()
     const next: IntelligenceSettings = {
-      ...saved.intelligence,
-      features: mergeFeatures(saved.intelligence?.features, features),
-      aiProvider: saved.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider
+      features: mergeFeatures(saved.intelligence?.features, features)
     }
     setSetting('intelligence', next)
     return next
-  })
-  ipcMain.handle('intelligence:setAiProvider', (_e, provider: 'off' | 'local' | 'cloud') => {
-    const saved = getSettings()
-    setSetting('intelligence', { ...saved.intelligence, features: saved.intelligence?.features ?? DEFAULT_INTELLIGENCE.features, aiProvider: provider })
   })
 
   // ---- AI assistant (step 6) ----

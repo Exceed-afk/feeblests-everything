@@ -112,7 +112,6 @@ const api: EverythingApi = {
   intelligence: {
     get: () => ipcRenderer.invoke('intelligence:get'),
     set: (features) => ipcRenderer.invoke('intelligence:set', features),
-    setAiProvider: (provider) => ipcRenderer.invoke('intelligence:setAiProvider', provider),
     automations: {
       get: () => ipcRenderer.invoke('automations:get'),
       set: (patch) => ipcRenderer.invoke('automations:set', patch),

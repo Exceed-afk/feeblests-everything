@@ -43,10 +43,25 @@ export function migrateSettingsKeys(handle: Database.Database): void {
   const intelligence = parsed as Record<string, unknown>
   const hasAutomations = Object.prototype.hasOwnProperty.call(intelligence, 'automations')
   const hasDismissals = Object.prototype.hasOwnProperty.call(intelligence, 'dismissedInsights')
-  if (!hasAutomations && !hasDismissals) return
+  const hasAiProvider = Object.prototype.hasOwnProperty.call(intelligence, 'aiProvider')
+  if (!hasAutomations && !hasDismissals && !hasAiProvider) return
 
   const automationsExist = Boolean(handle.prepare("SELECT 1 FROM settings WHERE key = 'automations'").get())
   const dismissalsExist = Boolean(handle.prepare("SELECT 1 FROM settings WHERE key = 'insightDismissals'").get())
+  const previousProvider = intelligence.aiProvider
+  let assistantSettings: Record<string, unknown> = {}
+  if (previousProvider === 'local' || previousProvider === 'cloud') {
+    const assistantRow = handle.prepare("SELECT value FROM settings WHERE key = 'assistant'").get() as { value: string } | undefined
+    if (assistantRow) {
+      const savedAssistant: unknown = JSON.parse(assistantRow.value)
+      if (!savedAssistant || typeof savedAssistant !== 'object' || Array.isArray(savedAssistant)) {
+        throw new Error('The saved assistant settings are not an object.')
+      }
+      assistantSettings = savedAssistant as Record<string, unknown>
+    }
+  }
+  const migrateProvider = (previousProvider === 'local' || previousProvider === 'cloud')
+    && (assistantSettings.provider === undefined || assistantSettings.provider === null || assistantSettings.provider === 'off')
   const save = handle.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
   )
@@ -54,9 +69,11 @@ export function migrateSettingsKeys(handle: Database.Database): void {
   handle.transaction(() => {
     if (hasAutomations && !automationsExist) save.run('automations', JSON.stringify(intelligence.automations))
     if (hasDismissals && !dismissalsExist) save.run('insightDismissals', JSON.stringify(intelligence.dismissedInsights))
+    if (migrateProvider) save.run('assistant', JSON.stringify({ ...assistantSettings, provider: previousProvider }))
     const next = { ...intelligence }
     delete next.automations
     delete next.dismissedInsights
+    delete next.aiProvider
     save.run('intelligence', JSON.stringify(next))
   })()
 }

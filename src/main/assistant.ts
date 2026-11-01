@@ -12,7 +12,7 @@ import { safeStorage } from 'electron'
 import type Database from 'better-sqlite3'
 import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
-  assistantReady, checkEndpoint, cleanModelText, failureText, functionByName,
+  assistantReady, checkEndpoint, cleanAssistantSettingsPatch, cleanModelText, failureText, functionByName,
   parseAssistantReply,
   type AssistantExchange, type AssistantProvider, type AssistantRows, type AssistantSettings,
   type AskOutcome, type DateRange
@@ -37,7 +37,9 @@ export function assistantSettings(): AssistantSettings {
 }
 
 export function setAssistantSettings(patch: Partial<AssistantSettings>): AssistantSettings {
-  const next = { ...assistantSettings(), ...patch }
+  const cleanPatch = cleanAssistantSettingsPatch(patch)
+  if (Object.keys(cleanPatch).length === 0) return assistantSettings()
+  const next = { ...assistantSettings(), ...cleanPatch }
   setSetting('assistant', next)
   return next
 }
