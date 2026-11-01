@@ -2,7 +2,7 @@
 // module (src/shared/insights.ts). Dismissed insight ids live in their own
 // settings key so they are not coupled to the Intelligence feature toggles.
 import type Database from 'better-sqlite3'
-import { buildInsights, MIN_WEEKS } from '../shared/insights'
+import { buildInsights, isInsightId, MIN_WEEKS } from '../shared/insights'
 import type { InsightsResult } from '../shared/insights'
 import { listEntries } from './logbook'
 import { listTrades } from './trades'
@@ -40,8 +40,7 @@ export function getInsights(db: Database.Database, today: string): InsightsResul
 // produces are accepted, so the list cannot grow unbounded with junk.
 export function setInsightDismissed(db: Database.Database, id: string, dismissed: boolean): string[] {
   void db
-  const KNOWN = ['savings-by-habits', 'trades-by-habits', 'mood-by-tasks', 'mood-vs-tasks']
-  if (!KNOWN.includes(id)) throw new Error('Unknown insight id')
+  if (!isInsightId(id)) throw new Error('Unknown insight id')
   const saved = getSettings() as ReturnType<typeof getSettings> & { insightDismissals?: string[] }
   const current = new Set(saved.insightDismissals ?? [])
   if (dismissed) current.add(id)

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Assistant date ranges reject impossible dates, clamp future endpoints to today, and reject ranges longer than five years to avoid unbounded habit calculations
 - Assistant, Insights and Habits now share due-day, skip, target and effective-start rules; future, archived and still-pending-today days no longer affect rates
 - Assistant and Insights now count each task completion occurrence from task history, including completed recurring occurrences no longer present on the current task row
+- Insights now exclude task-count median ties, compare all perfect-rate habit days against all lower-rate days, and avoid directional claims for weak correlations
 - Restoring a JSON backup resets the assistant provider and cloud confirmation while retaining the model and local URL; imported key blobs are ignored. JSON exports omit the encrypted key blob, but daily local database copies may contain it
 
 ### Automations

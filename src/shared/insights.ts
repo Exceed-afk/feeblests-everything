@@ -15,8 +15,22 @@ import { addDays, habitRateInRange, weekdayOf, WEEKDAY_NAMES } from './habits'
 import { isAutomationEntry } from './automations'
 import { localTaskDay } from './tasks'
 import { round8 } from './math'
+import { signedAmount } from './savings'
 import { MOOD_SCORE } from './types'
 import type { Habit, LogEntry, Mood, SavingsTx, Task, TaskCompletion, Trade } from './types'
+
+export const INSIGHT_IDS = {
+  savingsByHabits: 'savings-by-habits',
+  tradesByHabits: 'trades-by-habits',
+  moodByTasks: 'mood-by-tasks',
+  moodVsTasks: 'mood-vs-tasks'
+} as const
+
+export type InsightId = typeof INSIGHT_IDS[keyof typeof INSIGHT_IDS]
+
+export function isInsightId(id: string): id is InsightId {
+  return Object.values(INSIGHT_IDS).some((known) => known === id)
+}
 
 export const MIN_DAYS = 4        // each group of a comparison needs at least this many days
 export const MIN_WEEKS = 4       // the window must span at least this many distinct weeks
@@ -29,6 +43,21 @@ export const SAME = 0.25         // differences smaller than this are reported a
 
 export const mean = (xs: number[]): number | null =>
   xs.length === 0 ? null : round8(xs.reduce((a, b) => a + b, 0) / xs.length)
+
+export function lastN<T>(arr: T[], n: number): T[] {
+  return n <= 0 ? [] : arr.slice(-n)
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  const upper = sorted[middle]
+  if (upper === undefined) return null
+  if (sorted.length % 2 !== 0) return upper
+  const lower = lastN(sorted, middle + 1)[0]
+  return lower === undefined ? null : (lower + upper) / 2
+}
 
 // Pearson correlation of two equally long series. null when it cannot be computed
 // (too few points, or zero variance on a side).
@@ -82,7 +111,7 @@ export function buildInsightDays(i: InsightsInput): InsightDay[] {
       mood: moods.length === 0 ? null : round8(moods.reduce((a, b) => a + b, 0) / moods.length),
       tradePnl: round8(closed.reduce((a, t) => a + (t.pnl as number), 0)),
       tradeClosed: closed.length,
-      savingsNet: round8(byDate(i.txs).reduce((a, t) => a + (t.kind === 'deposit' ? t.amount : -t.amount), 0)),
+      savingsNet: round8(byDate(i.txs).reduce((a, t) => a + signedAmount(t.kind, t.amount), 0)),
       tasksDone: i.completions.filter((completion) => localTaskDay(completion.completedAt) === d).length
     })
   }
@@ -156,7 +185,8 @@ function correlationInsight(id: string, xs: number[], ys: number[], need: string
     return { id, ok: false, needText: 'One of the two sides does not vary yet (all days the same), so a correlation cannot be computed.', text: '', r: null, n: usable.length, detail: `${usable.length} days.` }
   }
   const strength = Math.abs(r) < 0.3 ? 'no clear link' : Math.abs(r) < 0.6 ? 'a weak link' : 'a fairly strong link'
-  return { id, ok: true, text: `${label(r)} (${strength}, r = ${oneDec(r)}).`, r, n: usable.length, detail: `n = ${usable.length} days, r = ${oneDec(r)}.` }
+  const direction = Math.abs(r) < 0.3 ? 'did not clearly move' : label(r)
+  return { id, ok: true, text: `Mood ${direction} on days with more completed tasks (${strength}, r = ${oneDec(r)}).`, r, n: usable.length, detail: `n = ${usable.length} days, r = ${oneDec(r)}.` }
 }
 
 // The weekday-average of habit completion per habit-scheduled day, as 7 groups.
@@ -220,12 +250,10 @@ export function buildInsights(i: InsightsInput): InsightsResult {
   const weeks = windowWeeks(i)
   const habitDays = days.filter((d) => d.habitDue > 0)
 
-  // High vs low habit-completion days (top/bottom half of scheduled days by rate).
+  // Compare every perfect-rate day with every scheduled day below 100%.
   const withRate = habitDays.map((d) => ({ ...d, rate: d.habitDone / d.habitDue }))
-  const sorted = [...withRate].sort((a, b) => b.rate - a.rate)
-  const half = Math.floor(sorted.length / 2)
-  const high = sorted.slice(0, half).filter((d) => d.rate >= 1).map((d) => d.date)
-  const low = sorted.slice(-half).filter((d) => d.rate < 1).map((d) => d.date)
+  const high = withRate.filter((d) => d.rate === 1).map((d) => d.date)
+  const low = withRate.filter((d) => d.rate < 1).map((d) => d.date)
   const highSet = new Set(high), lowSet = new Set(low)
 
   const savHigh = days.filter((d) => highSet.has(d.date) && d.savingsNet !== 0).map((d) => d.savingsNet)
@@ -233,33 +261,32 @@ export function buildInsights(i: InsightsInput): InsightsResult {
   const pnlHigh = days.filter((d) => highSet.has(d.date) && d.tradeClosed > 0).map((d) => d.tradePnl)
   const pnlLow = days.filter((d) => lowSet.has(d.date) && d.tradeClosed > 0).map((d) => d.tradePnl)
 
-  // Mood on days with more vs fewer completed tasks (top/bottom half by tasksDone).
+  // Median ties are excluded so "more" and "fewer" never depend on sort order.
   const withTasks = days.filter((d) => d.mood !== null)
-  const taskSorted = [...withTasks].sort((a, b) => b.tasksDone - a.tasksDone)
-  const th = Math.floor(taskSorted.length / 2)
-  const moreTasks = taskSorted.slice(0, th).filter((d) => d.mood !== null).map((d) => d.mood as number)
-  const fewerTasks = taskSorted.slice(-th).filter((d) => d.mood !== null).map((d) => d.mood as number)
+  const taskCut = median(withTasks.map((d) => d.tasksDone))
+  const moreTasks = taskCut === null ? [] : withTasks.filter((d) => d.tasksDone > taskCut).map((d) => d.mood as number)
+  const fewerTasks = taskCut === null ? [] : withTasks.filter((d) => d.tasksDone < taskCut).map((d) => d.mood as number)
 
   // Mood vs tasks-done correlation.
   const moodXs = days.filter((d) => d.mood !== null).map((d) => d.tasksDone)
   const moodYs = days.filter((d) => d.mood !== null).map((d) => d.mood as number)
 
   const comparisons: CompareInsight[] = [
-    compare('savings-by-habits', savHigh, savLow,
+    compare(INSIGHT_IDS.savingsByHabits, savHigh, savLow,
       (a, b) => a === null || b === null ? '' : `Net savings was ${oneDec(a)} per day on your best habit days and ${oneDec(b)} on your weakest — might be a pattern.`,
       `Not enough habit-and-savings days yet: ${savHigh.length + savLow.length} so far. Log habits and savings over a few weeks.`),
-    compare('trades-by-habits', pnlHigh, pnlLow,
+    compare(INSIGHT_IDS.tradesByHabits, pnlHigh, pnlLow,
       (a, b) => a === null || b === null ? '' : `Trading P&L averaged ${oneDec(a)} on your best habit days and ${oneDec(b)} on your weakest — might be a pattern.`,
       `Not enough habit-and-trade days yet: ${pnlHigh.length + pnlLow.length} so far. Close trades on more days with habits logged.`),
-    compare('mood-by-tasks', moreTasks, fewerTasks,
+    compare(INSIGHT_IDS.moodByTasks, moreTasks, fewerTasks,
       (a, b) => a === null || b === null ? '' : `Mood averaged ${oneDec(a)} of 5 on days you completed more tasks and ${oneDec(b)} of 5 on days you completed fewer — might be a pattern.`,
       `Not enough mood-and-task days yet: ${moreTasks.length + fewerTasks.length} so far. Log a mood on days with tasks completed.`)
   ]
 
   const correlations: CorrelationInsight[] = [
-    correlationInsight('mood-vs-tasks', moodXs, moodYs,
+    correlationInsight(INSIGHT_IDS.moodVsTasks, moodXs, moodYs,
       `Not enough days with both a mood and tasks completed yet.`,
-      (r) => `Mood ${r > 0 ? 'tended to be higher' : r < 0 ? 'tended to be lower' : 'did not clearly move'} on days with more completed tasks`)
+      (r) => r > 0 ? 'tended to be higher' : 'tended to be lower')
   ]
 
   const enoughData = weeks >= MIN_WEEKS && habitDays.length >= MIN_DAYS

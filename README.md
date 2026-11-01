@@ -255,12 +255,12 @@ The selected provider is stored once in `assistant.provider`; the Intelligence p
 The **Insights** page (sidebar, top; also `Ctrl+K` > "insights", and a "See patterns" card on the Dashboard) finds cross-tool patterns with **simple statistics only** — two-group averages and one Pearson correlation. No AI, no network. It respects the **Insights** toggle on the Intelligence page.
 
 ### How each insight is calculated
-All maths lives in the pure module `src/shared/insights.ts` (tested in `tests/insights.ts`). It first builds one row per day in a rolling 6-week window (`buildInsightDays`): habits scheduled/done, average mood (1–5), closed-trade P&L, net savings, tasks completed that local day.
+All maths lives in the pure module `src/shared/insights.ts` (tested in `tests/insights.ts` and `tests/insights-stats.ts`). It first builds one row per day in a rolling 6-week window (`buildInsightDays`): habits scheduled/done, average mood (1–5), closed-trade P&L, net savings, tasks completed that local day.
 
-- **Savings vs. habit completion** (`savings-by-habits`): scheduled-habit days are ranked by that day's completion rate; the top half is the "high" group, the bottom half the "low" group. The insight compares the average net savings of the two groups. Needs `MIN_DAYS` (4) days per side.
+- **Savings vs. habit completion** (`savings-by-habits`): scheduled-habit days are grouped as perfect-rate (100%) or lower-rate; every day is included in its applicable group. The insight compares average net savings using the shared signed-amount rule. Needs `MIN_DAYS` (4) days per side.
 - **Trade P&L vs. habit completion** (`trades-by-habits`): same grouping; compares average closed-trade P&L per day between the two groups.
-- **Mood vs. tasks completed** (`mood-by-tasks`): days with a logged mood are ranked by tasks completed; top half vs. bottom half, comparing average mood (1–5).
-- **Mood ↔ tasks correlation** (`mood-vs-tasks`): Pearson r between tasks-done and mood across all days with both. Reported with **n** and **r**; "no clear link / weak link / fairly strong link" by |r| (<0.3 / <0.6 / more).
+- **Mood vs. tasks completed** (`mood-by-tasks`): mood days above and below the median tasks completed are compared; days tied at the median are excluded. Both groups need at least `MIN_DAYS` (4) days.
+- **Mood ↔ tasks correlation** (`mood-vs-tasks`): Pearson r between tasks-done and mood across all days with both. Reported with **n** and **r**; "no clear link / weak link / fairly strong link" by |r| (<0.3 / <0.6 / more), with correlations below 0.3 described without a directional claim.
 - **Tables**: habit completion rate by weekday, closed-trade P&L by weekday, and closed-trade P&L bucketed by the day's mood — each row shows its own counts, so every headline is checkable.
 
 **Honesty rules**: a comparison only appears when each side has ≥ `MIN_DAYS` (4) days; the window must span ≥ `MIN_WEEKS` (4) weeks; correlations need ≥ `MIN_MOODS` (4) joint days and non-zero variance; a difference under `SAME` (0.25) is reported as "about the same". Wording is descriptive ("was higher on", "might be a pattern") and never causal. Under every card sits the detail line: sample sizes and the raw averages (or n and r). When data is short, the page says exactly what is missing instead of guessing.
@@ -270,7 +270,7 @@ All maths lives in the pure module `src/shared/insights.ts` (tested in `tests/in
 ### How to add a new insight
 1. In `src/shared/insights.ts`, extend `InsightDay` if you need a new per-day number, and fill it in `buildInsightDays`.
 2. Write the comparison with the existing `compare(...)` helper (two groups → averages + sample sizes) or `correlationInsight(...)` (a series pair → r + n). Give it a unique `id`, cautious wording, and a plain-`needText` for when data is short.
-3. Add the id to the `KNOWN` list in `src/main/insights.ts` so dismissal works.
+3. Add the id to `INSIGHT_IDS` in `src/shared/insights.ts`; the shared list also validates dismissal.
 4. Render it in `modules/Insights.tsx` (and optionally the Review "Top insights" list — they read the same arrays).
 5. Tests in `tests/insights.ts`: the rich-window case, the tiny-data case, and a ties case.
 
