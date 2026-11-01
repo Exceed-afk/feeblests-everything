@@ -128,7 +128,15 @@ export function Assistant() {
                           <>
                             <div>
                               <dt className="meta">Function chosen by the model</dt>
-                              <dd className="mt-0.5 num">{x.disclosure.functionName} · {x.disclosure.range.from} → {x.disclosure.range.to}</dd>
+                              <dd className="mt-0.5 num">{x.disclosure.functionName}</dd>
+                            </div>
+                            <div>
+                              <dt className="meta">Requested range spec</dt>
+                              <dd className="mt-0.5 font-mono">{JSON.stringify(x.disclosure.rangeSpec)}</dd>
+                            </div>
+                            <div>
+                              <dt className="meta">Resolved dates</dt>
+                              <dd className="mt-0.5 num">{x.disclosure.range.from} → {x.disclosure.range.to}</dd>
                             </div>
                             <div>
                               <dt className="meta">Result computed on this computer</dt>

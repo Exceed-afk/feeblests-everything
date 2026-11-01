@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Assistant date ranges now use symbolic calendar periods resolved locally (including all-time from 1970); disclosures show both the model's requested range and resolved dates, while legacy explicit dates remain supported
 - Assistant now refuses unsupported questions instead of guessing; clickable example prompts are generated from its supported function list
 - Cloud confirmation is address-specific and must be repeated after changing the normalized address; assistant requests reject redirects and questions over 500 characters
 - Assistant date ranges reject impossible dates, clamp future endpoints to today, and reject ranges longer than five years to avoid unbounded habit calculations

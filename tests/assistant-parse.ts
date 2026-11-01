@@ -33,11 +33,31 @@ test('a supported function still requires a valid date range', () => {
     call: {
       kind: 'function',
       functionName: 'trade_pnl',
-      range: { from: '2026-10-01', to: '2026-10-31' },
+      rangeSpec: { kind: 'between', from: '2026-10-01', to: '2026-10-31' },
       question: ''
     }
   })
   assert.equal(parseAssistantReply('{"function":"trade_pnl"}').ok, false)
+})
+
+test('a symbolic range kind parses without model-calculated dates', () => {
+  assert.deepEqual(
+    parseAssistantReply('{"function":"savings_total","range":{"kind":"last_month"}}'),
+    { ok: true, call: { kind: 'function', functionName: 'savings_total', rangeSpec: { kind: 'last_month' }, question: '' } }
+  )
+})
+
+test('invalid range specs and out-of-bounds day counts are rejected', () => {
+  for (const range of [
+    { kind: 'unknown' },
+    { kind: 'last_n_days', n: 0 },
+    { kind: 'last_n_days', n: 99999 },
+    { kind: 'last_n_days', n: 1.5 },
+    { kind: 'between', from: '2026-02-31', to: '2026-03-01' },
+    { kind: 'between', from: '2026-03-02', to: '2026-03-01' }
+  ]) {
+    assert.equal(parseAssistantReply(JSON.stringify({ function: 'trade_pnl', range })).ok, false)
+  }
 })
 
 console.log(`\n${n} assistant parse checks passed`)

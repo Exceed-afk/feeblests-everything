@@ -170,6 +170,7 @@ export interface AssistantRows {
 export interface DateRange { from: string; to: string } // "YYYY-MM-DD", inclusive
 
 export const MAX_RANGE_DAYS = 1830
+const ALL_TIME_START_DATE = '1970-01-01'
 
 export function isRealDate(value: string): boolean {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
@@ -183,11 +184,16 @@ export type ClampRangeResult =
     | { ok: true; range: DateRange }
     | { ok: false; kind: 'empty' | 'range' }
 
-export function clampRange(range: DateRange, today: string): ClampRangeResult {
+export function clampRange(
+    range: DateRange,
+    today: string,
+    options: { allowAllTime?: boolean } = {}
+): ClampRangeResult {
     const to = range.to > today ? today : range.to
     if (range.from > to) return { ok: false, kind: 'empty' }
     const spanDays = (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${range.from}T00:00:00.000Z`)) / 86_400_000 + 1
-    if (spanDays > MAX_RANGE_DAYS) return { ok: false, kind: 'range' }
+    const isAllowedAllTime = options.allowAllTime === true && range.from === ALL_TIME_START_DATE && range.to === today
+    if (spanDays > MAX_RANGE_DAYS && !isAllowedAllTime) return { ok: false, kind: 'range' }
     return { ok: true, range: { from: range.from, to } }
 }
 
@@ -279,11 +285,14 @@ export const functionByName = (name: string): AssistantFunctionDef | undefined =
 export const ASSISTANT_SYSTEM_PROMPT =
     'You answer questions about the user\'s personal logbook, savings, trades, habits and tasks. ' +
     'You cannot see any raw data. Reply with ONLY one JSON object, no prose, in this exact shape: ' +
-    '{"function":"<name>","range":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"},"question":"<the user\'s question, repeated back>"}; ' +
-    'if none of the functions fits, reply with {"function":"cannot_answer"}. ' +
+    '{"function":"<name>","range":{"kind":"<range kind>"},"question":"<the user\'s question, repeated back>"}; ' +
+    'use range kinds today, yesterday, this_week, last_week, this_month, last_month, this_year, all_time, ' +
+    'or {"kind":"last_n_days","n":1..1830}, or {"kind":"between","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}. ' +
+    'For unsupported questions, reply with {"function":"cannot_answer"}. ' +
     'Choose "function" from this list:\n' +
     ASSISTANT_FUNCTIONS.map((f) => `- ${f.name}: ${f.description}`).join('\n') +
-    '\nThe range must be a contiguous span of calendar days that answers the question. ' +
+    '\nChoose the range kind that matches the user\'s words; do not calculate dates for symbolic ranges. ' +
+    'The range must be a contiguous span of calendar days that answers the question. ' +
     'Do not guess or use the closest function when none fits. Never invent a function name.'
 
 export const ASSISTANT_USER_PROMPT = (question: string, today: string): string =>
@@ -292,8 +301,43 @@ export const ASSISTANT_USER_PROMPT = (question: string, today: string): string =
 // ---------- parsing the reply (the model's ONE function call) ----------
 
 export type AssistantCall =
-    | { kind: 'function'; functionName: string; range: DateRange; question: string }
+    | { kind: 'function'; functionName: string; rangeSpec: RangeSpec; question: string }
     | { kind: 'none' }
+
+export type RangeSpec =
+    | { kind: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_year' | 'all_time' }
+    | { kind: 'last_n_days'; n: number }
+    | { kind: 'between'; from: string; to: string }
+
+const RANGE_KINDS = new Set([
+    'today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month',
+    'this_year', 'all_time', 'last_n_days', 'between'
+])
+
+function parseRangeSpec(value: unknown): RangeSpec | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const range = value as Record<string, unknown>
+    if (range.kind === undefined) {
+        const from = range.from, to = range.to
+        if (typeof from !== 'string' || typeof to !== 'string' || !isRealDate(from) || !isRealDate(to) || from > to) {
+            return null
+        }
+        return { kind: 'between', from, to }
+    }
+    if (typeof range.kind !== 'string' || !RANGE_KINDS.has(range.kind)) return null
+    if (range.kind === 'last_n_days') {
+        return typeof range.n === 'number' && Number.isInteger(range.n) && range.n >= 1 && range.n <= MAX_RANGE_DAYS
+            ? { kind: 'last_n_days', n: range.n }
+            : null
+    }
+    if (range.kind === 'between') {
+        const { from, to } = range
+        return typeof from === 'string' && typeof to === 'string' && isRealDate(from) && isRealDate(to) && from <= to
+            ? { kind: 'between', from, to }
+            : null
+    }
+    return { kind: range.kind as Exclude<RangeSpec['kind'], 'last_n_days' | 'between'> }
+}
 
 export function parseAssistantReply(raw: string): { ok: true; call: AssistantCall } | { ok: false; error: string } {
     const text = raw.trim()
@@ -305,13 +349,10 @@ export function parseAssistantReply(raw: string): { ok: true; call: AssistantCal
     const o = obj as { function?: unknown; range?: unknown; question?: unknown }
     if (typeof o.function !== 'string') return { ok: false, error: failureText('model') }
     if (o.function === 'cannot_answer' || !functionByName(o.function)) return { ok: true, call: { kind: 'none' } }
-    const r = (o.range ?? {}) as { from?: unknown; to?: unknown }
-    const iso = (v: unknown): string | null =>
-        typeof v === 'string' && isRealDate(v) ? v : null
-    const from = iso(r.from), to = iso(r.to)
-    if (!from || !to || from > to) return { ok: false, error: failureText('model') }
+    const rangeSpec = parseRangeSpec(o.range)
+    if (!rangeSpec) return { ok: false, error: failureText('model') }
     const question = typeof o.question === 'string' && o.question.trim() ? o.question.trim() : ''
-    return { ok: true, call: { kind: 'function', functionName: o.function, range: { from, to }, question } }
+    return { ok: true, call: { kind: 'function', functionName: o.function, rangeSpec, question } }
 }
 
 // Cleans a model answer: drops reasoning blocks and keeps the JSON object the
@@ -344,6 +385,40 @@ export const lastWeekRange = (today: string): DateRange => {
     return { from: addDays(w.from, -7), to: addDays(w.from, -1) }
 }
 export const lastNDays = (today: string, n: number): DateRange => ({ from: addDays(today, -(n - 1)), to: today })
+export const lastMonthRange = (today: string): DateRange => {
+    const previousMonthEnd = addDays(monthRange(today).from, -1)
+    return monthRange(previousMonthEnd)
+}
+export const thisYearRange = (today: string): DateRange => {
+    const year = today.slice(0, 4)
+    return { from: `${year}-01-01`, to: `${year}-12-31` }
+}
+
+export function resolveRange(spec: RangeSpec, today: string): DateRange {
+    switch (spec.kind) {
+        case 'today': return { from: today, to: today }
+        case 'yesterday': {
+            const yesterday = addDays(today, -1)
+            return { from: yesterday, to: yesterday }
+        }
+        case 'this_week': return weekRange(today)
+        case 'last_week': return lastWeekRange(today)
+        case 'this_month': return monthRange(today)
+        case 'last_month': return lastMonthRange(today)
+        case 'this_year': return thisYearRange(today)
+        case 'all_time': return { from: ALL_TIME_START_DATE, to: today }
+        case 'last_n_days':
+            if (!Number.isInteger(spec.n) || spec.n < 1 || spec.n > MAX_RANGE_DAYS) {
+                throw new RangeError(`last_n_days must be an integer from 1 to ${MAX_RANGE_DAYS}.`)
+            }
+            return lastNDays(today, spec.n)
+        case 'between':
+            if (!isRealDate(spec.from) || !isRealDate(spec.to) || spec.from > spec.to) {
+                throw new RangeError('between requires two ordered, real calendar dates.')
+            }
+            return { from: spec.from, to: spec.to }
+    }
+}
 
 // ---------- what the renderer is told about one turn (adjustment 3) ----------
 
@@ -357,6 +432,7 @@ export type AssistantDisclosure =
     | (AssistantDisclosureBase & {
     kind: 'computed'
     functionName: string
+    rangeSpec: RangeSpec
     range: DateRange
     result: number
     })

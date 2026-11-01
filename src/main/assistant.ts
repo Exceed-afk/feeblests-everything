@@ -14,7 +14,7 @@ import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
   assistantQuestionError, assistantReady, assistantSettingsPatchError, CANNOT_ANSWER_MESSAGE, checkEndpoint, clampRange, cleanModelText, failureText,
   functionByName, normalizeAssistantPatch,
-  parseAssistantReply,
+  parseAssistantReply, resolveRange,
   type AssistantExchange, type AssistantFunctionInfo, type AssistantKeyStatus, type AssistantProvider, type AssistantRows, type AssistantSettings,
   type AskOutcome
 } from '../shared/assistant'
@@ -197,7 +197,8 @@ export async function askAssistant(db: Database.Database, question: string, toda
       }
     }
   }
-  const clamped = clampRange(parsed.call.range, today)
+  const rangeSpec = parsed.call.rangeSpec
+  const clamped = clampRange(resolveRange(rangeSpec, today), today, { allowAllTime: rangeSpec.kind === 'all_time' })
   if (!clamped.ok) return { ok: false, error: failureText('range') }
 
   const fn = functionByName(parsed.call.functionName)
@@ -228,6 +229,7 @@ export async function askAssistant(db: Database.Database, question: string, toda
       systemPromptChars: ASSISTANT_SYSTEM_PROMPT.length,
       userPromptChars: ASSISTANT_USER_PROMPT(question, today).length,
       functionName: fn.name,
+      rangeSpec,
       range,
       result
     },

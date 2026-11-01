@@ -497,10 +497,12 @@ export function habitRateInRange(
     ? habit.completions
     : habit.checkins.map((date) => ({ date, status: 'done' as const }))
   const start = effectiveStart(habit, completions)
+  if (start && start > end) return { done: 0, due: 0 }
   let done = 0
   let due = 0
 
-  for (let date = from; date <= end; date = addDays(date, 1)) {
+  const firstDay = start && start > from ? start : from
+  for (let date = firstDay; date <= end; date = addDays(date, 1)) {
     const status = getDayStatus(habit, date, completions, today, start)
     if (status === 'done') {
       done++
