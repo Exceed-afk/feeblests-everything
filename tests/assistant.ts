@@ -228,7 +228,7 @@ test('think-block stripping cleans reasoning-wrapped answers', () => {
 
 // ---------- failure wording never leaks key or payload ----------
 test('failure messages never contain key or payload material', () => {
-  for (const kind of ['off', 'confirm', 'offline', 'badkey', 'timeout', 'http', 'model'] as const) {
+  for (const kind of ['off', 'confirm', 'offline', 'badkey', 'timeout', 'http', 'model', 'range'] as const) {
     const msg = failureText(kind)
     assert.ok(msg.length > 0)
     assert.doesNotMatch(msg, /sk-[A-Za-z0-9]/i)

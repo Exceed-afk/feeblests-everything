@@ -167,6 +167,28 @@ export interface AssistantRows {
 
 export interface DateRange { from: string; to: string } // "YYYY-MM-DD", inclusive
 
+export const MAX_RANGE_DAYS = 1830
+
+export function isRealDate(value: string): boolean {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+    const [year, month, day] = value.split('-').map(Number)
+    const utcYear = year < 100 ? year + 400 : year
+    const date = new Date(Date.UTC(utcYear, month - 1, day))
+    return date.getUTCFullYear() === utcYear && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+export type ClampRangeResult =
+    | { ok: true; range: DateRange }
+    | { ok: false; kind: 'empty' | 'range' }
+
+export function clampRange(range: DateRange, today: string): ClampRangeResult {
+    const to = range.to > today ? today : range.to
+    if (range.from > to) return { ok: false, kind: 'empty' }
+    const spanDays = (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${range.from}T00:00:00.000Z`)) / 86_400_000 + 1
+    if (spanDays > MAX_RANGE_DAYS) return { ok: false, kind: 'range' }
+    return { ok: true, range: { from: range.from, to } }
+}
+
 export interface AssistantFunctionDef {
     name: string
     description: string // goes into the prompt
@@ -184,15 +206,15 @@ const moodScores = (entries: LogEntry[], r: DateRange): number[] =>
 // neither done nor scheduled. Days before the habit existed are not missed.
 const habitScheduledDays = (habits: Habit[], r: DateRange): { done: number; scheduled: number } => {
     let done = 0, scheduled = 0
-    const checked = (h: Habit): Set<string> => new Set(h.checkins)
     for (const h of habits) {
         if (h.archived) continue
         if (h.startDate > r.to) continue // did not exist yet in this window
+        const checked = new Set(h.checkins)
         const from = r.from < h.startDate ? h.startDate : r.from
         for (let d = from; d <= r.to; d = addDays(d, 1)) {
             if (!h.days.includes(weekdayOf(d))) continue
             scheduled++
-            if (checked(h).has(d)) done++
+            if (checked.has(d)) done++
         }
     }
     return { done, scheduled }
@@ -278,7 +300,7 @@ export function parseAssistantReply(raw: string): { ok: true; call: AssistantCal
     if (typeof o.function !== 'string' || !functionByName(o.function)) return { ok: false, error: failureText('model') }
     const r = (o.range ?? {}) as { from?: unknown; to?: unknown }
     const iso = (v: unknown): string | null =>
-        typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null
+        typeof v === 'string' && isRealDate(v) ? v : null
     const from = iso(r.from), to = iso(r.to)
     if (!from || !to || from > to) return { ok: false, error: failureText('model') }
     const question = typeof o.question === 'string' && o.question.trim() ? o.question.trim() : ''
@@ -340,7 +362,7 @@ export type AskOutcome =
 
 // ---------- plain failure words (never contain the key or raw payloads) ----------
 
-export type FailureKind = 'off' | 'confirm' | 'offline' | 'badkey' | 'timeout' | 'http' | 'model'
+export type FailureKind = 'off' | 'confirm' | 'offline' | 'badkey' | 'timeout' | 'http' | 'model' | 'range'
 
 export function failureText(kind: FailureKind): string {
     switch (kind) {
@@ -351,5 +373,6 @@ export function failureText(kind: FailureKind): string {
         case 'timeout': return 'The model took too long to answer. Try a shorter question, or check the server is not still loading.'
         case 'http': return 'The provider returned an error. Check the model name on the Intelligence page.'
         case 'model': return 'The model answered in a shape this app cannot use. Try rephrasing the question.'
+        case 'range': return 'That date range is too long or has not happened yet. Try something under 5 years.'
     }
 }

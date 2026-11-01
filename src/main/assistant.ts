@@ -12,11 +12,11 @@ import { safeStorage } from 'electron'
 import type Database from 'better-sqlite3'
 import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
-  assistantQuestionError, assistantReady, assistantSettingsPatchError, checkEndpoint, cleanModelText, failureText,
+  assistantQuestionError, assistantReady, assistantSettingsPatchError, checkEndpoint, clampRange, cleanModelText, failureText,
   functionByName, normalizeAssistantPatch,
   parseAssistantReply,
   type AssistantExchange, type AssistantKeyStatus, type AssistantProvider, type AssistantRows, type AssistantSettings,
-  type AskOutcome, type DateRange
+  type AskOutcome
 } from '../shared/assistant'
 import { listEntries } from './logbook'
 import { listTrades } from './trades'
@@ -179,6 +179,8 @@ export async function askAssistant(db: Database.Database, question: string, toda
   const cleaned = cleanModelText(http.text)
   const parsed = parseAssistantReply(cleaned.ok ? cleaned.text : http.text)
   if (!parsed.ok) return { ok: false, error: parsed.error }
+  const clamped = clampRange(parsed.call.range, today)
+  if (!clamped.ok) return { ok: false, error: failureText('range') }
 
   const fn = functionByName(parsed.call.functionName)
   if (!fn) return { ok: false, error: failureText('model') }
@@ -186,14 +188,14 @@ export async function askAssistant(db: Database.Database, question: string, toda
   // The ONE local, read-only run. Nothing here writes: AssistantRows is built from
   // SELECT-only queries, and fn returns a number.
   const rows = loadRows(db, today)
+  const range = clamped.range
   let result: number
   try {
-    result = fn.run(rows, parsed.call.range as DateRange)
+    result = fn.run(rows, range)
   } catch {
     return { ok: false, error: failureText('model') }
   }
 
-  const range = parsed.call.range
   const answer =
     `${fn.name.replace(/_/g, ' ')} for ${range.from} to ${range.to}: ${result}` +
     (parsed.call.question && parsed.call.question !== question.trim() ? ` (about: ${parsed.call.question})` : '')
