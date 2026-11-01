@@ -99,7 +99,7 @@ test('all-time habit calculations begin at the habit tracking start date', () =>
   const result = functionByName('habit_completion_rate')!.run({
     txs: [], goals: [], trades: [], habits: [habit], tasks: [], completions: [], entries: []
   }, range, today)
-  assert.equal(result, 4.54545455)
+  assert.deepEqual(result, { type: 'number', value: 4.54545455 })
 })
 
 test('last_n_days rejects zero, out-of-range and non-integer values', () => {

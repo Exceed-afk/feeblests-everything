@@ -8,7 +8,7 @@
 //  - Off means OFF: nothing is built, nothing is sent, no HTTP request exists.
 //  - The model never sees rows, SQL or the database. It answers with ONE function call;
 //    the app runs it locally on the shared data layer and shows the user exactly what
-//    was sent (question, function, arguments, numeric result) under the reply.
+//    was sent (question, function, arguments, locally computed result) under the reply.
 //  - Local mode may only point at loopback; cloud mode must be https (loopback exempt).
 import { round8 } from './math'
 import { signedAmount } from './savings'
@@ -155,7 +155,7 @@ export function defaultUrl(provider: AssistantProvider): string {
 }
 
 // ---------- read-only data functions (the fixed table) ----------
-// Each function takes rows + a range and returns ONE number. The model picks one of
+// Each function takes rows + a range and returns a typed result. The model picks one of
 // these by name; the app runs it locally on rows it already has in memory.
 
 export interface AssistantRows {
@@ -204,7 +204,9 @@ export interface AssistantFunctionDef {
     description: string // goes into the prompt
     examples: string[]
     supports: FilterName[]
-    run: (rows: AssistantRows, range: DateRange, today?: string, filters?: ResolvedAssistantFilters) => number
+    resultType: 'number' | 'list'
+    supportsLimit?: boolean
+    run: (rows: AssistantRows, range: DateRange, today?: string, filters?: ResolvedAssistantFilters, limit?: number) => AssistantResult
 }
 
 export interface AssistantFunctionInfo {
@@ -212,7 +214,13 @@ export interface AssistantFunctionInfo {
     description: string
     examples: string[]
     supports: FilterName[]
+    resultType: 'number' | 'list'
+    supportsLimit: boolean
 }
+
+export type AssistantResult =
+    | { type: 'number'; value: number }
+    | { type: 'list'; rows: { label: string; value: number }[] }
 
 export type FilterName = 'asset' | 'direction' | 'tag' | 'goal' | 'project' | 'habit'
 export type AssistantFilters = Partial<Record<FilterName, string>>
@@ -318,6 +326,14 @@ export function matchFilters(
     }
 }
 
+const numberResult = (value: number): AssistantResult => ({ type: 'number', value })
+const clampLimit = (limit: number = 3): number =>
+    Number.isFinite(limit) ? Math.max(1, Math.min(10, Math.trunc(limit))) : 3
+
+export function listEmptyMessage(label: string): string {
+    return `No ${label} found for that date range.`
+}
+
 const inRange = (date: string, r: DateRange): boolean => date >= r.from && date <= r.to
 
 const moodScores = (entries: LogEntry[], r: DateRange): number[] =>
@@ -337,9 +353,10 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         description: 'Net savings (deposits minus withdrawals) for a date range.',
         examples: ['How much did I save last month?'],
         supports: ['goal'],
-        run: (rows, r, _today, filters) => round8(rows.txs
+        resultType: 'number',
+        run: (rows, r, _today, filters) => numberResult(round8(rows.txs
             .filter((t) => inRange(t.date, r) && (filters?.goal === undefined || t.goalId === filters.goal))
-            .reduce((a, t) => a + signedAmount(t.kind, t.amount), 0))
+            .reduce((a, t) => a + signedAmount(t.kind, t.amount), 0)))
     },
     {
         name: 'trade_pnl',
@@ -347,13 +364,14 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         description: 'Total profit and loss of trades dated in a date range (a trade counts on its entry date; open trades are not counted).',
         examples: ['What was my total trade P&L this month?'],
         supports: ['asset', 'direction', 'tag'],
-        run: (rows, r, _today, filters) => round8(rows.trades
+        resultType: 'number',
+        run: (rows, r, _today, filters) => numberResult(round8(rows.trades
             .filter((t) => t.pnl !== null && inRange(t.date, r) &&
                 (filters?.asset === undefined || t.asset === filters.asset) &&
                 (filters?.direction === undefined || t.direction === filters.direction) &&
                 (filters?.tag === undefined || t.tags.some((tag) => normalizedLabel(tag) === normalizedLabel(String(filters.tag))))
             )
-            .reduce((a, t) => a + (t.pnl as number), 0))
+            .reduce((a, t) => a + (t.pnl as number), 0)))
     },
     {
         name: 'habit_completion_rate',
@@ -361,6 +379,7 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         description: 'Percentage of scheduled habit days checked off in a date range; 0 when nothing was scheduled.',
         examples: ['What was my habit completion rate this week?'],
         supports: ['habit'],
+        resultType: 'number',
         run: (rows, r, today = r.to, filters) => {
             const selectedHabits = rows.habits.filter((habit) =>
                 filters?.habit === undefined || habit.id === filters.habit
@@ -369,7 +388,7 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
                 const rate = habitRateInRange(habit, r.from, r.to, today)
                 return { done: sum.done + rate.done, due: sum.due + rate.due }
             }, { done: 0, due: 0 })
-            return totals.due === 0 ? 0 : round8((totals.done / totals.due) * 100)
+            return numberResult(totals.due === 0 ? 0 : round8((totals.done / totals.due) * 100))
         }
     },
     {
@@ -378,17 +397,18 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         description: 'How many tasks were completed in a date range.',
         examples: ['How many tasks did I complete this week?'],
         supports: ['project', 'tag'],
+        resultType: 'number',
         run: (rows, r, _today, filters) => {
             if (filters?.project === undefined && filters?.tag === undefined) {
-                return rows.completions.filter((completion) => completedOn(completion, r)).length
+                return numberResult(rows.completions.filter((completion) => completedOn(completion, r)).length)
             }
             const tasksById = new Map(rows.tasks.map((task) => [task.id, task]))
-            return rows.completions.filter((completion) => {
+            return numberResult(rows.completions.filter((completion) => {
                 const task = tasksById.get(completion.taskId)
                 return task !== undefined && completedOn(completion, r) &&
                     (filters?.project === undefined || task.project === filters.project) &&
                     (filters?.tag === undefined || task.tags.some((tag) => normalizedLabel(tag) === normalizedLabel(String(filters.tag))))
-            }).length
+            }).length)
         }
     },
     {
@@ -397,12 +417,13 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         description: 'Average mood (1 rough to 5 great) of journal entries dated in a date range; 0 when none were logged.',
         examples: ["What's my mood average over the last 30 days?"],
         supports: ['tag'],
+        resultType: 'number',
         run: (rows, r, _today, filters) => {
             const entries = filters?.tag === undefined ? rows.entries
                 : rows.entries.filter((entry) => entry.tags.some((tag) =>
                     normalizedLabel(tag) === normalizedLabel(String(filters.tag))))
             const m = moodScores(entries, r)
-            return m.length === 0 ? 0 : round8(m.reduce((a, b) => a + b, 0) / m.length)
+            return numberResult(m.length === 0 ? 0 : round8(m.reduce((a, b) => a + b, 0) / m.length))
         }
     },
     {
@@ -411,10 +432,89 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         description: 'How many journal entries were written in a date range.',
         examples: ['How many journal entries did I write this month?'],
         supports: ['tag'],
-        run: (rows, r, _today, filters) => rows.entries.filter((e) => !isAutomationEntry(e) && inRange(e.date, r) &&
+        resultType: 'number',
+        run: (rows, r, _today, filters) => numberResult(rows.entries.filter((e) => !isAutomationEntry(e) && inRange(e.date, r) &&
             (filters?.tag === undefined || e.tags.some((tag) =>
                 normalizedLabel(tag) === normalizedLabel(String(filters.tag)))))
-            .length
+            .length)
+    },
+    {
+        name: 'biggest_losses',
+        label: 'biggest losses',
+        description: 'The largest losing closed trades in a date range, with their local asset label and loss amount.',
+        examples: ['What were my 3 biggest losses this month?'],
+        supports: [],
+        resultType: 'list',
+        supportsLimit: true,
+        run: (rows, r, _today, _filters, limit) => ({
+            type: 'list',
+            rows: rows.trades
+                .filter((trade) => trade.pnl !== null && trade.pnl < 0 && inRange(trade.date, r))
+                .sort((a, b) => (a.pnl as number) - (b.pnl as number) || a.date.localeCompare(b.date) || a.id - b.id)
+                .slice(0, clampLimit(limit))
+                .map((trade) => ({ label: `${trade.date} · ${trade.asset} · ${trade.direction}`, value: trade.pnl as number }))
+        })
+    },
+    {
+        name: 'biggest_wins',
+        label: 'biggest wins',
+        description: 'The largest winning closed trades in a date range, with their local asset label and profit amount.',
+        examples: ['What were my 3 biggest wins this month?'],
+        supports: [],
+        resultType: 'list',
+        supportsLimit: true,
+        run: (rows, r, _today, _filters, limit) => ({
+            type: 'list',
+            rows: rows.trades
+                .filter((trade) => trade.pnl !== null && trade.pnl > 0 && inRange(trade.date, r))
+                .sort((a, b) => (b.pnl as number) - (a.pnl as number) || a.date.localeCompare(b.date) || a.id - b.id)
+                .slice(0, clampLimit(limit))
+                .map((trade) => ({ label: `${trade.date} · ${trade.asset} · ${trade.direction}`, value: trade.pnl as number }))
+        })
+    },
+    {
+        name: 'top_tags',
+        label: 'most-used tags',
+        description: 'Journal tags ordered by the number of user-written entries they appear on.',
+        examples: ['Which tags do I use most?'],
+        supports: [],
+        resultType: 'list',
+        run: (rows, r, _today, _filters, limit) => {
+            const counts = new Map<string, { label: string; value: number }>()
+            for (const entry of rows.entries) {
+                if (isAutomationEntry(entry) || !inRange(entry.date, r)) continue
+                const seen = new Set<string>()
+                for (const tag of entry.tags) {
+                    const key = normalizedLabel(tag)
+                    if (seen.has(key)) continue
+                    seen.add(key)
+                    const current = counts.get(key)
+                    counts.set(key, current ? { ...current, value: current.value + 1 } : { label: tag, value: 1 })
+                }
+            }
+            const sorted = [...counts.values()].sort((a, b) => b.value - a.value || a.label.localeCompare(b.label))
+            return { type: 'list', rows: limit === undefined ? sorted : sorted.slice(0, clampLimit(limit)) }
+        }
+    },
+    {
+        name: 'pnl_by_asset',
+        label: 'P&L by asset',
+        description: 'Total closed-trade profit and loss for each asset in a date range.',
+        examples: ['What is my P&L by asset this month?'],
+        supports: [],
+        resultType: 'list',
+        run: (rows, r) => {
+            const totals = new Map<string, number>()
+            for (const trade of rows.trades) {
+                if (trade.pnl === null || !inRange(trade.date, r)) continue
+                totals.set(trade.asset, (totals.get(trade.asset) ?? 0) + trade.pnl)
+            }
+            return {
+                type: 'list',
+                rows: [...totals].map(([label, value]) => ({ label, value: round8(value) }))
+                .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label))
+            }
+        }
     }
 ]
 
@@ -425,14 +525,15 @@ export const functionByName = (name: string): AssistantFunctionDef | undefined =
 
 export const ASSISTANT_SYSTEM_PROMPT =
     'You answer questions about the user\'s personal logbook, savings, trades, habits and tasks. ' +
-    'You cannot see any raw data. Reply with ONLY one JSON object, no prose, in this exact shape: ' +
-    '{"function":"<name>","range":{"kind":"<range kind>"},"question":"<the user\'s question, repeated back>"}; ' +
+    'You cannot see any raw data. Reply with ONLY one JSON object, no prose, with function, range, and question fields. ' +
+    'Optionally include filters, compare:"previous", or limit (biggest_losses and biggest_wins only); ' +
     'use range kinds today, yesterday, this_week, last_week, this_month, last_month, this_year, all_time, ' +
     'or {"kind":"last_n_days","n":1..1830}, or {"kind":"between","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}. ' +
     'Add a filters object only when useful, copying relevant words from the question without guessing, such as {"filters":{"asset":"XAUUSD"}}. ' +
     'Add "compare":"previous" only when the user asks for a comparison; otherwise use "compare":null. ' +
     ASSISTANT_FUNCTIONS.map((f) => `${f.name} supports filters: ${f.supports.join(', ') || 'none'}.`).join(' ') + ' ' +
     'For unsupported questions, reply with {"function":"cannot_answer"}. ' +
+    'For biggest_losses and biggest_wins, set limit to the requested number of rows, default 3, clamped from 1 to 10. ' +
     'Choose "function" from this list:\n' +
     ASSISTANT_FUNCTIONS.map((f) => `- ${f.name}: ${f.description}`).join('\n') +
     '\nChoose the range kind that matches the user\'s words; do not calculate dates for symbolic ranges. ' +
@@ -445,7 +546,7 @@ export const ASSISTANT_USER_PROMPT = (question: string, today: string): string =
 // ---------- parsing the reply (the model's ONE function call) ----------
 
 export type AssistantCall =
-    | { kind: 'function'; functionName: string; rangeSpec: RangeSpec; filters: AssistantFilters; compare: 'previous' | null; question: string }
+    | { kind: 'function'; functionName: string; rangeSpec: RangeSpec; filters: AssistantFilters; compare: 'previous' | null; limit?: number; question: string }
     | { kind: 'none' }
 
 export type RangeSpec =
@@ -490,9 +591,11 @@ export function parseAssistantReply(raw: string): { ok: true; call: AssistantCal
     if (start < 0 || end <= start) return { ok: false, error: failureText('model') }
     let obj: unknown
     try { obj = JSON.parse(text.slice(start, end + 1)) } catch { return { ok: false, error: failureText('model') } }
-    const o = obj as { function?: unknown; range?: unknown; filters?: unknown; compare?: unknown; question?: unknown }
+    const o = obj as { function?: unknown; range?: unknown; filters?: unknown; compare?: unknown; limit?: unknown; question?: unknown }
     if (typeof o.function !== 'string') return { ok: false, error: failureText('model') }
-    if (o.function === 'cannot_answer' || !functionByName(o.function)) return { ok: true, call: { kind: 'none' } }
+    if (o.function === 'cannot_answer') return { ok: true, call: { kind: 'none' } }
+    const fn = functionByName(o.function)
+    if (!fn) return { ok: true, call: { kind: 'none' } }
     const rangeSpec = parseRangeSpec(o.range)
     if (!rangeSpec) return { ok: false, error: failureText('model') }
     let filters: AssistantFilters = {}
@@ -511,8 +614,19 @@ export function parseAssistantReply(raw: string): { ok: true; call: AssistantCal
         ? null
         : o.compare === 'previous' ? 'previous' : undefined
     if (compare === undefined) return { ok: false, error: failureText('model') }
+    if (o.limit !== undefined && (!fn.supportsLimit || typeof o.limit !== 'number' || !Number.isFinite(o.limit))) {
+        return { ok: false, error: failureText('model') }
+    }
+    const limit = o.limit === undefined ? undefined : clampLimit(o.limit as number)
     const question = typeof o.question === 'string' && o.question.trim() ? o.question.trim() : ''
-    return { ok: true, call: { kind: 'function', functionName: o.function, rangeSpec, filters, compare, question } }
+    return {
+        ok: true,
+        call: {
+            kind: 'function', functionName: o.function, rangeSpec, filters, compare,
+            ...(limit === undefined ? {} : { limit }),
+            question
+        }
+    }
 }
 
 // Cleans a model answer: drops reasoning blocks and keeps the JSON object the
@@ -614,7 +728,7 @@ export type AssistantDisclosure =
     rangeSpec: RangeSpec
     range: DateRange
     filters: FilterDisclosure
-    result: number
+    result: AssistantResult
     compare: 'previous' | null
     previousRange: DateRange | null
     previousResult: number | null

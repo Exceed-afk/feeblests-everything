@@ -36,9 +36,9 @@ test('Assistant and Insights count each recurring completion from task history',
     const rows: AssistantRows = {
       txs: [], goals: [], trades: [], habits: [], tasks: [], completions, entries: []
     }
-    assert.equal(
+    assert.deepEqual(
       functionByName('tasks_completed')!.run(rows, { from: dates[0], to: today }),
-      3
+      { type: 'number', value: 3 }
     )
 
     const insightDays = buildInsightDays({

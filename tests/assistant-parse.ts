@@ -22,7 +22,7 @@ test('an unknown function name is treated as an unsupported question', () => {
 test('the local refusal lists the supported capabilities', () => {
   assert.equal(
     CANNOT_ANSWER_MESSAGE,
-    "I can't compute that yet. I can answer: savings total, trade P&L, habit completion, tasks completed, mood average, journal entries."
+    "I can't compute that yet. I can answer: savings total, trade P&L, habit completion, tasks completed, mood average, journal entries, biggest losses, biggest wins, most-used tags, P&L by asset."
   )
 })
 

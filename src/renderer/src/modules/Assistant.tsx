@@ -158,7 +158,25 @@ export function Assistant() {
                             )}
                             <div>
                               <dt className="meta">Result computed on this computer</dt>
-                              <dd className="mt-0.5 num">{fmtAmount(x.disclosure.result)}</dd>
+                              {x.disclosure.result.type === 'number' ? (
+                                <dd className="mt-0.5 num">{fmtAmount(x.disclosure.result.value)}</dd>
+                              ) : x.disclosure.result.rows.length === 0 ? (
+                                <dd className="mt-0.5">No results for this date range.</dd>
+                              ) : (
+                                <dd>
+                                  <table className="tbl mt-2">
+                                    <caption className="sr-only">Locally computed list answer</caption>
+                                    <thead><tr><th scope="col">Item</th><th scope="col">Value</th></tr></thead>
+                                    <tbody>
+                                      {x.disclosure.result.rows.map((row, rowIndex) => (
+                                        <tr key={`${row.label}-${rowIndex}`}>
+                                          <th scope="row">{row.label}</th><td className="num">{row.value}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </dd>
+                              )}
                             </div>
                             {x.disclosure.previousRange && x.disclosure.previousResult !== null && (
                               <div>

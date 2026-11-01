@@ -43,9 +43,10 @@ const THIS_WEEK = weekRange(TODAY)
 const LAST_30 = lastNDays(TODAY, 30)
 
 // ---------- the fixed function table ----------
-test('exactly the six read-only functions are offered', () => {
+test('the supported read-only functions are offered', () => {
   assert.deepEqual(ASSISTANT_FUNCTIONS.map((f) => f.name).sort(), [
-    'habit_completion_rate', 'journal_entries', 'mood_average', 'savings_total', 'tasks_completed', 'trade_pnl'
+    'biggest_losses', 'biggest_wins', 'habit_completion_rate', 'journal_entries', 'mood_average',
+    'pnl_by_asset', 'savings_total', 'tasks_completed', 'top_tags', 'trade_pnl'
   ].sort())
 })
 test('savings_total nets deposits and withdrawals in range only', () => {
@@ -57,7 +58,7 @@ test('savings_total nets deposits and withdrawals in range only', () => {
       tx('2026-07-01', 'deposit', 999) // outside the month range
     ]
   }), monthRange(TODAY))
-  assert.equal(r, 150)
+  assert.deepEqual(r, { type: 'number', value: 150 })
 })
 test('trade_pnl counts closed trades on their entry date, skips open ones', () => {
   const f = functionByName('trade_pnl')!
@@ -68,21 +69,21 @@ test('trade_pnl counts closed trades on their entry date, skips open ones', () =
       trade('2026-10-04', 100, null) // open: excluded
     ]
   }), LAST_30)
-  assert.equal(r, 10)
+  assert.deepEqual(r, { type: 'number', value: 10 })
 })
 test('habit_completion_rate counts scheduled days only', () => {
   const f = functionByName('habit_completion_rate')!
   // Weekdays-only habit; the range is Mon 19 – Fri 23 Oct, all 5 scheduled, 3 checked.
   const h = habit('Read', [0, 1, 2, 3, 4], ['2026-10-19', '2026-10-20', '2026-10-21'])
   const r = f.run(rows({ habits: [h] }), full({ from: '2026-10-19', to: '2026-10-23' }))
-  assert.equal(r, 75) // 3 checked of 4 elapsed due days; today is still pending
+  assert.deepEqual(r, { type: 'number', value: 75 }) // 3 checked of 4 elapsed due days; today is still pending
 })
 test('habit_completion_rate ignores archived habits and counts only scheduled days', () => {
   const f = functionByName('habit_completion_rate')!
   const archived = { ...habit('Old', EVERY, ['2026-10-20']), archived: true } // ignored
   const weekend = habit('Fun', [5, 6], ['2026-10-24']) // Sat 24 scheduled + checked; Sun 25 scheduled + unchecked
   const r = f.run(rows({ habits: [archived, weekend] }), full({ from: '2026-10-19', to: '2026-10-25' }))
-  assert.equal(r, 100) // Sunday is still pending, so only Saturday enters the rate
+  assert.deepEqual(r, { type: 'number', value: 100 }) // Sunday is still pending, so only Saturday enters the rate
 })
 test('tasks_completed matches completion timestamps on their local day', () => {
   const f = functionByName('tasks_completed')!
@@ -94,32 +95,32 @@ test('tasks_completed matches completion timestamps on their local day', () => {
   ]
   const completions = tasks.flatMap((t) => t.completedAt ? [{ taskId: t.id, completedAt: t.completedAt }] : [])
   const r = f.run(rows({ tasks, completions }), THIS_WEEK)
-  assert.equal(r, 2)
+  assert.deepEqual(r, { type: 'number', value: 2 })
 })
 test('mood_average averages the 1-5 scores in range, 0 when none', () => {
   const f = functionByName('mood_average')!
-  assert.equal(f.run(rows({ entries: [entry('2026-10-20', 'good'), entry('2026-10-21', 'great')] }), LAST_30), 4.5)
-  assert.equal(f.run(rows(), LAST_30), 0)
+  assert.deepEqual(f.run(rows({ entries: [entry('2026-10-20', 'good'), entry('2026-10-21', 'great')] }), LAST_30), { type: 'number', value: 4.5 })
+  assert.deepEqual(f.run(rows(), LAST_30), { type: 'number', value: 0 })
 })
 test('mood_average ignores automation drafts', () => {
   const f = functionByName('mood_average')!
   const draft = { ...entry('2026-10-20', 'rough'), tags: ['automation'] }
-  assert.equal(f.run(rows({ entries: [draft, entry('2026-10-20', 'good')] }), LAST_30), 4)
+  assert.deepEqual(f.run(rows({ entries: [draft, entry('2026-10-20', 'good')] }), LAST_30), { type: 'number', value: 4 })
 })
 test('journal_entries counts entries in range', () => {
   const f = functionByName('journal_entries')!
-  assert.equal(f.run(rows({ entries: [entry('2026-10-20', null), entry('2026-10-21', null), entry('2026-09-01', null)] }), LAST_30), 2)
+  assert.deepEqual(f.run(rows({ entries: [entry('2026-10-20', null), entry('2026-10-21', null), entry('2026-09-01', null)] }), LAST_30), { type: 'number', value: 2 })
 })
 test('journal_entries ignores automation drafts', () => {
   const f = functionByName('journal_entries')!
   const draft = { ...entry('2026-10-20', null), tags: ['automation'] }
-  assert.equal(f.run(rows({ entries: [draft, entry('2026-10-20', null)] }), LAST_30), 1)
+  assert.deepEqual(f.run(rows({ entries: [draft, entry('2026-10-20', null)] }), LAST_30), { type: 'number', value: 1 })
 })
-test('every function is read-only by shape: rows in, number out', () => {
+test('every function is read-only by shape and does not mutate rows', () => {
   for (const f of ASSISTANT_FUNCTIONS) {
     const before = JSON.stringify([[], [], [], [], []])
     const result = f.run(rows(), THIS_WEEK)
-    assert.equal(typeof result, 'number')
+    assert.equal(result.type, f.resultType)
     assert.equal(JSON.stringify([[], [], [], [], []]), before) // nothing mutated
     void before; void result
   }

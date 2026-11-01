@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Assistant now shows locally computed tables for biggest trade losses/wins, most-used journal tags and P&L by asset; trade lists default to three and cap at ten
 - Assistant can compare a period with an equal-length previous period; both results are calculated locally, with percent change omitted when the previous value is zero
 - Assistant supports local matching for asset, direction, tag, goal, project and habit filters without sending the app's label lists to the provider
 - Assistant date ranges now use symbolic calendar periods resolved locally (including all-time from 1970); disclosures show both the model's requested range and resolved dates, while legacy explicit dates remain supported

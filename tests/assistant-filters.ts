@@ -73,7 +73,7 @@ test('trade filters apply the matched asset, direction and tag locally', () => {
   assert.ok(matched.ok)
   if (!matched.ok) return
   assert.deepEqual(matched.filters, { asset: 'XAUUSD', direction: 'long', tag: 'gold' })
-  assert.equal(functionByName('trade_pnl')!.run(rows, month, undefined, matched.filters), 25)
+  assert.deepEqual(functionByName('trade_pnl')!.run(rows, month, undefined, matched.filters), { type: 'number', value: 25 })
 })
 
 test('goal and habit filters resolve to local identifiers and select only the matching record', () => {
@@ -82,13 +82,13 @@ test('goal and habit filters resolve to local identifiers and select only the ma
   if (!selectedGoal.ok) return
   assert.deepEqual(selectedGoal.filters, { goal: goal.id })
   assert.deepEqual(selectedGoal.disclosure.matched, { goal: 'Emergency Fund' })
-  assert.equal(functionByName('savings_total')!.run(rows, month, undefined, selectedGoal.filters), 100)
+  assert.deepEqual(functionByName('savings_total')!.run(rows, month, undefined, selectedGoal.filters), { type: 'number', value: 100 })
 
   const selectedHabit = matchFilters(rows, 'habit_completion_rate', { habit: 'reading' })
   assert.ok(selectedHabit.ok)
   if (!selectedHabit.ok) return
   assert.deepEqual(selectedHabit.filters, { habit: habit.id })
-  assert.equal(functionByName('habit_completion_rate')!.run(rows, month, '2026-10-23', selectedHabit.filters), 4.54545455)
+  assert.deepEqual(functionByName('habit_completion_rate')!.run(rows, month, '2026-10-23', selectedHabit.filters), { type: 'number', value: 4.54545455 })
 })
 
 test('task and journal tag filters match locally', () => {
@@ -96,12 +96,12 @@ test('task and journal tag filters match locally', () => {
   assert.ok(project.ok)
   if (!project.ok) return
   assert.deepEqual(project.filters, { project: 'Work', tag: 'planning' })
-  assert.equal(functionByName('tasks_completed')!.run(rows, month, undefined, project.filters), 1)
+  assert.deepEqual(functionByName('tasks_completed')!.run(rows, month, undefined, project.filters), { type: 'number', value: 1 })
   const journal = matchFilters(rows, 'mood_average', { tag: 'trading' })
   assert.ok(journal.ok)
   if (!journal.ok) return
   assert.deepEqual(journal.filters, { tag: 'Trading' })
-  assert.equal(functionByName('mood_average')!.run(rows, month, undefined, journal.filters), 4)
+  assert.deepEqual(functionByName('mood_average')!.run(rows, month, undefined, journal.filters), { type: 'number', value: 4 })
 })
 
 test('filter inputs must be non-empty strings with known names', () => {

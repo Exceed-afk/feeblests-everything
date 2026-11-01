@@ -6,16 +6,16 @@
 // What leaves the computer per question (shown to the user under each answer):
 //   - the fixed instruction block (ASSISTANT_SYSTEM_PROMPT, no user data),
 //   - one user turn: "Today is <date>. Question: <their question>",
-//   - nothing else. No rows, no SQL, no history. The numeric result comes back
-//     to the app and never travels to the provider again.
+//   - nothing else. No rows, no SQL, no history. The local result never travels
+//     to the provider again.
 import { safeStorage } from 'electron'
 import type Database from 'better-sqlite3'
 import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
   assistantQuestionError, assistantReady, assistantSettingsPatchError, CANNOT_ANSWER_MESSAGE, checkEndpoint, clampRange, cleanModelText, comparisonChange, failureText,
-  functionByName, matchFilters, normalizeAssistantPatch,
+  functionByName, listEmptyMessage, matchFilters, normalizeAssistantPatch,
   parseAssistantReply, previousRange, resolveRange,
-  type AssistantExchange, type AssistantFunctionInfo, type AssistantKeyStatus, type AssistantProvider, type AssistantRows, type AssistantSettings,
+  type AssistantExchange, type AssistantFunctionInfo, type AssistantKeyStatus, type AssistantProvider, type AssistantResult, type AssistantRows, type AssistantSettings,
   type AskOutcome
 } from '../shared/assistant'
 import { listEntries } from './logbook'
@@ -207,32 +207,45 @@ export async function askAssistant(db: Database.Database, question: string, toda
 
   const fn = functionByName(parsed.call.functionName)
   if (!fn) return { ok: false, error: failureText('model') }
+  if (parsed.call.compare === 'previous' && fn.resultType === 'list') {
+    return { ok: false, error: 'List answers cannot be compared with a previous period yet.' }
+  }
 
   // The ONE local, read-only run. Nothing here writes: AssistantRows is built from
-  // SELECT-only queries, and fn returns a number.
+  // SELECT-only queries, and fn returns a local typed result.
   const range = clamped.range
   const prior = parsed.call.compare === 'previous' ? previousRange(range) : null
   const rows = loadRows(db, today, prior ? { from: prior.from, to: range.to } : range)
   const filterMatch = matchFilters(rows, fn.name, parsed.call.filters)
   if (!filterMatch.ok) return { ok: false, error: filterMatch.error }
-  let result: number
+  let result: AssistantResult
   let priorResult: number | null = null
   try {
-    result = fn.run(rows, range, today, filterMatch.filters)
-    if (prior) priorResult = fn.run(rows, prior, today, filterMatch.filters)
+    result = fn.run(rows, range, today, filterMatch.filters, parsed.call.limit)
+    if (prior) {
+      const previous = fn.run(rows, prior, today, filterMatch.filters, parsed.call.limit)
+      if (previous.type !== 'number') {
+        return { ok: false, error: 'List answers cannot be compared with a previous period yet.' }
+      }
+      priorResult = previous.value
+    }
   } catch {
     return { ok: false, error: failureText('model') }
   }
 
   const filterNote = filterMatch.warning ? ` ${filterMatch.warning}` : ''
-  const comparison = priorResult === null ? null : comparisonChange(result, priorResult)
+  const comparison = priorResult === null || result.type !== 'number' ? null : comparisonChange(result.value, priorResult)
   const comparisonText = comparison && priorResult !== null
     ? comparison.direction === 'unchanged'
       ? ` (previous period: ${priorResult}; no change).`
       : ` (previous period: ${priorResult}; ${comparison.direction} ${Math.abs(comparison.change)}${comparison.percent === null ? '' : `, ${Math.abs(comparison.percent)}%`}).`
     : ''
   const answer =
-    `${fn.name.replace(/_/g, ' ')} for ${range.from} to ${range.to}: ${result}` +
+    (result.type === 'list'
+      ? result.rows.length === 0
+        ? listEmptyMessage(fn.label)
+        : `${fn.label} for ${range.from} to ${range.to}: ${result.rows.length} results.`
+      : `${fn.name.replace(/_/g, ' ')} for ${range.from} to ${range.to}: ${result.value}`) +
     (parsed.call.question && parsed.call.question !== question.trim() ? ` (about: ${parsed.call.question})` : '') +
     comparisonText + filterNote
 
@@ -261,6 +274,8 @@ export async function askAssistant(db: Database.Database, question: string, toda
 
 // The function list for the Intelligence page's plain-language table.
 export const assistantFunctionList = (): AssistantFunctionInfo[] =>
-  ASSISTANT_FUNCTIONS.map(({ name, description, examples, supports }) => ({ name, description, examples, supports }))
+  ASSISTANT_FUNCTIONS.map(({ name, description, examples, supports, resultType, supportsLimit }) => ({
+    name, description, examples, supports, resultType, supportsLimit: supportsLimit === true
+  }))
 
 export { DEFAULT_ASSISTANT }

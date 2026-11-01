@@ -34,7 +34,7 @@ test('a far-future endpoint is clamped before the habit loop runs', () => {
   assert.deepEqual(clamped, { ok: true, range: { from: today, to: today } })
   if (!clamped.ok) throw new Error('Expected the range to clamp successfully.')
   const result = functionByName('habit_completion_rate')!.run(rows, clamped.range)
-  assert.equal(result, 0)
+  assert.deepEqual(result, { type: 'number', value: 0 })
   assert.ok(performance.now() - start < 200, 'the assistant range calculation should finish in under 200 ms')
 })
 
