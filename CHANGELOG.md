@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restoring an archived habit moves it to the end of the list; partial updates (restore) no longer reset type/target/unit/time of day
 
 ### Fixed
+- Intelligence feature toggles now update the sidebar and palette immediately instead of waiting for an app restart
 - Automation failures are logged and skipped so they cannot make an already-saved Logbook entry, trade, savings, task, or habit change appear to fail
 - Intelligence feature changes now merge in the main process; automation settings and insight dismissals move to independent settings keys without losing their saved values
 - The Intelligence provider picker and Assistant now use the same provider setting; legacy provider choices are moved during the existing settings-key migration

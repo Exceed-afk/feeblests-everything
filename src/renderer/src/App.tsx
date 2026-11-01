@@ -2,17 +2,16 @@ import { useCallback, useEffect, useState } from 'react'
 import { Sidebar, SIDEBAR_NARROW } from './components/Sidebar'
 import { PaletteHost } from './components/PaletteHost'
 import { START_TOOL, TOOLS, findTool, toolByShortcut } from './tools'
-import { getCurrentSettings, loadSettings, updateSettings } from './lib/settingsStore'
+import { getCurrentSettings, loadSettings, updateSettings, useSettings } from './lib/settingsStore'
 import { ErrorBoundary } from './lib/error-boundary'
 import type { OpenTarget } from './lib/navigation'
 import { pushRecent } from '../../shared/palette'
-import { DEFAULT_INTELLIGENCE } from '../../shared/types'
+import { DEFAULT_INTELLIGENCE, type Settings } from '../../shared/types'
 
-// The visible tool list, respecting the Intelligence feature toggles. Turning the daily briefing
-// off removes it from the sidebar and the palette (opening /briefing directly still works, it
-// just is not advertised).
-function visibleTools(): typeof TOOLS {
-  const f = getCurrentSettings().intelligence?.features ?? DEFAULT_INTELLIGENCE.features
+// The visible tool list, respecting the Intelligence feature toggles. App subscribes to settings
+// so enabling or disabling a tool updates the sidebar and palette immediately.
+function visibleTools(settings: Settings): typeof TOOLS {
+  const f = settings.intelligence?.features ?? DEFAULT_INTELLIGENCE.features
   let list = TOOLS
   if (!f.dailyBriefing) list = list.filter((t) => t.id !== 'briefing')
   if (!f.insights) list = list.filter((t) => t.id !== 'insights')
@@ -21,6 +20,7 @@ function visibleTools(): typeof TOOLS {
 }
 
 export default function App() {
+  const settings = useSettings()
   const [active, setActive] = useState(START_TOOL.id)
   // An item another page asked us to open (e.g. a search result). The page
   // that receives it opens the item, then clears it.
@@ -37,8 +37,7 @@ export default function App() {
     const next = pushRecent(recent, t.id)
     if (next !== recent) updateSettings({ recentTools: next }) // unchanged (already the newest) = nothing to save
   }, [])
-  const [tools, setTools] = useState(visibleTools)
-  useEffect(() => { setTools(visibleTools()) }, [])
+  const tools = visibleTools(settings)
   const open = useCallback((t: OpenTarget) => { setTarget(t); navigate(t.module) }, [])
   const clearTarget = useCallback(() => setTarget(null), [])
 
