@@ -36,7 +36,7 @@ const task = (completedAt: string | null): Task => ({
 
 const EVERY = [0, 1, 2, 3, 4, 5, 6]
 const rows = (over: Partial<AssistantRows> = {}): AssistantRows => ({
-  txs: [], trades: [], habits: [], tasks: [], completions: [], entries: [], ...over
+  txs: [], goals: [], trades: [], habits: [], tasks: [], completions: [], entries: [], ...over
 })
 const full = (r: DateRange): DateRange => r
 const THIS_WEEK = weekRange(TODAY)
@@ -206,7 +206,7 @@ test('a well-formed model reply parses to one call', () => {
   const raw = '{"function":"savings_total","range":{"from":"2026-10-01","to":"2026-10-31"},"question":"how much did I save?"}'
   const r = parseAssistantReply(raw)
   assert.ok(r.ok)
-  assert.deepEqual(!r.ok ? null : r.call, { kind: 'function', functionName: 'savings_total', rangeSpec: { kind: 'between', from: '2026-10-01', to: '2026-10-31' }, question: 'how much did I save?' })
+  assert.deepEqual(!r.ok ? null : r.call, { kind: 'function', functionName: 'savings_total', rangeSpec: { kind: 'between', from: '2026-10-01', to: '2026-10-31' }, filters: {}, question: 'how much did I save?' })
 })
 test('a reply wrapped in prose or think-blocks still parses', () => {
   const raw = 'Some preamble {"function":"tasks_completed","range":{"from":"2026-10-19","to":"2026-10-25"},"question":"q"} trailing'

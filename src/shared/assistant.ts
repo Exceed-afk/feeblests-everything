@@ -16,7 +16,7 @@ import { isAutomationEntry } from './automations'
 import { MOOD_SCORE } from './types'
 import { addDays, habitRateInRange, weekdayOf } from './habits'
 import { localTaskDay } from './tasks'
-import type { Habit, LogEntry, Mood, SavingsTx, Task, TaskCompletion, Trade } from './types'
+import type { Habit, LogEntry, Mood, SavingsGoal, SavingsTx, Task, TaskCompletion, Trade } from './types'
 
 // ---------- provider modes ----------
 
@@ -160,6 +160,7 @@ export function defaultUrl(provider: AssistantProvider): string {
 
 export interface AssistantRows {
     txs: SavingsTx[]
+    goals: SavingsGoal[]
     trades: Trade[]
     habits: Habit[]
     tasks: Task[]
@@ -202,13 +203,119 @@ export interface AssistantFunctionDef {
     label: string
     description: string // goes into the prompt
     examples: string[]
-    run: (rows: AssistantRows, range: DateRange, today?: string) => number
+    supports: FilterName[]
+    run: (rows: AssistantRows, range: DateRange, today?: string, filters?: ResolvedAssistantFilters) => number
 }
 
 export interface AssistantFunctionInfo {
     name: string
     description: string
     examples: string[]
+    supports: FilterName[]
+}
+
+export type FilterName = 'asset' | 'direction' | 'tag' | 'goal' | 'project' | 'habit'
+export type AssistantFilters = Partial<Record<FilterName, string>>
+export type ResolvedAssistantFilters = Partial<Record<FilterName, string | number>>
+
+export interface FilterDisclosure {
+    sent: AssistantFilters
+    matched: ResolvedAssistantFilters
+    ignored: FilterName[]
+}
+
+export type FilterMatchResult =
+    | { ok: true; filters: ResolvedAssistantFilters; disclosure: FilterDisclosure; warning: string | null }
+    | { ok: false; error: string }
+
+const FILTER_NAMES: FilterName[] = ['asset', 'direction', 'tag', 'goal', 'project', 'habit']
+const normalizedLabel = (label: string): string => label.trim().toLocaleLowerCase()
+
+const matchLabel = (label: string, candidates: string[]): string | null =>
+    candidates.find((candidate) => normalizedLabel(candidate) === normalizedLabel(label)) ?? null
+
+const filterNotFound = (name: FilterName, value: string): string => {
+    const article = /^[aeiou]/i.test(name) ? 'an' : 'a'
+    return `I couldn't find ${article} ${name} called "${value}".`
+}
+
+export function matchFilters(
+    rows: AssistantRows,
+    functionName: string,
+    filters: AssistantFilters = {}
+): FilterMatchResult {
+    const fn = functionByName(functionName)
+    if (!fn) return { ok: false, error: 'That assistant function is not supported.' }
+
+    const matched: ResolvedAssistantFilters = {}
+    const displayMatched: ResolvedAssistantFilters = {}
+    const ignored: FilterName[] = []
+    for (const [rawName, rawValue] of Object.entries(filters)) {
+        if (!FILTER_NAMES.includes(rawName as FilterName) || typeof rawValue !== 'string' || !rawValue.trim()) {
+            return { ok: false, error: 'That filter is not valid.' }
+        }
+        const name = rawName as FilterName
+        const value = rawValue.trim()
+        if (!fn.supports.includes(name)) {
+            ignored.push(name)
+            continue
+        }
+
+        if (name === 'direction') {
+            const direction = value.trim().toLowerCase()
+            if (direction !== 'long' && direction !== 'short') {
+                return { ok: false, error: filterNotFound(name, value) }
+            }
+            matched.direction = direction
+            displayMatched.direction = direction
+            continue
+        }
+
+        let candidates: string[]
+        switch (name) {
+            case 'asset':
+                candidates = [...new Set(rows.trades.map((trade) => trade.asset))]
+                break
+            case 'tag':
+                candidates = [...new Set(
+                    functionName === 'trade_pnl' ? rows.trades.flatMap((trade) => trade.tags)
+                        : functionName === 'tasks_completed' ? rows.tasks.flatMap((task) => task.tags)
+                            : rows.entries.flatMap((entry) => entry.tags)
+                )]
+                break
+            case 'goal':
+                candidates = rows.goals.map((goal) => goal.name)
+                break
+            case 'project':
+                candidates = [...new Set(rows.tasks.flatMap((task) => task.project ? [task.project] : []))]
+                break
+            case 'habit':
+                candidates = rows.habits.map((habit) => habit.name)
+                break
+        }
+        const found = matchLabel(value, candidates)
+        if (!found) return { ok: false, error: filterNotFound(name, value) }
+        displayMatched[name] = found
+        if (name === 'goal') {
+            const goal = rows.goals.find((item) => item.name === found)
+            if (!goal) return { ok: false, error: filterNotFound(name, value) }
+            matched.goal = goal.id
+        } else if (name === 'habit') {
+            const habit = rows.habits.find((item) => item.name === found)
+            if (!habit) return { ok: false, error: filterNotFound(name, value) }
+            matched.habit = habit.id
+        } else matched[name] = found
+    }
+
+    const warning = ignored.length > 0
+        ? `Note: I ignored unsupported filters: ${ignored.join(', ')}.`
+        : null
+    return {
+        ok: true,
+        filters: matched,
+        disclosure: { sent: { ...filters }, matched: displayMatched, ignored },
+        warning
+    }
 }
 
 const inRange = (date: string, r: DateRange): boolean => date >= r.from && date <= r.to
@@ -229,22 +336,36 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         label: 'savings total',
         description: 'Net savings (deposits minus withdrawals) for a date range.',
         examples: ['How much did I save last month?'],
-        run: (rows, r) => round8(rows.txs.filter((t) => inRange(t.date, r)).reduce((a, t) => a + signedAmount(t.kind, t.amount), 0))
+        supports: ['goal'],
+        run: (rows, r, _today, filters) => round8(rows.txs
+            .filter((t) => inRange(t.date, r) && (filters?.goal === undefined || t.goalId === filters.goal))
+            .reduce((a, t) => a + signedAmount(t.kind, t.amount), 0))
     },
     {
         name: 'trade_pnl',
         label: 'trade P&L',
         description: 'Total profit and loss of trades dated in a date range (a trade counts on its entry date; open trades are not counted).',
         examples: ['What was my total trade P&L this month?'],
-        run: (rows, r) => round8(rows.trades.filter((t) => t.pnl !== null && inRange(t.date, r)).reduce((a, t) => a + (t.pnl as number), 0))
+        supports: ['asset', 'direction', 'tag'],
+        run: (rows, r, _today, filters) => round8(rows.trades
+            .filter((t) => t.pnl !== null && inRange(t.date, r) &&
+                (filters?.asset === undefined || t.asset === filters.asset) &&
+                (filters?.direction === undefined || t.direction === filters.direction) &&
+                (filters?.tag === undefined || t.tags.some((tag) => normalizedLabel(tag) === normalizedLabel(String(filters.tag))))
+            )
+            .reduce((a, t) => a + (t.pnl as number), 0))
     },
     {
         name: 'habit_completion_rate',
         label: 'habit completion',
         description: 'Percentage of scheduled habit days checked off in a date range; 0 when nothing was scheduled.',
         examples: ['What was my habit completion rate this week?'],
-        run: (rows, r, today = r.to) => {
-            const totals = rows.habits.reduce((sum, habit) => {
+        supports: ['habit'],
+        run: (rows, r, today = r.to, filters) => {
+            const selectedHabits = rows.habits.filter((habit) =>
+                filters?.habit === undefined || habit.id === filters.habit
+            )
+            const totals = selectedHabits.reduce((sum, habit) => {
                 const rate = habitRateInRange(habit, r.from, r.to, today)
                 return { done: sum.done + rate.done, due: sum.due + rate.due }
             }, { done: 0, due: 0 })
@@ -256,15 +377,31 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         label: 'tasks completed',
         description: 'How many tasks were completed in a date range.',
         examples: ['How many tasks did I complete this week?'],
-        run: (rows, r) => rows.completions.filter((completion) => completedOn(completion, r)).length
+        supports: ['project', 'tag'],
+        run: (rows, r, _today, filters) => {
+            if (filters?.project === undefined && filters?.tag === undefined) {
+                return rows.completions.filter((completion) => completedOn(completion, r)).length
+            }
+            const tasksById = new Map(rows.tasks.map((task) => [task.id, task]))
+            return rows.completions.filter((completion) => {
+                const task = tasksById.get(completion.taskId)
+                return task !== undefined && completedOn(completion, r) &&
+                    (filters?.project === undefined || task.project === filters.project) &&
+                    (filters?.tag === undefined || task.tags.some((tag) => normalizedLabel(tag) === normalizedLabel(String(filters.tag))))
+            }).length
+        }
     },
     {
         name: 'mood_average',
         label: 'mood average',
         description: 'Average mood (1 rough to 5 great) of journal entries dated in a date range; 0 when none were logged.',
         examples: ["What's my mood average over the last 30 days?"],
-        run: (rows, r) => {
-            const m = moodScores(rows.entries, r)
+        supports: ['tag'],
+        run: (rows, r, _today, filters) => {
+            const entries = filters?.tag === undefined ? rows.entries
+                : rows.entries.filter((entry) => entry.tags.some((tag) =>
+                    normalizedLabel(tag) === normalizedLabel(String(filters.tag))))
+            const m = moodScores(entries, r)
             return m.length === 0 ? 0 : round8(m.reduce((a, b) => a + b, 0) / m.length)
         }
     },
@@ -273,7 +410,11 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
         label: 'journal entries',
         description: 'How many journal entries were written in a date range.',
         examples: ['How many journal entries did I write this month?'],
-        run: (rows, r) => rows.entries.filter((e) => !isAutomationEntry(e) && inRange(e.date, r)).length
+        supports: ['tag'],
+        run: (rows, r, _today, filters) => rows.entries.filter((e) => !isAutomationEntry(e) && inRange(e.date, r) &&
+            (filters?.tag === undefined || e.tags.some((tag) =>
+                normalizedLabel(tag) === normalizedLabel(String(filters.tag)))))
+            .length
     }
 ]
 
@@ -288,6 +429,8 @@ export const ASSISTANT_SYSTEM_PROMPT =
     '{"function":"<name>","range":{"kind":"<range kind>"},"question":"<the user\'s question, repeated back>"}; ' +
     'use range kinds today, yesterday, this_week, last_week, this_month, last_month, this_year, all_time, ' +
     'or {"kind":"last_n_days","n":1..1830}, or {"kind":"between","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}. ' +
+    'Add a filters object only when useful, copying relevant words from the question without guessing, such as {"filters":{"asset":"XAUUSD"}}. ' +
+    ASSISTANT_FUNCTIONS.map((f) => `${f.name} supports filters: ${f.supports.join(', ') || 'none'}.`).join(' ') + ' ' +
     'For unsupported questions, reply with {"function":"cannot_answer"}. ' +
     'Choose "function" from this list:\n' +
     ASSISTANT_FUNCTIONS.map((f) => `- ${f.name}: ${f.description}`).join('\n') +
@@ -301,7 +444,7 @@ export const ASSISTANT_USER_PROMPT = (question: string, today: string): string =
 // ---------- parsing the reply (the model's ONE function call) ----------
 
 export type AssistantCall =
-    | { kind: 'function'; functionName: string; rangeSpec: RangeSpec; question: string }
+    | { kind: 'function'; functionName: string; rangeSpec: RangeSpec; filters: AssistantFilters; question: string }
     | { kind: 'none' }
 
 export type RangeSpec =
@@ -346,13 +489,25 @@ export function parseAssistantReply(raw: string): { ok: true; call: AssistantCal
     if (start < 0 || end <= start) return { ok: false, error: failureText('model') }
     let obj: unknown
     try { obj = JSON.parse(text.slice(start, end + 1)) } catch { return { ok: false, error: failureText('model') } }
-    const o = obj as { function?: unknown; range?: unknown; question?: unknown }
+    const o = obj as { function?: unknown; range?: unknown; filters?: unknown; question?: unknown }
     if (typeof o.function !== 'string') return { ok: false, error: failureText('model') }
     if (o.function === 'cannot_answer' || !functionByName(o.function)) return { ok: true, call: { kind: 'none' } }
     const rangeSpec = parseRangeSpec(o.range)
     if (!rangeSpec) return { ok: false, error: failureText('model') }
+    let filters: AssistantFilters = {}
+    if (o.filters !== undefined) {
+        if (!o.filters || typeof o.filters !== 'object' || Array.isArray(o.filters)) return { ok: false, error: failureText('model') }
+        const parsedFilters: AssistantFilters = {}
+        for (const [name, value] of Object.entries(o.filters)) {
+            if (!FILTER_NAMES.includes(name as FilterName) || typeof value !== 'string' || !value.trim()) {
+                return { ok: false, error: failureText('model') }
+            }
+            parsedFilters[name as FilterName] = value.trim()
+        }
+        filters = parsedFilters
+    }
     const question = typeof o.question === 'string' && o.question.trim() ? o.question.trim() : ''
-    return { ok: true, call: { kind: 'function', functionName: o.function, rangeSpec, question } }
+    return { ok: true, call: { kind: 'function', functionName: o.function, rangeSpec, filters, question } }
 }
 
 // Cleans a model answer: drops reasoning blocks and keeps the JSON object the
@@ -434,6 +589,7 @@ export type AssistantDisclosure =
     functionName: string
     rangeSpec: RangeSpec
     range: DateRange
+    filters: FilterDisclosure
     result: number
     })
     | (AssistantDisclosureBase & { kind: 'cannot_answer' })

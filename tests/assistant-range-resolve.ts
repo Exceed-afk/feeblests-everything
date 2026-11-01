@@ -97,7 +97,7 @@ test('all-time habit calculations begin at the habit tracking start date', () =>
   }
   const range = resolveRange({ kind: 'all_time' }, today)
   const result = functionByName('habit_completion_rate')!.run({
-    txs: [], trades: [], habits: [habit], tasks: [], completions: [], entries: []
+    txs: [], goals: [], trades: [], habits: [habit], tasks: [], completions: [], entries: []
   }, range, today)
   assert.equal(result, 4.54545455)
 })
@@ -123,6 +123,7 @@ test('the previous date range shape remains valid as an explicit between range',
       kind: 'function',
       functionName: 'savings_total',
       rangeSpec: { kind: 'between', from: '2026-10-01', to: '2026-10-31' },
+      filters: {},
       question: ''
     }
   })

@@ -91,7 +91,7 @@ test('pending today and future days do not count in a rate', () => {
 })
 
 test('Assistant and Insights use the shared habit-rate totals', () => {
-  const rows: AssistantRows = { txs: [], trades: [], habits, tasks: [], completions: [], entries: [] }
+  const rows: AssistantRows = { txs: [], goals: [], trades: [], habits, tasks: [], completions: [], entries: [] }
   const assistantRate = functionByName('habit_completion_rate')!.run(rows, { from, to: today }, today)
   assert.equal(assistantRate, round8((totals.done / totals.due) * 100))
 

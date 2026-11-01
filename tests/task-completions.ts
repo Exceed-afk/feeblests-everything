@@ -34,7 +34,7 @@ test('Assistant and Insights count each recurring completion from task history',
     const completions = listCompletions(db, { from: dates[0], to: today })
     assert.equal(completions.length, 3)
     const rows: AssistantRows = {
-      txs: [], trades: [], habits: [], tasks: [], completions, entries: []
+      txs: [], goals: [], trades: [], habits: [], tasks: [], completions, entries: []
     }
     assert.equal(
       functionByName('tasks_completed')!.run(rows, { from: dates[0], to: today }),

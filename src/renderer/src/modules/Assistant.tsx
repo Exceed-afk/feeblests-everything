@@ -138,6 +138,24 @@ export function Assistant() {
                               <dt className="meta">Resolved dates</dt>
                               <dd className="mt-0.5 num">{x.disclosure.range.from} → {x.disclosure.range.to}</dd>
                             </div>
+                            {Object.keys(x.disclosure.filters.sent).length > 0 && (
+                              <div>
+                                <dt className="meta">Filters sent by the model</dt>
+                                <dd className="mt-0.5 font-mono">{JSON.stringify(x.disclosure.filters.sent)}</dd>
+                              </div>
+                            )}
+                            {Object.keys(x.disclosure.filters.matched).length > 0 && (
+                              <div>
+                                <dt className="meta">Matched locally</dt>
+                                <dd className="mt-0.5 font-mono">{JSON.stringify(x.disclosure.filters.matched)}</dd>
+                              </div>
+                            )}
+                            {x.disclosure.filters.ignored.length > 0 && (
+                              <div>
+                                <dt className="meta">Ignored unsupported filters</dt>
+                                <dd className="mt-0.5">{x.disclosure.filters.ignored.join(', ')}</dd>
+                              </div>
+                            )}
                             <div>
                               <dt className="meta">Result computed on this computer</dt>
                               <dd className="mt-0.5 num">{fmtAmount(x.disclosure.result)}</dd>
@@ -186,7 +204,10 @@ export function Assistant() {
                   <p className="mt-1 text-sm text-muted">Read-only, one number each, run on this computer. The model picks one; it never sees rows or queries.</p>
                   <ul className="mt-2 flex flex-col gap-1 text-sm">
                     {functions.map((f) => (
-                      <li key={f.name}><span className="num font-medium">{f.name}</span> — {f.description}</li>
+                      <li key={f.name}>
+                        <span className="num font-medium">{f.name}</span> — {f.description}
+                        {f.supports.length > 0 && <span className="text-muted"> Filters: {f.supports.join(', ')}.</span>}
+                      </li>
                     ))}
                   </ul>
                 </section>

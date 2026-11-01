@@ -13,14 +13,14 @@ import type Database from 'better-sqlite3'
 import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
   assistantQuestionError, assistantReady, assistantSettingsPatchError, CANNOT_ANSWER_MESSAGE, checkEndpoint, clampRange, cleanModelText, failureText,
-  functionByName, normalizeAssistantPatch,
+  functionByName, matchFilters, normalizeAssistantPatch,
   parseAssistantReply, resolveRange,
   type AssistantExchange, type AssistantFunctionInfo, type AssistantKeyStatus, type AssistantProvider, type AssistantRows, type AssistantSettings,
   type AskOutcome
 } from '../shared/assistant'
 import { listEntries } from './logbook'
 import { listTrades } from './trades'
-import { listAllTransactions } from './savings'
+import { listAllTransactions, listGoals } from './savings'
 import { listHabits } from './habits'
 import { listCompletions, listTasks } from './tasks'
 import { deleteSetting, getSettings, setSetting } from './db'
@@ -107,6 +107,7 @@ export function keyStatus(): AssistantKeyStatus {
 
 const loadRows = (db: Database.Database, today: string, range: { from: string; to: string }): AssistantRows => ({
   txs: listAllTransactions(db),
+  goals: listGoals(db),
   trades: listTrades(db),
   habits: listHabits(db, today).habits,
   tasks: listTasks(db, today),
@@ -208,16 +209,20 @@ export async function askAssistant(db: Database.Database, question: string, toda
   // SELECT-only queries, and fn returns a number.
   const range = clamped.range
   const rows = loadRows(db, today, range)
+  const filterMatch = matchFilters(rows, fn.name, parsed.call.filters)
+  if (!filterMatch.ok) return { ok: false, error: filterMatch.error }
   let result: number
   try {
-    result = fn.run(rows, range, today)
+    result = fn.run(rows, range, today, filterMatch.filters)
   } catch {
     return { ok: false, error: failureText('model') }
   }
 
+  const filterNote = filterMatch.warning ? ` ${filterMatch.warning}` : ''
   const answer =
     `${fn.name.replace(/_/g, ' ')} for ${range.from} to ${range.to}: ${result}` +
-    (parsed.call.question && parsed.call.question !== question.trim() ? ` (about: ${parsed.call.question})` : '')
+    (parsed.call.question && parsed.call.question !== question.trim() ? ` (about: ${parsed.call.question})` : '') +
+    filterNote
 
   const exchange: AssistantExchange = {
     question: question.trim(),
@@ -231,6 +236,7 @@ export async function askAssistant(db: Database.Database, question: string, toda
       functionName: fn.name,
       rangeSpec,
       range,
+      filters: filterMatch.disclosure,
       result
     },
     at: new Date().toISOString()
@@ -240,6 +246,6 @@ export async function askAssistant(db: Database.Database, question: string, toda
 
 // The function list for the Intelligence page's plain-language table.
 export const assistantFunctionList = (): AssistantFunctionInfo[] =>
-  ASSISTANT_FUNCTIONS.map(({ name, description, examples }) => ({ name, description, examples }))
+  ASSISTANT_FUNCTIONS.map(({ name, description, examples, supports }) => ({ name, description, examples, supports }))
 
 export { DEFAULT_ASSISTANT }
