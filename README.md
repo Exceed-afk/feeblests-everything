@@ -242,7 +242,7 @@ The **Assistant** page answers questions about your own data through a chat. **O
 In **all** modes the model never sees rows, SQL, history, or the database: it replies with one function call from a fixed list (`savings_total`, `trade_pnl`, `habit_completion_rate`, `tasks_completed`, `mood_average`, `journal_entries`), each taking only a from/to date range; the app runs it locally on the shared data layer. One call per question, no chaining. Read-only by construction — there is no write path.
 
 ### Key storage
-Cloud keys are encrypted with **Electron `safeStorage`** (Windows DPAPI / macOS Keychain / desktop keyring) and stored only as a ciphertext blob. If the OS cannot encrypt (e.g. Linux without a keyring backend), saving is **refused** with an explanation rather than writing plain text. The key is never sent to the renderer, never logged, never shown back, and **excluded from JSON backups**.
+Cloud keys are encrypted with **Electron `safeStorage`** (Windows DPAPI / macOS Keychain / desktop keyring) and stored only as a ciphertext blob. If the OS cannot encrypt (e.g. Linux without a keyring backend), saving is **refused** with an explanation rather than writing plain text. The key is never sent to the renderer, never logged, never shown back, and **excluded from JSON backups**. Remove key deletes the stored blob; if a saved blob cannot be decrypted on this computer, both Assistant pages say to paste it again.
 
 ### Safety and failure handling
 Plain, specific errors for: assistant off, cloud not confirmed, no key, unreachable server, rejected key, timeout (30 s), unusable model replies. Chats exist only in the page's memory — "Clear history" empties them and nothing is persisted anywhere, not even the question list.

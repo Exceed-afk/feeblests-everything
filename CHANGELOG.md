@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automation failures are logged and skipped so they cannot make an already-saved Logbook entry, trade, savings, task, or habit change appear to fail
 - Intelligence feature changes now merge in the main process; automation settings and insight dismissals move to independent settings keys without losing their saved values
 - The Intelligence provider picker and Assistant now use the same provider setting; legacy provider choices are moved during the existing settings-key migration
+- Removing an assistant key now deletes its stored blob; both Assistant surfaces distinguish a key that is saved but unreadable on this computer
 - Fixed floating-point rounding in fmtPnl using round8
 - Fixed fmtAmount to strip sign for consistent locale formatting
 - Fixed rate30 null display showing '0% scheduled' when due===0

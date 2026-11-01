@@ -28,6 +28,17 @@ export interface AssistantSettings {
     cloudConfirmed: boolean // the explicit "I understand data leaves the computer" step
 }
 
+export interface AssistantKeyStatus {
+    saved: boolean
+    readable: boolean
+    encryptionOk: boolean
+}
+
+export function keyStateLabel(status: AssistantKeyStatus): 'none' | 'ok' | 'unreadable' {
+  if (!status.saved) return 'none'
+  return status.readable ? 'ok' : 'unreadable'
+}
+
 export const DEFAULT_ASSISTANT: AssistantSettings = {
     provider: 'off',
     localUrl: 'http://localhost:11434/v1',

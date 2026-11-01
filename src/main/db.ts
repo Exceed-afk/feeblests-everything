@@ -112,6 +112,10 @@ export function setSetting(key: string, value: unknown): void {
     .run(key, JSON.stringify(value))
 }
 
+export function deleteSetting(key: string): void {
+  db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+}
+
 // Copy of the whole database, made right before an import replaces it.
 // Kept in its own folder so the daily-backup cleanup never deletes it; newest 5 stay.
 export async function safetyCopy(): Promise<string> {

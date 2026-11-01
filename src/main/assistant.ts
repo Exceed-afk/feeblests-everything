@@ -14,7 +14,7 @@ import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
   assistantReady, checkEndpoint, cleanAssistantSettingsPatch, cleanModelText, failureText, functionByName,
   parseAssistantReply,
-  type AssistantExchange, type AssistantProvider, type AssistantRows, type AssistantSettings,
+  type AssistantExchange, type AssistantKeyStatus, type AssistantProvider, type AssistantRows, type AssistantSettings,
   type AskOutcome, type DateRange
 } from '../shared/assistant'
 import { listEntries } from './logbook'
@@ -22,11 +22,12 @@ import { listTrades } from './trades'
 import { listAllTransactions } from './savings'
 import { listHabits } from './habits'
 import { listTasks } from './tasks'
-import { getSettings, setSetting, getDb } from './db'
+import { deleteSetting, getSettings, setSetting, getDb } from './db'
 import { isDate } from './util'
 
 const TIMEOUT_MS = 30_000
 const KEY_SETTING = 'assistantKeyBlob' // encrypted blob, NOT the key itself
+let readableCache: boolean | null = null
 
 // ---------- provider settings (the key lives apart, encrypted) ----------
 
@@ -60,7 +61,8 @@ export function encryptionAvailable(): boolean {
 }
 
 export function keySaved(): boolean {
-  return getSettings()[KEY_SETTING as keyof ReturnType<typeof getSettings>] !== undefined
+  const blob = (getSettings() as unknown as Record<string, unknown>)[KEY_SETTING]
+  return typeof blob === 'string' && blob.length > 0
 }
 
 export function storeKey(plain: string): KeyStoreResult {
@@ -70,11 +72,13 @@ export function storeKey(plain: string): KeyStoreResult {
   }
   const blob = safeStorage.encryptString(plain.trim()).toString('base64')
   setSetting(KEY_SETTING, blob)
+  readableCache = null
   return { ok: true }
 }
 
 export function clearKey(): void {
-  setSetting(KEY_SETTING, null)
+  deleteSetting(KEY_SETTING)
+  readableCache = null
 }
 
 const readKey = (): string | null => {
@@ -87,10 +91,16 @@ const readKey = (): string | null => {
   }
 }
 
-// The key NEVER crosses into the renderer: there is no get-key IPC, and this module
-// returns only booleans about its presence.
-export const keyStatus = (): { saved: boolean; encryptionOk: boolean } =>
-  ({ saved: keySaved(), encryptionOk: encryptionAvailable() })
+// The key NEVER crosses into the renderer: this returns only status booleans.
+export function keyStatus(): AssistantKeyStatus {
+  const saved = keySaved()
+  if (saved && readableCache === null) readableCache = readKey() !== null
+  return {
+    saved,
+    readable: saved && readableCache === true,
+    encryptionOk: encryptionAvailable()
+  }
+}
 
 // ---------- the rows the chosen function may read ----------
 

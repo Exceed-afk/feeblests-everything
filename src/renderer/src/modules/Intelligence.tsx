@@ -2,7 +2,7 @@ import { useMemo, useEffect, useState, useCallback } from 'react'
 import { Brain, Trash2, Zap } from 'lucide-react'
 import { DEFAULT_INTELLIGENCE, type IntelligenceFeatureToggles } from '../../../shared/types'
 import { DEFAULT_AUTOMATIONS, type AutomationSettings, type AutomationActivity } from '../../../shared/automations'
-import { CLOUD_CONFIRM_PHRASE, type AssistantSettings } from '../../../shared/assistant'
+import { CLOUD_CONFIRM_PHRASE, keyStateLabel, type AssistantKeyStatus, type AssistantSettings } from '../../../shared/assistant'
 import { errMsg } from '../lib/errors'
 
 const PLATFORM = typeof process !== 'undefined' ? process.platform : 'unknown'
@@ -216,7 +216,7 @@ function AssistantProviderSection({ features }: {
   features: IntelligenceFeatureToggles
 }) {
   const [assistant, setAssistant] = useState<AssistantSettings | null>(null)
-  const [keyState, setKeyState] = useState<{ saved: boolean; encryptionOk: boolean } | null>(null)
+  const [keyState, setKeyState] = useState<AssistantKeyStatus | null>(null)
   const [keyInput, setKeyInput] = useState('')
   const [keyMsg, setKeyMsg] = useState('')
   const [keyError, setKeyError] = useState('')
@@ -299,12 +299,15 @@ function AssistantProviderSection({ features }: {
       {aiProvider === 'cloud' && (
         <div className="mt-4 rounded-xl border border-line/60 p-4">
           <p className="text-sm font-medium">API key</p>
+          {keyStateLabel(keyState) === 'unreadable' && (
+            <p role="alert" className="mt-2 text-sm text-neg">A key is saved but cannot be read on this computer. Paste it again.</p>
+          )}
           {!keyState.encryptionOk ? (
             <p className="mt-1 text-sm text-neg">This system cannot encrypt a key right now (no OS keyring available{PLATFORM === 'linux' ? ' — a gnome-keyring or KWallet backend is needed' : ''}), so a key cannot be saved: it would have to be written in plain text. Use Local model mode, which needs no key.</p>
           ) : (
             <>
               <p className="mt-1 text-sm text-muted">Stored with the operating system's encryption ({PLATFORM === 'win32' ? 'Windows DPAPI' : PLATFORM === 'darwin' ? 'the macOS Keychain' : 'the desktop keyring'}). Never shown again, never logged, never included in backups.</p>
-              {keyState.saved
+              {keyStateLabel(keyState) === 'ok'
                 ? <div className="mt-2 flex items-center gap-2">
                     <span className="badge badge-pos">Key saved</span>
                     <button className="btn btn-sm" onClick={async () => { await window.api.intelligence.assistant.clearKey(); reload() }}>Remove key</button>

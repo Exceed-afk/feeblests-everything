@@ -513,7 +513,7 @@ sequenceDiagram
 | Savings | `savings_goals`, `savings_transactions` | CRUD + search, balance derived | shared/savings (progress) |
 | Habits | `habits`, `habit_checkins` | CRUD, day-status, logValue, reorder; listens to logbook events (auto-complete) | shared/habits (all rules), main/events.ts |
 | Tasks | `tasks`, `task_subtasks` | CRUD, status, bulk, reorder, recurrence resolution | shared/tasks |
-| Intelligence (automations/insights/assistant) | `automation_events`; **writes into `settings`** (`intelligence`, `assistant`, `assistantKeyBlob`, dismissed insights) | toggles, activity log, insights build/dismiss, assistant ask | automations emit from logbook/habits writes; shared/insights* |
+| Intelligence (automations/insights/assistant) | `automation_events`; **writes into `settings`** (`intelligence`, `automations`, `insightDismissals`, `assistant`, `assistantKeyBlob`) | toggles, activity log, insights build/dismiss, assistant ask | automations emit from logbook/habits writes; shared/insights* |
 | Search (main) | none | `runSearch` bundling | logbook/trades/savings search fns, shared/search |
 | Dashboard / Review / Calendar / Briefing / Insights | none (aggregators) | one-request snapshots | **every module's query functions** + shared aggregators (src/shared/dashboard.ts, review.ts, insightsData.ts, calendar.ts) |
 | Settings (core) | `settings` | get/set to everyone | shared/appearance (normalisation) |
@@ -522,7 +522,7 @@ sequenceDiagram
 **Cross-boundary call-outs (as-is in the code):**
 - `src/main/automations.ts` catches and logs failures from automation settings, rules, or activity writes. Each event emitter can therefore fail independently without turning a completed Logbook, trade, savings, task, or habit save into an apparent failure.
 - `settings:set` accepts only `DEFAULT_SETTINGS` keys and rejects main-owned settings; `settings:getAll` excludes the encrypted assistant key. Intelligence features, automations, and insight dismissals are stored separately and written by the main process.
-- `src/main/insights.ts` stores insight dismissals *inside* the core `settings.intelligence` value — the settings table is shared real estate; a second writer could clobber it (merges are done read-modify-write, safe today, fragile at scale).
+- `assistantKeyBlob` is deleted when the user removes a key. `assistant:keyStatus` reports whether a saved blob can be read on this computer without returning the key itself.
 - `src/main/reminders.ts` imports `src/main/habits.ts` functions — a main-process module reaching into another module is fine by design (both own their tables), but the habit rule it depends on (`getDayStatus`) is deliberately in `src/shared/habits.ts` so both windows of rendering agree.
 - `src/main/dashboard.ts` imports almost every module file. It is the one intentional "top" of the dependency graph; nothing else should import *it*.
 - In the renderer, module pages never import each other; they meet only through `OpenTarget` and `onNavigate` (`src/renderer/src/lib/navigation.ts`).

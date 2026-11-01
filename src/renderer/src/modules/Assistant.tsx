@@ -5,8 +5,8 @@
 // nothing else; no request exists to make.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eraser, MessageCircleQuestion, SendHorizonal } from 'lucide-react'
-import type { AssistantExchange, AssistantSettings } from '../../../shared/assistant'
-import { failureText } from '../../../shared/assistant'
+import type { AssistantExchange, AssistantKeyStatus, AssistantSettings } from '../../../shared/assistant'
+import { failureText, keyStateLabel } from '../../../shared/assistant'
 void failureText
 import { today } from '../lib/dates'
 import { errMsg } from '../lib/errors'
@@ -16,7 +16,7 @@ import { EmptyState } from '../components/EmptyState'
 
 export function Assistant() {
   const [settings, setSettings] = useState<AssistantSettings | null>(null)
-  const [keyState, setKeyState] = useState<{ saved: boolean; encryptionOk: boolean } | null>(null)
+  const [keyState, setKeyState] = useState<AssistantKeyStatus | null>(null)
   const [exchanges, setExchanges] = useState<AssistantExchange[]>([])
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
@@ -37,7 +37,7 @@ export function Assistant() {
   const masterOn = true // the Intelligence toggle gates reaching this page; keep the invariant visible
   void masterOn
   const usable = settings !== null && keyState !== null &&
-    (settings.provider === 'local' || (settings.provider === 'cloud' && settings.cloudConfirmed && keyState.saved))
+    (settings.provider === 'local' || (settings.provider === 'cloud' && settings.cloudConfirmed && keyStateLabel(keyState) === 'ok'))
 
   const ask = async (): Promise<void> => {
     if (busy || !question.trim()) return
@@ -86,11 +86,17 @@ export function Assistant() {
               <p className="mt-2 text-sm">Cloud mode sends each question to {settings.cloudUrl}. Confirm it on the Intelligence page before anything can be asked here.</p>
             </section>
           )}
-          {settings.provider === 'cloud' && settings.cloudConfirmed && keyState && !keyState.saved && (
+          {settings.provider === 'cloud' && settings.cloudConfirmed && keyState && keyStateLabel(keyState) === 'none' && (
             <section className="card card-pad mt-5">
               <h2 className="section-title">No API key yet</h2>
               <p className="mt-2 text-sm">Paste your key on the Intelligence page. It is stored with the operating system's encryption (never in plain text), never shown again, and never included in backups.</p>
               {keyState && !keyState.encryptionOk && <p className="mt-2 text-sm text-neg">This system cannot encrypt keys right now, so none can be saved.</p>}
+            </section>
+          )}
+          {settings.provider === 'cloud' && keyState && keyStateLabel(keyState) === 'unreadable' && (
+            <section className="card card-pad mt-5" role="alert">
+              <h2 className="section-title">API key unavailable</h2>
+              <p className="mt-2 text-sm">A key is saved but cannot be read on this computer. Paste it again on the Intelligence page.</p>
             </section>
           )}
 
