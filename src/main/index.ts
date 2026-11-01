@@ -120,7 +120,7 @@ app.on('will-quit', () => capture?.dispose())
 
 app.whenReady().then(async () => {
   if (!gotLock) return // a second copy: the first one was asked to come forward and this one is closing
-  await initDatabase()
+  if (!await initDatabase()) return
   // Habit reminders: a check every minute while the app runs. It needs the
   // database once it exists, and clicking a notification focuses the app.
   startReminders(getDb, showMainWindow)

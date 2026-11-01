@@ -1,6 +1,6 @@
 // All database code lives here. The UI never touches the database directly.
 import Database from 'better-sqlite3'
-import { app } from 'electron'
+import { app, dialog } from 'electron'
 import { join } from 'path'
 import { mkdirSync, readdirSync, unlinkSync, existsSync } from 'fs'
 import { DEFAULT_SETTINGS, type Settings } from '../shared/types'
@@ -14,22 +14,54 @@ export const getDb = (): Database.Database => db
 
 export const dataDir = (): string => join(app.getPath('userData'), 'data')
 
-export async function initDatabase(): Promise<void> {
+export async function initDatabase(): Promise<boolean> {
   const dir = dataDir()
   mkdirSync(dir, { recursive: true })
   db = new Database(join(dir, 'everything.db'))
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  try {
+  const ready = await runMigrationsWithBackup(db, dir, () => {
     applyMigrations(db)
     migrateSettingsKeys(db)
-  } catch (e) {
-    console.error('Migration failed, starting with fresh schema:', e)
-    // If migrations fail, we still need a valid database.
-    // The app will work with the base schema (migration 0), but
-    // newer features may not be available until migrations are fixed.
-  }
+  }, (error) => {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('Database migration failed; startup is stopping:', error)
+    dialog.showErrorBox('Database migration failed', `The database could not be upgraded, so the app will close.\n\n${message}`)
+    app.quit()
+  })
+  if (!ready) return false
   await dailyBackup(dir)
+  return true
+}
+
+export async function backupBeforeMigrations(
+  handle: Database.Database,
+  dir: string,
+  now: Date = new Date()
+): Promise<string> {
+  const backupDir = join(dir, 'before-migrate')
+  mkdirSync(backupDir, { recursive: true })
+  const target = join(backupDir, `everything-${now.toISOString().replace(/[:.]/g, '-')}.db`)
+  await handle.backup(target)
+  readdirSync(backupDir).filter((file) => file.endsWith('.db')).sort().reverse().slice(3)
+    .forEach((file) => unlinkSync(join(backupDir, file)))
+  return target
+}
+
+export async function runMigrationsWithBackup(
+  handle: Database.Database,
+  dir: string,
+  migrate: () => void,
+  onFailure: (error: unknown) => void
+): Promise<boolean> {
+  try {
+    await backupBeforeMigrations(handle, dir)
+    migrate()
+    return true
+  } catch (error) {
+    onFailure(error)
+    return false
+  }
 }
 
 export function migrateSettingsKeys(handle: Database.Database): void {

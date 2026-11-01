@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restoring an archived habit moves it to the end of the list; partial updates (restore) no longer reset type/target/unit/time of day
 
 ### Fixed
+- Database startup now keeps the three newest pre-migration copies and closes with an error dialog if an upgrade fails
 - Intelligence feature toggles now update the sidebar and palette immediately instead of waiting for an app restart
 - Intelligence checkboxes use defaults when saved feature settings are missing, update immediately while saving, and revert with an explicit error if persistence fails
 - Automation failures are logged and skipped so they cannot make an already-saved Logbook entry, trade, savings, task, or habit change appear to fail

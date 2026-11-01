@@ -326,4 +326,4 @@ Settings > Tag colours lists every tag; pick a colour and it applies in the logb
 - File format and checks: `src/shared/backup.ts`; database side: `src/main/backup.ts`.
 
 ## Your data
-Stored in `%APPDATA%\feeblests-everything\data\everything.db`, with daily backups in `backups/`.
+Stored in `%APPDATA%\feeblests-everything\data\everything.db`, with daily backups in `backups/`. Before database upgrades, the app keeps the three newest copies in `before-migrate/`; if an upgrade fails, it reports the error and closes rather than opening against a partially upgraded database.
