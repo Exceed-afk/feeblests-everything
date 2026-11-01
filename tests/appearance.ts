@@ -88,6 +88,11 @@ test('saved legacy colour schemes and recipe palette ids migrate to unified them
   assert.equal(normalizeSettings({ palette: 'royalPlum', colorScheme: 'Midnight' }).palette, 'royal-plum')
 })
 
+test('appearance cache normalization drops unknown settings keys', () => {
+  const settings = normalizeSettings({ ...DEFAULT_SETTINGS, assistantKeyBlob: 'must not be cached' } as Parameters<typeof normalizeSettings>[0])
+  assert.equal('assistantKeyBlob' in settings, false)
+})
+
 test('existing customised colours are migrated and remain independent of the selected theme', () => {
   const settings = normalizeSettings({ palette: 'fresh-meadow', colors: { light: { panel: '#123456', card: '#234567', fg: '#345678' }, dark: {} } })
   assert.deepEqual(settings.colors.light, { sidebar: '#123456', surface: '#234567', text: '#345678' })

@@ -421,7 +421,7 @@ So: no repository/service *class* exists — the "layer" is the module-file conv
 - **JSON-in-TEXT columns**: `tags`, `habits.days`, `tasks.recurrence_rule` (parsed with `JSON.parse` at the edge of the query file).
 - **Soft delete vs hard delete**: only tasks use `deleted_at` (soft); logbook/trades/habits rows are hard-deleted (habits cascade their checkins). Foreign keys enforced by `foreign_keys = ON`.
 - **Migrations**: append-only array in `src/main/migrations.ts`, applied by counting `user_version`, each in a transaction; never edit an old entry.
-- **Backups**: automatic daily copy kept 14 days (`dailyBackup` in db.ts); a manual JSON export through `backup:exportJson` (format + validation in `src/shared/backup.ts`), trades-only CSV export; import → validate (`parseBackup`), `safetyCopy()` (kept 5) of the current DB, then full restore. The AI assistant's API key is stored in the `settings` table as an **encrypted blob** (Electron `safeStorage`), never in plain text.
+- **Backups**: automatic daily copy kept 14 days (`dailyBackup` in db.ts); a manual JSON export through `backup:exportJson` (format + validation in `src/shared/backup.ts`), trades-only CSV export; import → validate (`parseBackup`), `safetyCopy()` (kept 5) of the current DB, then full restore. The AI assistant's API key is stored in the `settings` table as an **encrypted blob** (Electron `safeStorage`), never in plain text. JSON exports omit it; daily `.db` copies can contain the ciphertext.
 
 ---
 
@@ -523,6 +523,7 @@ sequenceDiagram
 - `src/main/automations.ts` catches and logs failures from automation settings, rules, or activity writes. Each event emitter can therefore fail independently without turning a completed Logbook, trade, savings, task, or habit save into an apparent failure.
 - `settings:set` accepts only `DEFAULT_SETTINGS` keys and rejects main-owned settings; `settings:getAll` excludes the encrypted assistant key. Intelligence features, automations, and insight dismissals are stored separately and written by the main process.
 - `assistantKeyBlob` is deleted when the user removes a key. `assistant:keyStatus` reports whether a saved blob can be read on this computer without returning the key itself.
+- Assistant settings patches keep only known, length-limited values; a cloud URL change clears confirmation. Requests refuse redirects and limit questions to 500 characters. JSON backup restores reset the provider and cloud confirmation, retaining only a valid model name and local URL while dropping imported key blobs and legacy provider values.
 - `src/main/reminders.ts` imports `src/main/habits.ts` functions — a main-process module reaching into another module is fine by design (both own their tables), but the habit rule it depends on (`getDayStatus`) is deliberately in `src/shared/habits.ts` so both windows of rendering agree.
 - `src/main/dashboard.ts` imports almost every module file. It is the one intentional "top" of the dependency graph; nothing else should import *it*.
 - In the renderer, module pages never import each other; they meet only through `OpenTarget` and `onNavigate` (`src/renderer/src/lib/navigation.ts`).

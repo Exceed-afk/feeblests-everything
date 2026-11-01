@@ -1,12 +1,15 @@
 // Export / import. Reads and writes the database only; the file dialogs live
 // in index.ts. The file format and its checks are in src/shared/backup.ts.
 import type Database from 'better-sqlite3'
+import { DEFAULT_ASSISTANT, normalizeAssistantPatch } from '../shared/assistant'
 import { cleanReminderTime } from '../shared/habits'
 import { countsOf, BACKUP_APP, BACKUP_FORMAT, type BackupFile } from '../shared/backup'
 import type { BackupCounts } from '../shared/types'
 import { MIGRATIONS } from './migrations'
 
 interface R { [k: string]: any } // raw database rows
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 // Everything the app stores, as one object.
 export function collectBackup(db: Database.Database): BackupFile {
@@ -92,8 +95,22 @@ export function restoreBackup(db: Database.Database, b: BackupFile): BackupCount
     // Goals first on the way in, last on the way out (foreign key).
     for (const t of ['task_completions', 'task_subtasks', 'tasks', 'habit_checkins', 'habits', 'savings_transactions', 'savings_goals', 'trades', 'logbook_entries', 'automation_events', 'settings']) db.exec(`DELETE FROM ${t}`)
 
+    const savedAssistant = isRecord(b.settings.assistant) ? b.settings.assistant : {}
+    const restoredSettings: Record<string, unknown> = {
+      ...b.settings,
+      assistant: normalizeAssistantPatch(DEFAULT_ASSISTANT, {
+        model: savedAssistant.model,
+        localUrl: savedAssistant.localUrl
+      })
+    }
+    delete restoredSettings.assistantKeyBlob
+    if (isRecord(restoredSettings.intelligence)) {
+      const restoredIntelligence = { ...restoredSettings.intelligence }
+      delete restoredIntelligence.aiProvider
+      restoredSettings.intelligence = restoredIntelligence
+    }
     const setting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
-    for (const [k, v] of Object.entries(b.settings)) setting.run(k, JSON.stringify(v))
+    for (const [k, v] of Object.entries(restoredSettings)) setting.run(k, JSON.stringify(v))
 
     const entry = db.prepare(`INSERT INTO logbook_entries (id, date, title, body, mood, tags, created_at, updated_at)
       VALUES (@id, @date, @title, @body, @mood, @tags, @createdAt, @updatedAt)`)

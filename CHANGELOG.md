@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added CHANGELOG file for version tracking
 
+### Intelligence
+- Cloud confirmation is tied to the normalized address; assistant requests reject redirects and questions over 500 characters
+- Restoring a JSON backup resets the assistant provider and cloud confirmation while retaining the model and local URL; imported key blobs are ignored. JSON exports omit the encrypted key blob, but daily local database copies may contain it
+
 ### Appearance
 - Unified the six original colour schemes and seven named palettes into one theme list, with light and dark variants for all 13 themes
 - Replaced the six supplied palette ramps with their requested token values and added measured contrast checks for every palette, mode and interface style

@@ -2,7 +2,10 @@ import { useMemo, useEffect, useState, useCallback } from 'react'
 import { Brain, Trash2, Zap } from 'lucide-react'
 import { DEFAULT_INTELLIGENCE, type IntelligenceFeatureToggles } from '../../../shared/types'
 import { DEFAULT_AUTOMATIONS, type AutomationSettings, type AutomationActivity } from '../../../shared/automations'
-import { CLOUD_CONFIRM_PHRASE, keyStateLabel, type AssistantKeyStatus, type AssistantSettings } from '../../../shared/assistant'
+import {
+  CLOUD_CONFIRM_PHRASE, keyStateLabel, MAX_ASSISTANT_MODEL_LENGTH, MAX_ASSISTANT_URL_LENGTH,
+  type AssistantKeyStatus, type AssistantSettings
+} from '../../../shared/assistant'
 import { errMsg } from '../lib/errors'
 
 const PLATFORM = typeof process !== 'undefined' ? process.platform : 'unknown'
@@ -77,7 +80,7 @@ export function Intelligence() {
 
   return (
     <div className="page page-sm">
-      <PageHeader title="Intelligence" subtitle="Turn individual features on or off. Everything runs on your computer.">
+      <PageHeader title="Intelligence" subtitle="Turn individual features on or off. Everything runs on your computer unless you choose Cloud for the assistant.">
         <Brain size={20} className="text-accent" />
       </PageHeader>
 
@@ -234,13 +237,18 @@ function AssistantProviderSection({ features }: {
 
   if (!assistant || !keyState) return null
   const patch = async (p: Partial<AssistantSettings>): Promise<void> => {
-    const next = await window.api.intelligence.assistant.set(p)
-    setAssistant(next)
+    try {
+      const next = await window.api.intelligence.assistant.set(p)
+      setAssistant(next)
+      setSettingsError('')
+    } catch (error) {
+      setSettingsError(errMsg(error))
+    }
   }
   const aiProvider = assistant.provider
   const setAiProvider = (provider: AssistantSettings['provider']) => {
     setSettingsError('')
-    void patch({ provider }).catch((error) => setSettingsError(errMsg(error)))
+    void patch({ provider })
   }
 
   return (
@@ -278,19 +286,19 @@ function AssistantProviderSection({ features }: {
         </div>
       )}
       {aiProvider === 'cloud' && assistant.cloudConfirmed && (
-        <p className="meta mt-3" role="status">Cloud confirmed. You can switch back to Off any time; the confirmation stays until you clear it by switching to Off… nothing is stored about your questions either way.</p>
+        <p className="meta mt-3" role="status">Confirmed for this address. Changing the address asks again.</p>
       )}
 
       {aiProvider !== 'off' && (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col text-xs text-muted">Address ({aiProvider === 'local' ? 'localhost only' : 'https required'})
-            <input className="field mt-1" value={aiProvider === 'local' ? localUrl : cloudUrl}
+            <input className="field mt-1" value={aiProvider === 'local' ? localUrl : cloudUrl} maxLength={MAX_ASSISTANT_URL_LENGTH}
               onChange={(e) => (aiProvider === 'local' ? setLocalUrl : setCloudUrl)(e.target.value)}
               onBlur={() => patch(aiProvider === 'local' ? { localUrl } : { cloudUrl })}
               aria-label="Provider address" />
           </label>
           <label className="flex flex-col text-xs text-muted">Model name
-            <input className="field mt-1" value={model} onChange={(e) => setModel(e.target.value)}
+            <input className="field mt-1" value={model} maxLength={MAX_ASSISTANT_MODEL_LENGTH} onChange={(e) => setModel(e.target.value)}
               onBlur={() => patch({ model })} aria-label="Model name" />
           </label>
         </div>
@@ -306,7 +314,7 @@ function AssistantProviderSection({ features }: {
             <p className="mt-1 text-sm text-neg">This system cannot encrypt a key right now (no OS keyring available{PLATFORM === 'linux' ? ' — a gnome-keyring or KWallet backend is needed' : ''}), so a key cannot be saved: it would have to be written in plain text. Use Local model mode, which needs no key.</p>
           ) : (
             <>
-              <p className="mt-1 text-sm text-muted">Stored with the operating system's encryption ({PLATFORM === 'win32' ? 'Windows DPAPI' : PLATFORM === 'darwin' ? 'the macOS Keychain' : 'the desktop keyring'}). Never shown again, never logged, never included in backups.</p>
+              <p className="mt-1 text-sm text-muted">Stored with the operating system's encryption ({PLATFORM === 'win32' ? 'Windows DPAPI' : PLATFORM === 'darwin' ? 'the macOS Keychain' : 'the desktop keyring'}). Never shown again, never logged, never included in exports.</p>
               {keyStateLabel(keyState) === 'ok'
                 ? <div className="mt-2 flex items-center gap-2">
                     <span className="badge badge-pos">Key saved</span>

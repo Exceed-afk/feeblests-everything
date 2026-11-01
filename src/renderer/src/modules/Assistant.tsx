@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eraser, MessageCircleQuestion, SendHorizonal } from 'lucide-react'
 import type { AssistantExchange, AssistantKeyStatus, AssistantSettings } from '../../../shared/assistant'
-import { failureText, keyStateLabel } from '../../../shared/assistant'
+import { failureText, keyStateLabel, MAX_ASSISTANT_QUESTION_LENGTH } from '../../../shared/assistant'
 void failureText
 import { today } from '../lib/dates'
 import { errMsg } from '../lib/errors'
@@ -89,7 +89,7 @@ export function Assistant() {
           {settings.provider === 'cloud' && settings.cloudConfirmed && keyState && keyStateLabel(keyState) === 'none' && (
             <section className="card card-pad mt-5">
               <h2 className="section-title">No API key yet</h2>
-              <p className="mt-2 text-sm">Paste your key on the Intelligence page. It is stored with the operating system's encryption (never in plain text), never shown again, and never included in backups.</p>
+              <p className="mt-2 text-sm">Paste your key on the Intelligence page. It is stored with the operating system's encryption (never in plain text), never shown again, and never included in exports. Automatic local database copies may contain the encrypted blob.</p>
               {keyState && !keyState.encryptionOk && <p className="mt-2 text-sm text-neg">This system cannot encrypt keys right now, so none can be saved.</p>}
             </section>
           )}
@@ -143,7 +143,7 @@ export function Assistant() {
               {error && <p role="alert" className="mt-3 text-sm text-neg">{error}</p>}
 
               <form className="mt-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); void ask() }}>
-                <input className="field" value={question} onChange={(e) => setQuestion(e.target.value)}
+                <input className="field" value={question} maxLength={MAX_ASSISTANT_QUESTION_LENGTH} onChange={(e) => setQuestion(e.target.value)}
                   placeholder="Ask about your own data…" aria-label="Your question" disabled={busy} />
                 <button type="submit" className="btn-primary" disabled={busy || !question.trim()} aria-busy={busy}>
                   <SendHorizonal size={15} /> Ask

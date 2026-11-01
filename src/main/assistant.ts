@@ -12,7 +12,8 @@ import { safeStorage } from 'electron'
 import type Database from 'better-sqlite3'
 import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
-  assistantReady, checkEndpoint, cleanAssistantSettingsPatch, cleanModelText, failureText, functionByName,
+  assistantQuestionError, assistantReady, assistantSettingsPatchError, checkEndpoint, cleanModelText, failureText,
+  functionByName, normalizeAssistantPatch,
   parseAssistantReply,
   type AssistantExchange, type AssistantKeyStatus, type AssistantProvider, type AssistantRows, type AssistantSettings,
   type AskOutcome, type DateRange
@@ -38,9 +39,9 @@ export function assistantSettings(): AssistantSettings {
 }
 
 export function setAssistantSettings(patch: Partial<AssistantSettings>): AssistantSettings {
-  const cleanPatch = cleanAssistantSettingsPatch(patch)
-  if (Object.keys(cleanPatch).length === 0) return assistantSettings()
-  const next = { ...assistantSettings(), ...cleanPatch }
+  const patchError = assistantSettingsPatchError(patch)
+  if (patchError) throw new Error(patchError)
+  const next = normalizeAssistantPatch(assistantSettings(), patch)
   setSetting('assistant', next)
   return next
 }
@@ -135,7 +136,8 @@ async function callProvider(url: string, key: string | null, model: string, ques
         ...(key ? { Authorization: `Bearer ${key}` } : {})
       },
       body: JSON.stringify(body),
-      signal: controller.signal
+      signal: controller.signal,
+      redirect: 'error'
     })
     if (res.status === 401 || res.status === 403) return { ok: false, kind: 'badkey' }
     if (!res.ok) return { ok: false, kind: 'http' }
@@ -158,6 +160,8 @@ export async function askAssistant(db: Database.Database, question: string, toda
     return { ok: false, error: settings.provider === 'cloud' && !settings.cloudConfirmed ? failureText('confirm') : failureText('off') }
   }
   if (!question.trim()) return { ok: false, error: 'Ask something first.' }
+  const questionError = assistantQuestionError(question)
+  if (questionError) return { ok: false, error: questionError }
   if (!isDate(today)) throw new Error('Date must look like 2026-10-25')
 
   const endpoint = settings.provider === 'cloud' ? settings.cloudUrl : settings.localUrl

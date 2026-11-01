@@ -47,18 +47,71 @@ export const DEFAULT_ASSISTANT: AssistantSettings = {
     cloudConfirmed: false
 }
 
-export function cleanAssistantSettingsPatch(patch: unknown): Partial<AssistantSettings> {
-    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return {}
-    const values = patch as Record<string, unknown>
-    const clean: Partial<AssistantSettings> = {}
-    if (values.provider === 'off' || values.provider === 'local' || values.provider === 'cloud') {
-      clean.provider = values.provider
+export const MAX_ASSISTANT_URL_LENGTH = 300
+export const MAX_ASSISTANT_MODEL_LENGTH = 100
+export const MAX_ASSISTANT_QUESTION_LENGTH = 500
+
+const isProvider = (value: unknown): value is AssistantProvider =>
+  value === 'off' || value === 'local' || value === 'cloud'
+
+const comparableCloudUrl = (value: string): string => value.trim().replace(/\/+$/, '')
+
+export function assistantSettingsPatchError(patch: unknown): string | null {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return null
+  const values = patch as Record<string, unknown>
+  if (
+    (typeof values.localUrl === 'string' && values.localUrl.length > MAX_ASSISTANT_URL_LENGTH) ||
+    (typeof values.cloudUrl === 'string' && values.cloudUrl.length > MAX_ASSISTANT_URL_LENGTH)
+  ) return `Provider addresses must be ${MAX_ASSISTANT_URL_LENGTH} characters or fewer.`
+  if (typeof values.model === 'string' && values.model.length > MAX_ASSISTANT_MODEL_LENGTH) {
+    return `Model names must be ${MAX_ASSISTANT_MODEL_LENGTH} characters or fewer.`
+  }
+  return null
+}
+
+export function normalizeAssistantPatch(current: AssistantSettings, patch: unknown): AssistantSettings {
+    const currentCloudUrl = typeof current.cloudUrl === 'string' ? current.cloudUrl : ''
+    const next: AssistantSettings = {
+      provider: isProvider(current.provider) ? current.provider : DEFAULT_ASSISTANT.provider,
+      localUrl: typeof current.localUrl === 'string' && current.localUrl.length <= MAX_ASSISTANT_URL_LENGTH
+        ? current.localUrl : DEFAULT_ASSISTANT.localUrl,
+      cloudUrl: typeof current.cloudUrl === 'string' && current.cloudUrl.length <= MAX_ASSISTANT_URL_LENGTH
+        ? current.cloudUrl : DEFAULT_ASSISTANT.cloudUrl,
+      model: typeof current.model === 'string' && current.model.length <= MAX_ASSISTANT_MODEL_LENGTH
+        ? current.model : DEFAULT_ASSISTANT.model,
+      cloudConfirmed: typeof current.cloudConfirmed === 'boolean' ? current.cloudConfirmed : false
     }
-    if (typeof values.localUrl === 'string') clean.localUrl = values.localUrl
-    if (typeof values.cloudUrl === 'string') clean.cloudUrl = values.cloudUrl
-    if (typeof values.model === 'string') clean.model = values.model
-    if (typeof values.cloudConfirmed === 'boolean') clean.cloudConfirmed = values.cloudConfirmed
-    return clean
+    let cloudUrlChanged = comparableCloudUrl(next.cloudUrl) !== comparableCloudUrl(currentCloudUrl)
+
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      if (cloudUrlChanged) next.cloudConfirmed = false
+      return next
+    }
+    const values = patch as Record<string, unknown>
+    if (values.provider === 'off' || values.provider === 'local' || values.provider === 'cloud') {
+      next.provider = values.provider
+    }
+    if (typeof values.localUrl === 'string' && values.localUrl.length <= MAX_ASSISTANT_URL_LENGTH) {
+      next.localUrl = values.localUrl
+    }
+    if (typeof values.cloudUrl === 'string' && values.cloudUrl.length <= MAX_ASSISTANT_URL_LENGTH) {
+      cloudUrlChanged = comparableCloudUrl(next.cloudUrl) !== comparableCloudUrl(values.cloudUrl)
+      next.cloudUrl = values.cloudUrl
+    }
+    if (typeof values.model === 'string' && values.model.length <= MAX_ASSISTANT_MODEL_LENGTH) {
+      next.model = values.model
+    }
+    if (typeof values.cloudConfirmed === 'boolean') {
+      next.cloudConfirmed = values.cloudConfirmed
+    }
+    if (cloudUrlChanged) next.cloudConfirmed = false
+    return next
+}
+
+export function assistantQuestionError(question: string): string | null {
+  return question.length > MAX_ASSISTANT_QUESTION_LENGTH
+    ? `A question must be ${MAX_ASSISTANT_QUESTION_LENGTH} characters or fewer.`
+    : null
 }
 
 export const CLOUD_CONFIRM_PHRASE = 'I understand'
