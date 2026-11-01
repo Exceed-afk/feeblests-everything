@@ -94,7 +94,7 @@ export function updateTrade(db: Database.Database, id: number, input: TradeInput
   const trade = getTrade(db, id)
   // A trade CLOSING (was open, now has an exit) is an automation event.
   if (before && before.exit_price === null && trade.exitPrice !== null && trade.pnl !== null) {
-    void emitAutomation(db, 'trade-closed', `trade:${trade.id}`, { tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset })
+    emitAutomation(db, 'trade-closed', `trade:${trade.id}`, { tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset })
   }
   return trade
 }

@@ -133,11 +133,11 @@ export function addTransaction(db: Database.Database, input: SavingsTxInput): Sa
   // Deposit added (automation event). The goal key in the event key means "first" fires once;
   // the goal-reached variant has its own key below so each message shows once per goal.
   if (t.kind === 'deposit') {
-    void emitAutomation(db, 'savings-deposit', `deposit:${tx.id}`, { goalId: goal.id, goalName: goal.name, depositAmount: t.amount })
+    emitAutomation(db, 'savings-deposit', `deposit:${tx.id}`, { goalId: goal.id, goalName: goal.name, depositAmount: t.amount })
   }
   // Goal reached (automation event): it now sits at/over its target and did not before.
   if (goal.target !== null && after >= goal.target && balanceWithout(db, goal.id) - signedAmount(t.kind, t.amount) < goal.target) {
-    void emitAutomation(db, 'goal-reached', `goal:${goal.id}:reached`, { goalId: goal.id, goalName: goal.name })
+    emitAutomation(db, 'goal-reached', `goal:${goal.id}:reached`, { goalId: goal.id, goalName: goal.name })
   }
   return tx
 }

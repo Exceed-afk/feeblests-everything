@@ -75,7 +75,7 @@ export function createEntry(db: Database.Database, input: LogEntryInput): LogEnt
   // Journal entry saved (automation event). Fires only for USER-written entries:
   // automation drafts carry the #automation tag and skip their own trigger — loop prevention.
   if (!e.tags.includes('automation')) {
-    void emitAutomation(db, 'journal-entry-saved', `entry:${entry.id}`, { entryId: entry.id })
+    emitAutomation(db, 'journal-entry-saved', `entry:${entry.id}`, { entryId: entry.id })
     // Announce the new entry on the event bus (see events.ts), so other
     // modules - like habits - can react WITHOUT this file importing them.
     emitLogbookEntryCreated(db, { date: entry.date })

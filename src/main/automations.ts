@@ -54,7 +54,7 @@ interface EmitResult { fired: { rule: string; label: string; entryId: number | n
 // Emits one event. Returns what actually happened, so the caller can tell the UI.
 // `overdueTasks` is the caller's cheap scan result for the stale-tasks rule (it
 // needs list state, not event data, so the engine takes it as run context).
-export function emitAutomation(
+function emitAutomationUnsafe(
   db: Database.Database,
   event: AutomationEventKind,
   key: string, // "trade:12", "goal:3:first-reach": one event, once per rule, ever
@@ -94,6 +94,15 @@ export function emitAutomation(
     }
   }
   return { fired }
+}
+
+export function emitAutomation(...args: Parameters<typeof emitAutomationUnsafe>): EmitResult {
+  try {
+    return emitAutomationUnsafe(...args)
+  } catch (error) {
+    console.error('[automations] failed and was skipped:', args[1], args[2], error)
+    return { fired: [] }
+  }
 }
 
 // ---------- actions out ----------

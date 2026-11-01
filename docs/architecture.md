@@ -520,6 +520,7 @@ sequenceDiagram
 | Capture (window) | none | overlay save flows | all save-able modules' IPC (via same window.api), readSettings/saveSetting deps |
 
 **Cross-boundary call-outs (as-is in the code):**
+- `src/main/automations.ts` catches and logs failures from automation settings, rules, or activity writes. Each event emitter can therefore fail independently without turning a completed Logbook, trade, savings, task, or habit save into an apparent failure.
 - `src/main/insights.ts` stores insight dismissals *inside* the core `settings.intelligence` value — the settings table is shared real estate; a second writer could clobber it (merges are done read-modify-write, safe today, fragile at scale).
 - `src/main/reminders.ts` imports `src/main/habits.ts` functions — a main-process module reaching into another module is fine by design (both own their tables), but the habit rule it depends on (`getDayStatus`) is deliberately in `src/shared/habits.ts` so both windows of rendering agree.
 - `src/main/dashboard.ts` imports almost every module file. It is the one intentional "top" of the dependency graph; nothing else should import *it*.

@@ -264,7 +264,7 @@ export function setTaskStatus(db: Database.Database, id: number, status: TaskSta
     db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?').run(status, status === 'done' ? task.completedAt : null, id)
     const updated = getTask(db, id)
     if (status === 'done' && task.status !== 'done') {
-      void emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
+      emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
     }
     return updated
   }
@@ -277,7 +277,7 @@ export function setTaskStatus(db: Database.Database, id: number, status: TaskSta
       .run(now, next, id)
     db.prepare('INSERT INTO task_completions (task_id, completed_at) VALUES (?, ?)').run(id, now)
   })()
-  void emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
+  emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
   return getTask(db, id)
 }
 

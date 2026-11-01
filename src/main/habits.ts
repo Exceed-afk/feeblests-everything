@@ -194,7 +194,7 @@ export function setCheckin(db: Database.Database, habitId: number, date: string,
   else db.prepare('DELETE FROM habit_checkins WHERE habit_id = ? AND date = ?').run(habitId, date)
   const after = getHabit(db, habitId)
   if (beforeStreak >= 7 && after.stats.current < beforeStreak) {
-    void emitAutomation(db, 'habit-streak-broken', `habit:${habitId}:break:${beforeStreak}:${after.stats.current}`,
+    emitAutomation(db, 'habit-streak-broken', `habit:${habitId}:break:${beforeStreak}:${after.stats.current}`,
       { habitId, habitName: habit.name, habitStreak: beforeStreak })
   }
 }
@@ -230,7 +230,7 @@ export function setDayStatus(
 
   const after = getHabit(db, habitId)
   if (beforeStreak >= 7 && after.stats.current < beforeStreak) {
-    void emitAutomation(db, 'habit-streak-broken', `habit:${habitId}:break:${beforeStreak}:${after.stats.current}`,
+    emitAutomation(db, 'habit-streak-broken', `habit:${habitId}:break:${beforeStreak}:${after.stats.current}`,
       { habitId, habitName: habit.name, habitStreak: beforeStreak })
   }
 }
@@ -264,7 +264,7 @@ export function logHabitValue(
 
   const after = getHabit(db, habitId)
   if (beforeStreak >= 7 && after.stats.current < beforeStreak) {
-    void emitAutomation(db, 'habit-streak-broken', `habit:${habitId}:break:${beforeStreak}:${after.stats.current}`,
+    emitAutomation(db, 'habit-streak-broken', `habit:${habitId}:break:${beforeStreak}:${after.stats.current}`,
       { habitId, habitName: habit.name, habitStreak: beforeStreak })
   }
 }
