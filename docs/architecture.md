@@ -28,7 +28,7 @@ Last verified: 2026-11-01 (package.json `0.12.0`). Every path and name below was
 | State | React `useState` per page + one settings store (`useSyncExternalStore`) | Page data refetched from SQLite on every load/write; only settings live in memory across pages |
 | Bridge | Electron `contextBridge` (`window.api`, `src/preload/index.ts`) | The only path between UI and data; ~60 typed IPC channels |
 | Logic | Pure rule modules in `src/shared/*.ts` | Streaks, recurrence, palette fuzzy match, appearance — tested with plain `tsx` |
-| Data | better-sqlite3, one file at `userData/data/everything.db` | 10 tables, 15 append-only migrations, WAL |
+| Data | better-sqlite3, one file at `userData/data/everything.db` | 11 tables, 15 append-only migrations, WAL |
 
 **Data flow in one paragraph:** every module page calls a promise-style method on `window.api`; the preload script turns it into `ipcRenderer.invoke('channel', payload)`; the matching handler in `src/main/index.ts` calls a query function in `src/main/<module>.ts` with the SQLite handle from `src/main/db.ts`; the result (plain JSON objects, never DB handles) resolves back to the page, which stores it in local `useState` and re-renders. Writes follow the same path in reverse, and pages re-fetch their lists after each write — there is no client-side data cache to keep in sync.
 
@@ -158,10 +158,12 @@ All `ipcMain.handle` calls live in `src/main/index.ts`; all caller wrappers in `
 | review | `review:build` | kind, anchor, today | `getReview` | Review |
 | calendar | `calendar:month` | `YYYY-MM`, today | `getCalendar` | Calendar |
 | briefing | `briefing:build` | today | `getBriefing` | Briefing |
-| search | `search:run` | text, limit | `runSearch` | Search page || automations | `automations:get` / `set` | settings patch | `automationSettings` / `setAutomationSettings` (writes `settings.intelligence`) | Intelligence page |
+| search | `search:run` | text, limit | `runSearch` | Search page |
+| intelligence | `intelligence:get` / `set` | feature toggles | `getSettings` / `setSetting` (writes `settings.intelligence`) | Intelligence page |
+| automations | `automations:get` / `set` | settings patch | `automationSettings` / `setAutomationSettings` (writes `settings.automations`) | Intelligence page |
 | automations | `automations:activity` / `activity:delete` / `activity:clear` | id | `automationActivity` / `deleteAutomationActivity` / `clearAutomationActivity` (automation_events; delete/clear mark rows hidden) | Intelligence page |
-| automations | `automations:staleTasks` | – | filters `listTasks` overdue | Intelligence stale-task automation |
-| insights | `insights:build` / `dismiss` | today / id, dismissed | `getInsights` / `setInsightDismissed` (writes settings) | Insights, Review |
+| automations | `automations:staleTasks` | – | `overdueTasks(db, today)` | Intelligence stale-task automation |
+| insights | `insights:build` / `dismiss` | today / id, dismissed | `getInsights` / `setInsightDismissed` (writes `settings.insightDismissals`) | Insights, Review |
 | capture | `capture:status` / `configure` / `open` / `hide` / `openMain` / `resize` / `saved` | settings patch / height | capture.ts controller | Capture window, CaptureSettings, quickAddSave |
 | app | `app:dataPath` / `app:openDataFolder` | – | `dataDir()` / `shell.openPath` | Settings |
 | backup | `backup:exportJson` / `exportTradesCsv` | today | `collectBackup` + save dialog (shared/backup.ts format) | Settings |
@@ -213,7 +215,7 @@ sequenceDiagram
     App->>Win: first module renders
 ```
 
-Notes: the settings read happens *once* (`loadSettings()` in `App.tsx`'s first effect); the pre-paint uses a localStorage cache (`appearance-cache`) that is refreshed every time settings are applied. The db migration failure path is logged and swallowed (see Known Issues).
+Notes: the settings read happens *once* (`loadSettings()` in `App.tsx`'s first effect); the pre-paint uses a localStorage cache (`appearance-cache`) that is refreshed every time settings are applied. A migration failure is backed up, shown in a dialog, and stops startup.
 
 ---
 
@@ -296,9 +298,9 @@ flowchart LR
 
 - **Engine:** better-sqlite3, **file:** `everything.db` inside `userData/data/` (`dataDir()` in `src/main/db.ts`).
 - **Pragmas:** `journal_mode = WAL`, `foreign_keys = ON` (both set in `initDatabase`).
-- **Schema version:** the SQLite `user_version` pragma, equal to `MIGRATIONS.length` = **13**. `applyMigrations()` in `src/main/migrations.ts` runs any pending entries (each wrapped in a transaction), so old databases upgrade in place.
+- **Schema version:** the SQLite `user_version` pragma, equal to `MIGRATIONS.length` = **15**. Before applying migrations the app creates a database copy in `data/before-migrate/` (newest three kept); if backup or migration fails, startup shows an error and stops. `applyMigrations()` in `src/main/migrations.ts` runs pending entries (each wrapped in a transaction), so old databases upgrade in place.
 
-### 6.2 Version history (13 migrations)
+### 6.2 Version history (15 migrations)
 
 | Ver. | What changed | Migration notes |
 |---|---|---|
@@ -315,6 +317,8 @@ flowchart LR
 | 11 | `habits.type/target/unit`, `habit_checkins.value` | check/count/duration habits; old rows = 'check' |
 | 12 | `habits.sort_order` (backfilled from creation order), `habits.time_of_day` | drag-and-drop order, grouping |
 | 13 | `habits.reminder_time`, `habits.auto_complete_on` | reminders + Logbook link; defaults = off |
+| 14 | `task_completions` + completed-at index | preserves each completed occurrence, including recurring tasks |
+| 15 | `automation_events.hidden` | hides activity without removing deduplication claims |
 
 A backup file also records `schemaVersion` (`MIGRATIONS.length`) so an import is validated against the current schema (`src/shared/backup.ts`).
 
@@ -334,7 +338,7 @@ Tables are created in `src/main/migrations.ts`; all queries are in the named mod
 | `tasks` | tasks.ts | `id` | `idx_tasks_due_status`, `idx_tasks_deleted` | title, status, priority, due_date/due_time, position, recurrence_rule(JSON)/recurrence_next, deleted_at, tags(JSON), project | Tasks |
 | `task_completions` | tasks.ts | `id` | `idx_task_completions_completed_at` | task_id (FK), completed_at (each historical occurrence) | Tasks, Assistant, Insights |
 | `task_subtasks` | tasks.ts | `id` | – | task_id (FK CASCADE), title, done, sort_order | Tasks |
-| `automation_events` | automations.ts | `id` | `idx_automation_once(rule,event_key)` unique | rule, event, event_key, label, entry_id | Intelligence automations |
+| `automation_events` | automations.ts | `id` | `idx_automation_once(rule,event_key)` unique | rule, event, event_key, label, entry_id, hidden | Intelligence automations |
 
 ### 6.4 Entity relationships
 
@@ -527,9 +531,41 @@ sequenceDiagram
 - `settings:set` accepts only `DEFAULT_SETTINGS` keys and rejects main-owned settings; `settings:getAll` excludes the encrypted assistant key. Intelligence features, automations, and insight dismissals are stored separately and written by the main process.
 - `assistantKeyBlob` is deleted when the user removes a key. `assistant:keyStatus` reports whether a saved blob can be read on this computer without returning the key itself.
 - Assistant settings patches keep only known, length-limited values; a cloud URL change clears confirmation. Requests refuse redirects and limit questions to 500 characters. Assistant reply dates are validated as calendar dates, future endpoints are clamped to today, and ranges over 1,830 days or wholly in the future are rejected before calculations. JSON backup restores reset the provider and cloud confirmation, retaining only a valid model name and local URL while dropping imported key blobs and legacy provider values.
+- **Assistant privacy contract:** local mode accepts only loopback endpoints. Cloud mode requires HTTPS and explicit confirmation for the normalized URL; the provider receives the fixed system prompt, today's local date and the user's question, with the key in the authorization header. No database rows, computed results or chat history are sent. The model selects an allowlisted read-only function; the app runs it locally and returns the numeric result in the current page session. Chat history is not persisted.
+- Automation draft entries are tagged `automation` and excluded from authored-writing totals, streaks and journal mood statistics. Clearing the Automation activity list hides rows only; it retains generated drafts and deduplication claims, so cleared triggers cannot repeat.
+- A `trade-closed` automation event is emitted both when a trade is created already closed and when an existing trade transitions from open to closed.
 - `src/main/reminders.ts` imports `src/main/habits.ts` functions — a main-process module reaching into another module is fine by design (both own their tables), but the habit rule it depends on (`getDayStatus`) is deliberately in `src/shared/habits.ts` so both windows of rendering agree.
 - `src/main/dashboard.ts` imports almost every module file. It is the one intentional "top" of the dependency graph; nothing else should import *it*.
 - In the renderer, module pages never import each other; they meet only through `OpenTarget` and `onNavigate` (`src/renderer/src/lib/navigation.ts`).
+
+### Intelligence settings keys
+
+These related settings are stored as separate rows in SQLite's `settings` table. Main-process handlers own updates so a change to one key cannot overwrite another.
+
+| Key | Contents | Writer |
+|---|---|---|
+| `intelligence` | Per-feature switches (`dailyBriefing`, `automations`, `smartQuickAdd`, `insights`, `aiAssistant`) | `intelligence:set` |
+| `automations` | Rule switches and thresholds | `automations:set` |
+| `insightDismissals` | Dismissed IDs from the finite shared `INSIGHT_IDS` list | `insights:dismiss` |
+| `assistant` | Provider, local/cloud URLs, model name and cloud confirmation | `assistant:set` |
+| `assistantKeyBlob` | Encrypted `safeStorage` ciphertext; never the plaintext key | Assistant key handlers |
+
+JSON exports omit `assistantKeyBlob`; local SQLite database copies may contain the encrypted blob.
+
+### Automation event sources
+
+The event kinds are declared in `src/shared/automations.ts`; writers in `src/main/` emit them after the corresponding save.
+
+| Event | Emitted by | Built-in listener |
+|---|---|---|
+| `trade-closed` | `createTrade` for a trade entered already closed; `updateTrade` when an open trade closes | Loss reflection |
+| `savings-deposit` | `addTransaction` for a deposit | Goal celebration receives it but takes no action; a crossing emits a separate `goal-reached` event |
+| `goal-reached` | `addTransaction` when a deposit takes the goal across its target | Goal celebration |
+| `habit-streak-broken` | `setDayStatus` when a streak of at least seven days decreases | Broken-streak note |
+| `task-completed` | `setTaskStatus` when a task is completed | Stale-overdue-task scan |
+| `journal-entry-saved` | `createEntry` for a user-written entry (automation drafts do not emit it) | Stale-overdue-task scan |
+
+The separate `src/main/events.ts` Logbook-entry bus emits after user-written entries so linked habits can auto-complete; it is not an `AutomationEventKind`.
 
 ---
 
@@ -565,13 +601,11 @@ Rules a new contributor must follow, as they actually work in the code:
 
 Honest list from reading the code (ranked by severity):
 
-1. **Stale architecture documentation — `docs/database-schema.md`.** It claims "7 migrations"; there are **13**, and it omits the tasks rework (soft delete, position, recurrence rules), habit types/values, organisation columns and the Logbook-link/reminder columns. Anyone trusting it will write wrong SQL. Fix: regenerate it from `src/main/migrations.ts` (or replace it with this file + a pointer).
-2. **Migration failure is swallowed.** `src/main/db.ts` `initDatabase` catches migration errors, logs them, and keeps running on a possibly half-migrated schema. Why it matters: a failed `ALTER` could make later feature code throw at every IPC call. Small fix: surface a visible dialog on startup in addition to the log, or rethrow after backup.
-3. **Duplicate computation risk on `habits:list`.** `listHabits` reads *all* check-in rows and recomputes up to 10 years of day-by-day stats for *every* habit on every request (walks in `src/shared/habits.ts`). It's fine for hundreds of habits, but the Tab complete/Search/calendar calls also hit it (Calendar/Capture/palette call `habits:list`). Small fix if it ever grows: compute stats lazily per habit requested, or cache `completionsOf` per db handle.
-4. **Settings debounce can lose a change in a crash window.** `settingsStore.ts` `persist()` waits 200 ms before `settings:set`; app closed within that window keeps the old value on disk (screen shows the new one). Small fix: flush pending settings on `beforeunload`/capture window close.
-5. **Some `window.api.*` calls have no `.catch`.** Most pages wrap their fetches in try/catch (for example `src/renderer/src/modules/Calendar.tsx` lines 62–64), but a few load paths can produce unhandled rejections — e.g. `src/renderer/src/modules/GoalDetail.tsx` line ~35 (`window.api.savings.listTransactions(...).then(setTxs)` with no rejection handler). Small fix: one tiny `safe(fn, onError)` wrapper in `src/renderer/src/lib/` and use it everywhere.
-6. **Insights `dismissedInsights` list grows without bound** in the settings JSON. Harmless for years; cap at ~50 with oldest-drop if you care.
-7. **Window bounds are not persisted** (see Not built yet) — deliberate absence, but users usually expect it on desktop apps.
+1. **Stale architecture documentation — `docs/database-schema.md`.** It claims "7 migrations"; there are **15**, and it omits the tasks rework (soft delete, position, recurrence rules), habit types/values, organisation columns, the Logbook-link/reminder columns and task completion history. Anyone trusting it will write wrong SQL. Fix: regenerate it from `src/main/migrations.ts` (or replace it with this file + a pointer).
+2. **Duplicate computation risk on `habits:list`.** `listHabits` reads *all* check-in rows and recomputes up to 10 years of day-by-day stats for *every* habit on every request (walks in `src/shared/habits.ts`). It's fine for hundreds of habits, but the Tab complete/Search/calendar calls also hit it (Calendar/Capture/palette call `habits:list`). Small fix if it ever grows: compute stats lazily per habit requested, or cache `completionsOf` per db handle.
+3. **Settings debounce can lose a change in a crash window.** `settingsStore.ts` `persist()` waits 200 ms before `settings:set`; app closed within that window keeps the old value on disk (screen shows the new one). Small fix: flush pending settings on `beforeunload`/capture window close.
+4. **Some `window.api.*` calls have no `.catch`.** Most pages wrap their fetches in try/catch (for example `src/renderer/src/modules/Calendar.tsx`), but a few load paths can produce unhandled rejections — e.g. `src/renderer/src/modules/GoalDetail.tsx` (`window.api.savings.listTransactions(...).then(setTxs)` with no rejection handler). Small fix: one tiny `safe(fn, onError)` wrapper in `src/renderer/src/lib/` and use it everywhere.
+5. **Window bounds are not persisted** (see Not built yet) — deliberate absence, but users usually expect it on desktop apps.
 
 ---
 
@@ -602,4 +636,4 @@ Planned/described elsewhere but **not in the code today** — do not build on th
 - **Better-sqlite3 / SQLite file** — a single-file relational database owned by the main process; `everything.db` in the user data folder.
 - **Index** — a lookup structure on table columns (e.g. `idx_logbook_date`) that keeps date-range queries fast.
 - **Migration** — a numbered SQL change in `src/main/migrations.ts` applied once, tracked by SQLite's `user_version`.
-- **Schema version** — `MIGRATIONS.length` (13 today); recorded inside backup files so imports can be validated.
+- **Schema version** — `MIGRATIONS.length` (15 today); recorded inside backup files so imports can be validated.

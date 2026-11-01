@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
-- Cloud confirmation is tied to the normalized address; assistant requests reject redirects and questions over 500 characters
+- Cloud confirmation is address-specific and must be repeated after changing the normalized address; assistant requests reject redirects and questions over 500 characters
 - Assistant date ranges reject impossible dates, clamp future endpoints to today, and reject ranges longer than five years to avoid unbounded habit calculations
 - Assistant, Insights and Habits now share due-day, skip, target and effective-start rules; future, archived and still-pending-today days no longer affect rates
 - Assistant and Insights now count each task completion occurrence from task history, including completed recurring occurrences no longer present on the current task row
@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Automations
 - Automation drafts use the local date; event claims and draft creation are transactional, and separate actions receive separate dedupe keys
-- Clearing or deleting automation activity now hides rows without allowing old triggers to repeat (append-only migration 15)
+- Deleting an automation activity row or pressing "Clear list" hides activity without removing its draft or deduplication claim, so old triggers cannot repeat (append-only migration 15)
 - Automation drafts remain visible but no longer count as user writing in streaks, authored-entry totals, or journal mood statistics
 - Entering a closed losing trade now creates its loss-reflection draft when its trade date is today or up to three days earlier; older and future-dated trades are ignored
 - Capture and Calendar check-ins now replace a skipped status with done; unchecking clears the day as before
