@@ -6,18 +6,18 @@ export type Radius = 'sharp' | 'soft' | 'round'         // corner roundness
 export type Density = 'compact' | 'comfortable' | 'spacious' // padding, margins and gaps
 export type TextSize = 'small' | 'default' | 'large'
 export type TaskLayout = 'list' | 'board' // how the Tasks tool shows its tasks
+export type TaskSort = 'manual' | 'due-date' | 'priority'
 export type FontChoice = 'system' | 'clean' | 'serif' | 'mono'
 
-// Hand-picked colours that replace part of the chosen palette (#rrggbb). Kept per mode,
-// because a dark background picked for dark mode would be wrong in light mode.
-export interface ColorOverrides { bg?: string; panel?: string; card?: string; fg?: string }
+// Hand-picked colours that replace part of the chosen palette (#rrggbb). Kept per mode.
+export interface ColorOverrides { bg?: string; sidebar?: string; surface?: string; text?: string }
 
 export interface Settings {
   intelligence: IntelligenceSettings // per-feature intelligence toggles (step 1)
   theme: ThemeMode
   accent: string // hex color, e.g. "#8b5cf6"
   tagColors: Record<string, string> // tag name -> hex color; tags not listed use the accent color
-  palette: string // id of a colour scheme, see PALETTES in shared/appearance.ts
+  palette: string // unified colour-theme id, see PALETTES in shared/appearance.ts
   uiStyle: UiStyle
   radius: Radius
   density: Density
@@ -29,6 +29,8 @@ export interface Settings {
   sidebarClosedGroups: string[] // ids of sidebar groups the user has collapsed (all others are open)
   recentTools: string[] // tool ids, most recently opened first (at most 8); shown when the command palette is empty
   taskLayout: TaskLayout // Tasks: the list or the board, remembered between sessions
+  taskSort: TaskSort
+  taskSavedViews: TaskSavedView[]
 }
 
 // Default intelligence feature toggles. Daily briefing is on; everything else is off.
@@ -37,12 +39,12 @@ export const DEFAULT_INTELLIGENCE: IntelligenceSettings = {
   aiProvider: 'off'
 }
 
-// These defaults reproduce the look of version 0.7.0 exactly.
+// The shared defaults used before saved settings are loaded.
 export const DEFAULT_SETTINGS: Settings = {
   intelligence: DEFAULT_INTELLIGENCE,
   theme: 'dark', accent: '#8b5cf6', tagColors: {},
   palette: 'default', uiStyle: 'modern', radius: 'soft', density: 'comfortable', textSize: 'default', font: 'system',
-  colors: { light: {}, dark: {} }, sidebarCollapsed: false, pinnedTools: [], sidebarClosedGroups: [], recentTools: [], taskLayout: 'list'
+  colors: { light: {}, dark: {} }, sidebarCollapsed: false, pinnedTools: [], sidebarClosedGroups: [],   recentTools: [], taskLayout: 'list', taskSort: 'manual', taskSavedViews: []
 }
 
 // The API the renderer can call. The preload script implements it and
@@ -122,17 +124,39 @@ export interface EverythingApi {
     remove(id: number): Promise<void>
     // Idempotent: checking an already-checked day (or unchecking an unchecked one) changes nothing.
     setCheckin(habitId: number, date: string, done: boolean): Promise<void>
+    // Set what a day says: 'done', 'skipped', or null to clear it (the day
+    // then falls back to "missed" if it was due, or to "rest" if it was not).
+    // The day must not be in the future.
+    // `value` is the number logged on that day, for 'count' and 'duration' habits.
+    setDayStatus(habitId: number, date: string, status: 'done' | 'skipped' | null, value?: number | null): Promise<void>
+    // Logs how much of a count/duration habit was done on a day.
+    // A value that reaches the target marks the day done.
+    logValue(habitId: number, date: string, value: number): Promise<void>
+    // Saves a new manual order after drag-and-drop: every ACTIVE habit id,
+    // in the order they should be listed (first id = top of the list).
+    reorder(ids: number[]): Promise<void>
   }
   tasks: {
     list(filter?: TaskFilter): Promise<Task[]>
+    completed(date: string): Promise<Task[]>
+    trash(): Promise<Task[]>
     create(input: TaskInput): Promise<Task>
     update(id: number, input: TaskInput): Promise<Task>
     remove(id: number): Promise<void>
+    restore(id: number): Promise<void>
+    deleteForever(id: number): Promise<void>
+    clearTrash(): Promise<void>
+    rescheduleMany(ids: number[], dueDate: string, dueTime?: string | null): Promise<void>
     setStatus(id: number, status: TaskStatus): Promise<Task>
+    undoStatus(id: number, status: TaskStatus, completedAt: string | null, recurrenceNext: string | null): Promise<void>
     // Bulk actions: every id is changed in one transaction, so a failure changes nothing.
     setStatusMany(ids: number[], status: TaskStatus): Promise<void>
     removeMany(ids: number[]): Promise<void>
     reorder(ids: number[]): Promise<void>
+    setSubtaskDone(taskId: number, subtaskId: number, done: boolean): Promise<void>
+    reorderSubtasks(taskId: number, ids: number[]): Promise<void>
+    promoteSubtask(taskId: number, subtaskId: number): Promise<Task>
+    skipOccurrence(id: number, today: string): Promise<Task>
   }
   calendar: {
     // The month grid (Monday to Sunday weeks, including the days of the neighbouring months that fill the first and last row)
@@ -297,6 +321,7 @@ export interface SearchResults {
   trades: SearchGroup<Trade>
   goals: SearchGroup<SavingsGoal>
   transactions: SearchGroup<SavingsTxHit>
+  tasks: SearchGroup<Task>
 }
 
 // ---------- Dashboard ----------
@@ -312,12 +337,17 @@ export interface PnlPoint { tradeId: number; date: string; asset: string; pnl: n
 // One habit scheduled today, as the dashboard tile shows it.
 export interface HabitToday { id: number; name: string; done: boolean; streak: number }
 
+// A habit worth naming in the dashboard's "top streaks" list.
+export interface HabitStreak { id: number; name: string; current: number }
+
 // The "Habits today" tile: scheduled-today counts, the longest running streak among active habits, and today's list.
 export interface HabitsToday {
   total: number // active habits (any schedule)
   due: number // scheduled today
   done: number // scheduled today AND checked off
   longestStreak: number // best current streak among active habits
+  // The three best current streaks (biggest first), shown in the dashboard widget.
+  topStreaks: HabitStreak[]
   items: HabitToday[] // scheduled today, unfinished first
 }
 
@@ -341,6 +371,24 @@ export interface HabitStats {
   total: number // every check-in ever
 }
 
+// One recorded day of a habit.
+//   status 'done'    = the habit was completed
+//   status 'skipped' = deliberately skipped (sick day, travel, ...)
+// "missed" and "rest" are NEVER stored: they are derived from the schedule.
+export interface HabitCompletion {
+  date: string // "YYYY-MM-DD"
+  status: 'done' | 'skipped'
+  // How much was logged on this day (for 'count' and 'duration' habits).
+  value?: number
+}
+
+// The kinds of habit there are.
+export type HabitType = 'check' | 'count' | 'duration'
+
+// When in the day the habit belongs to. 'anytime' is the same as "no time of
+// day", so a habit created before this field existed keeps meaning "anytime".
+export type TimeOfDay = 'morning' | 'afternoon' | 'evening' | 'anytime'
+
 export interface Habit {
   id: number
   name: string
@@ -348,12 +396,40 @@ export interface Habit {
   days: number[] // the days it is scheduled: 0 = Monday ... 6 = Sunday
   archived: boolean // hidden from the daily list, history kept
   startDate: string // "YYYY-MM-DD", the day tracking began
-  checkins: string[] // every day checked off, "YYYY-MM-DD"
+  checkins: string[] // every day checked off, "YYYY-MM-DD" (the "done" days)
+  // Every recorded day, done or skipped. Optional so older data (and the test
+  // fixtures) keep working: the code falls back to the checkins when it is missing.
+  completions?: HabitCompletion[]
+  // What kind of habit this is. Optional so older data keeps working:
+  // a habit without a type is a plain 'check' habit.
+  type?: HabitType
+  // How much is enough, for 'count' and 'duration' habits (3 sessions, 10 min).
+  target?: number | null
+  // The label for that number ("sessions", "min", ...).
+  unit?: string
+  // When in the day the habit belongs to, used by the "group by time of day"
+  // toggle on the Habits page. Optional so older data keeps working: a habit
+  // without one is an 'anytime' habit.
+  timeOfDay?: TimeOfDay
+  // The position in the list, from drag-and-drop (0 = first; lower comes
+  // first). Optional so older data keeps working.
+  sortOrder?: number
+  // When to remind about this habit, "HH:MM" (24-hour), or null for never.
+  // Optional so older data keeps working.
+  reminderTime?: string | null
+  // What else may complete this habit automatically. Empty ('') means
+  // nothing: only you can check it off. Optional so older data keeps working.
+  autoCompleteOn?: AutoCompleteOn
   stats: HabitStats // CALCULATED from the check-ins (never stored)
   createdAt: string
   updatedAt: string
 }
 export type HabitInput = Pick<Habit, 'name' | 'notes' | 'days' | 'archived'>
+  & Partial<Pick<Habit, 'type' | 'target' | 'unit' | 'timeOfDay' | 'reminderTime' | 'autoCompleteOn'>>
+
+// The things (besides ticking the circle yourself) that can finish a habit.
+// An empty string means "nothing else": the habit only counts when you tick it.
+export type AutoCompleteOn = '' | 'logbook-entry'
 
 // `today` comes from the main process, so the stats and the screen always agree on the date.
 export interface HabitsOverview { today: string; habits: Habit[] }
@@ -361,7 +437,7 @@ export interface HabitsOverview { today: string; habits: Habit[] }
 // ---------- Tasks ----------
 export type TaskStatus = 'todo' | 'in-progress' | 'done'
 export type TaskPriority = 'low' | 'medium' | 'high'
-export type TaskView = 'today' | 'upcoming' | 'overdue' | 'all' | 'completed'
+export type TaskView = 'today' | 'upcoming' | 'overdue' | 'all' | 'completed' | 'trash'
 export interface TaskRecurrence { frequency: 'daily' | 'weekly' | 'monthly' | 'custom'; intervalDays: number }
 export interface TaskSubtask { id: number; taskId: number; title: string; done: boolean; sortOrder: number }
 export interface Task {
@@ -377,6 +453,7 @@ export type TaskInput = Pick<Task, 'title' | 'notes' | 'status' | 'priority' | '
   subtasks: Pick<TaskSubtask, 'title' | 'done'>[]
 }
 export interface TaskFilter { view?: TaskView; text?: string; priority?: TaskPriority; project?: string; tag?: string }
+export interface TaskSavedView { id: string; name: string; filter: TaskFilter }
 export interface TaskDashboard { dueToday: number; overdue: number; completedThisWeek: number }
 export interface TaskReview { created: number; completed: number }
 
@@ -432,6 +509,8 @@ export interface ReviewHabit {
   bonus: number // check-ins on rest days
   streak: number // current streak (as on the Habits page)
   missed: string[] // scheduled days that passed unchecked
+  days: number[] // its schedule, 0 = Monday ... 6 = Sunday (so a rest day is never drawn as a win)
+  startDate: string // the day tracking began; days before it are "not tracked", not misses
 }
 
 // One day of the period, with what the day's scheduled habits came to across every active habit.
@@ -583,5 +662,3 @@ export interface CalendarData {
   weeks: CalendarDay[][] // 4 to 6 rows of 7
   summary: CalendarSummary
 }
-
-

@@ -1,10 +1,10 @@
 // One owner for the Tasks filters. The list and the board both read the result of this hook,
 // so switching views (or filtering in either one) always shows exactly the same set of tasks.
 import { useMemo, useState } from 'react'
-import { filterTasks } from '../../../shared/tasks'
-import type { Task, TaskFilter, TaskPriority, TaskView } from '../../../shared/types'
+import { filterTasks, sortTasks } from '../../../shared/tasks'
+import type { Task, TaskFilter, TaskPriority, TaskSort, TaskView } from '../../../shared/types'
 
-export function useTaskFilters(tasks: Task[], today: string) {
+export function useTaskFilters(tasks: Task[], today: string, nowTime = '00:00', sort: TaskSort = 'manual', trashTasks: Task[] = [], completedTasks: Task[] = []) {
   const [view, setView] = useState<TaskView>('today')
   const [text, setText] = useState('')
   const [priority, setPriority] = useState<TaskPriority | ''>('')
@@ -16,15 +16,16 @@ export function useTaskFilters(tasks: Task[], today: string) {
     view, text, priority: priority || undefined, project: project || undefined, tag: tag || undefined
   }), [view, text, priority, project, tag])
 
-  const filtered = useMemo(() => filterTasks(tasks, filter, today), [tasks, filter, today])
-  const projects = useMemo(() => [...new Set(tasks.map((t) => t.project).filter((x): x is string => Boolean(x)))].sort(), [tasks])
-  const tags = useMemo(() => [...new Set(tasks.flatMap((t) => t.tags))].sort(), [tasks])
+  const displayedTasks = view === 'trash' ? trashTasks : view === 'completed' ? completedTasks : tasks
+  const filtered = useMemo(() => sortTasks(filterTasks(displayedTasks, filter, today, nowTime), sort), [displayedTasks, filter, today, nowTime, sort])
+  const projects = useMemo(() => [...new Set(displayedTasks.map((t) => t.project).filter((x): x is string => Boolean(x)))].sort(), [displayedTasks])
+  const tags = useMemo(() => [...new Set(displayedTasks.flatMap((t) => t.tags))].sort(), [displayedTasks])
 
   const clear = () => { setText(''); setPriority(''); setProject(''); setTag('') }
 
   return {
     view, setView, text, setText, priority, setPriority, project, setProject, tag, setTag,
-    filter, filtered, projects, tags, clear,
+    filter, filtered, displayedTasks, projects, tags, clear,
     filtering: Boolean(text.trim() || priority || project || tag)
   }
 }

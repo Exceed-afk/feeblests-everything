@@ -7,6 +7,7 @@ import { collectBackup, currentCounts, restoreBackup } from './backup'
 import { countsOf, parseBackup, tradesToCsv, type BackupFile } from '../shared/backup'
 import { normalizeSettings, resolveTokens } from '../shared/appearance'
 import { MIGRATIONS } from './migrations'
+import { startReminders } from './reminders'
 import { listEntries, listTags, createEntry, updateEntry, deleteEntry } from './logbook'
 import { listTrades, tradeMeta, createTrade, updateTrade, deleteTrade } from './trades'
 import * as savings from './savings'
@@ -117,6 +118,9 @@ app.on('will-quit', () => capture?.dispose())
 app.whenReady().then(async () => {
   if (!gotLock) return // a second copy: the first one was asked to come forward and this one is closing
   await initDatabase()
+  // Habit reminders: a check every minute while the app runs. It needs the
+  // database once it exists, and clicking a notification focuses the app.
+  startReminders(getDb, showMainWindow)
   capture = createCapture({
     appName: APP_NAME,
     preload: join(__dirname, '../preload/index.js'),
@@ -156,18 +160,33 @@ app.whenReady().then(async () => {
   ipcMain.handle('savings:updateTransaction', (_e, id: number, i: SavingsTxInput) => savings.updateTransaction(getDb(), id, i))
   ipcMain.handle('savings:removeTransaction', (_e, id: number) => savings.deleteTransaction(getDb(), id))
   ipcMain.handle('tasks:list', (_e, f?: TaskFilter) => tasks.listFilteredTasks(getDb(), f ?? {}))
+  ipcMain.handle('tasks:completed', (_e, date: string) => tasks.listCompletedTasks(getDb(), date))
+  ipcMain.handle('tasks:trash', () => tasks.listDeletedTasks(getDb()))
   ipcMain.handle('tasks:create', (_e, i: TaskInput) => tasks.createTask(getDb(), i))
   ipcMain.handle('tasks:update', (_e, id: number, i: TaskInput) => tasks.updateTask(getDb(), id, i))
   ipcMain.handle('tasks:remove', (_e, id: number) => tasks.deleteTask(getDb(), id))
+  ipcMain.handle('tasks:restore', (_e, id: number) => tasks.restoreTask(getDb(), id))
+  ipcMain.handle('tasks:deleteForever', (_e, id: number) => tasks.deleteTaskForever(getDb(), id))
+  ipcMain.handle('tasks:clearTrash', () => tasks.clearTrash(getDb()))
+  ipcMain.handle('tasks:rescheduleMany', (_e, ids: number[], dueDate: string, dueTime?: string | null) => tasks.rescheduleTasks(getDb(), ids, dueDate, dueTime ?? null))
   ipcMain.handle('tasks:setStatus', (_e, id: number, status: TaskStatus) => tasks.setTaskStatus(getDb(), id, status))
+  ipcMain.handle('tasks:undoStatus', (_e, id: number, status: TaskStatus, completedAt: string | null, recurrenceNext: string | null) => tasks.undoTaskStatus(getDb(), id, status, completedAt, recurrenceNext))
   ipcMain.handle('tasks:setStatusMany', (_e, ids: number[], status: TaskStatus) => tasks.setTasksStatus(getDb(), ids, status))
   ipcMain.handle('tasks:removeMany', (_e, ids: number[]) => tasks.deleteTasks(getDb(), ids))
   ipcMain.handle('tasks:reorder', (_e, ids: number[]) => tasks.reorderTasks(getDb(), ids))
+  ipcMain.handle('tasks:setSubtaskDone', (_e, taskId: number, subtaskId: number, done: boolean) => tasks.setSubtaskDone(getDb(), taskId, subtaskId, done))
+  ipcMain.handle('tasks:reorderSubtasks', (_e, taskId: number, ids: number[]) => tasks.reorderSubtasks(getDb(), taskId, ids))
+  ipcMain.handle('tasks:promoteSubtask', (_e, taskId: number, subtaskId: number) => tasks.promoteSubtask(getDb(), taskId, subtaskId))
+  ipcMain.handle('tasks:skipOccurrence', (_e, id: number, today: string) => tasks.skipTaskOccurrence(getDb(), id, today))
   ipcMain.handle('habits:list', () => habits.listHabits(getDb()))
   ipcMain.handle('habits:create', (_e, i: HabitInput) => habits.createHabit(getDb(), i))
   ipcMain.handle('habits:update', (_e, id: number, i: HabitInput) => habits.updateHabit(getDb(), id, i))
   ipcMain.handle('habits:remove', (_e, id: number) => habits.deleteHabit(getDb(), id))
   ipcMain.handle('habits:setCheckin', (_e, habitId: number, date: string, done: boolean) => habits.setCheckin(getDb(), habitId, date, Boolean(done)))
+  ipcMain.handle('habits:setDayStatus', (_e, habitId: number, date: string, status: 'done' | 'skipped' | null, value?: number | null) => habits.setDayStatus(getDb(), habitId, date, status ?? null, value ?? null))
+  // Logs how much of a count/duration habit was done on a day.
+  ipcMain.handle('habits:logValue', (_e, habitId: number, date: string, value: number) => habits.logHabitValue(getDb(), habitId, date, Number(value)))
+  ipcMain.handle('habits:reorder', (_e, ids: number[]) => habits.reorderHabits(getDb(), ids))
   ipcMain.handle('dashboard:summary', (_e, today: string) => getDashboard(getDb(), today))
   ipcMain.handle('review:build', (_e, kind: ReviewKind, anchor: string, today: string) => getReview(getDb(), kind, anchor, today))
   ipcMain.handle('calendar:month', (_e, month: string, today: string) => getCalendar(getDb(), month, today))

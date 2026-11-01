@@ -14,7 +14,7 @@
 //   run       called when the user presses Enter on it; the palette closes right after.
 //             It receives { navigate, open } for actions that go somewhere (see ActionContext).
 import type { LucideIcon } from 'lucide-react'
-import { CheckSquare, LayoutGrid, PenLine, Sunrise } from 'lucide-react'
+import { Archive, Check, CheckSquare, Clock3, LayoutGrid, PenLine, Sunrise } from 'lucide-react'
 import { validateActions, type ActionMeta } from '../../shared/palette'
 import { getCurrentSettings } from './lib/settingsStore'
 import { DEFAULT_INTELLIGENCE } from '../../shared/types'
@@ -31,17 +31,25 @@ export interface ActionDef extends ActionMeta {
   run: (ctx: ActionContext) => void
 }
 
+const taskEvent = (name: string): void => { window.setTimeout(() => window.dispatchEvent(new CustomEvent(name)), 0) }
+
 export const ACTIONS: ActionDef[] = [
   { id: 'quick-capture', title: 'Quick capture', icon: PenLine, keywords: ['note', 'log', 'add', 'trade', 'deposit', 'habit', 'check in', 'window'],
     run: () => { window.api.capture.open() } },
   { id: 'open-briefing', title: 'Open daily briefing', icon: Sunrise, keywords: ['today', 'summary', 'morning', 'brief', 'agenda'],
     run: ({ navigate }) => { navigate('briefing') } },
   { id: 'new-task', title: 'New task', icon: CheckSquare, keywords: ['add', 'create', 'todo'],
-    run: ({ navigate }) => { navigate('tasks'); window.dispatchEvent(new CustomEvent('tasks:new')) } },
+    run: ({ navigate }) => { navigate('tasks'); taskEvent('tasks:new') } },
   { id: 'today-tasks', title: "Go to Today's tasks", icon: CheckSquare, keywords: ['today', 'due', 'task list'],
-    run: ({ navigate }) => { navigate('tasks'); window.dispatchEvent(new CustomEvent('tasks:today')) } },
+    run: ({ navigate }) => { navigate('tasks'); taskEvent('tasks:today') } },
   { id: 'tasks-board', title: 'Switch to Board view', icon: LayoutGrid, keywords: ['kanban', 'columns', 'task board', 'tasks'],
-    run: ({ navigate }) => { navigate('tasks'); window.dispatchEvent(new CustomEvent('tasks:board')) } }
+    run: ({ navigate }) => { navigate('tasks'); taskEvent('tasks:board') } },
+  { id: 'tasks-trash', title: 'Open task Trash', icon: Archive, keywords: ['restore', 'deleted tasks', 'permanent delete'],
+    run: ({ navigate }) => { navigate('tasks'); taskEvent('tasks:trash') } },
+  { id: 'tasks-overdue', title: 'Show overdue tasks', icon: Clock3, keywords: ['late', 'reschedule', 'tasks'],
+    run: ({ navigate }) => { navigate('tasks'); taskEvent('tasks:overdue') } },
+  { id: 'tasks-complete-selected', title: 'Complete selected tasks', icon: Check, keywords: ['finish', 'done', 'bulk'],
+    run: ({ navigate }) => { navigate('tasks'); taskEvent('tasks:complete-selected') } }
 ]
 
 // A mistake in an entry stops the app at start-up with a readable message (see shared/palette.ts for the rules).

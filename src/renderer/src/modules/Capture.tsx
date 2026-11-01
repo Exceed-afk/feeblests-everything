@@ -171,8 +171,13 @@ export function Capture() {
         const title = taskTitle.trim()
         if (!title) return setError('Write a task first.')
         setBusy(true)
-        await window.api.tasks.create({ title, notes: '', status: 'todo', priority: 'medium', dueDate: day, dueTime: null,
-          project: '', tags: [], subtasks: [], recurrenceRule: null, recurrenceNext: null })
+        const parsed = parseQuickAdd(`task ${title}`, { today: day })
+        if (parsed.ok && parsed.parse.proposal.kind === 'task') {
+          await saveProposal(parsed.parse.proposal, { goals: [], habits: [], defaultTaskDueDate: day })
+        } else {
+          await window.api.tasks.create({ title, notes: '', status: 'todo', priority: 'medium', dueDate: day, dueTime: null,
+            project: '', tags: [], subtasks: [], recurrenceRule: null, recurrenceNext: null })
+        }
         setTaskTitle('')
         await finished('Task added for today')
       } else {
@@ -318,7 +323,7 @@ export function Capture() {
           <label className="flex flex-col text-xs text-muted">Task
             <input data-autofocus aria-label="Task title" className="field mt-1" value={taskTitle} placeholder="What needs doing today?"
               onChange={(e) => setTaskTitle(e.target.value)} />
-            <span className="meta mt-1">Added to Tasks with medium priority and today's due date.</span>
+            <span className="meta mt-1">Use Friday, 5pm, #tags, project:Name, or a priority to add task details inline.</span>
           </label>
         )}
 

@@ -4,6 +4,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { mkdirSync, readdirSync, unlinkSync, existsSync } from 'fs'
 import { DEFAULT_SETTINGS, type Settings } from '../shared/types'
+import { migrateColorScheme } from '../shared/appearance'
 import { applyMigrations } from './migrations'
 import { localDate } from './util'
 
@@ -43,6 +44,19 @@ async function dailyBackup(dir: string): Promise<void> {
 export function getSettings(): Settings {
   const rows = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
   const saved = Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]))
+  const legacyScheme = saved.colorScheme ?? saved.colourScheme
+  if (legacyScheme !== undefined) {
+    const palette = migrateColorScheme(saved.palette, legacyScheme)
+    if (palette) {
+      db.transaction(() => {
+        setSetting('palette', palette)
+        db.prepare("DELETE FROM settings WHERE key IN ('colorScheme', 'colourScheme')").run()
+      })()
+      saved.palette = palette
+    }
+    delete saved.colorScheme
+    delete saved.colourScheme
+  }
   return { ...DEFAULT_SETTINGS, ...saved }
 }
 

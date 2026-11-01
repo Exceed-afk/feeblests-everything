@@ -164,8 +164,13 @@ function habitPeriod(habits: Habit[], range: PeriodRange, today: string): HabitP
   let trackedFrom: string | null = null
   for (const h of habits) {
     if (h.archived) continue
-    const checked = new Set(h.checkins)
-    const first = [h.startDate, ...h.checkins].sort()[0]
+    // The full list of recorded days, so a SKIPPED day is not counted as missed.
+    const completions = h.completions && h.completions.length > 0
+      ? h.completions
+      : h.checkins.map((date) => ({ date, status: 'done' as const }))
+    const checked = new Set(completions.filter((c) => c.status === 'done').map((c) => c.date))
+    const skipped = new Set(completions.filter((c) => c.status === 'skipped').map((c) => c.date))
+    const first = [h.startDate, ...completions.map((c) => c.date)].sort()[0]
     // Tracking begins with the earliest active habit, including a check-in made before its start date.
     if (trackedFrom === null || first < trackedFrom) trackedFrom = first
     const from = range.start > first ? range.start : first
@@ -176,12 +181,14 @@ function habitPeriod(habits: Habit[], range: PeriodRange, today: string): HabitP
       if (checked.has(d)) {
         if (scheduled) { hDue++; hDone++; tally(days, d, true) } else hBonus++
       } else if (scheduled && d !== today) {
-        hDue++; missed.push(d); tally(days, d, false)
+        // A skipped day was due, but it was skipped on purpose, so it is not missed.
+        if (skipped.has(d)) { hDue++; tally(days, d, false) }
+        else { hDue++; missed.push(d); tally(days, d, false) }
       }
     }
     due += hDue; done += hDone; bonus += hBonus
     if (hDue > 0 || hBonus > 0) {
-      rows.push({ id: h.id, name: h.name, due: hDue, done: hDone, rate: hDue > 0 ? (hDone / hDue) * 100 : null, bonus: hBonus, streak: h.stats.current, missed })
+      rows.push({ id: h.id, name: h.name, due: hDue, done: hDone, rate: hDue > 0 ? (hDone / hDue) * 100 : null, bonus: hBonus, streak: h.stats.current, missed, days: h.days, startDate: first })
     }
   }
   // Weakest first, so the habit that needs attention is on top. Habits with nothing due go last.

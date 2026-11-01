@@ -78,6 +78,19 @@ export function QuickAddPreview({ proposal, confidence, onConfirm, onCancel }: P
               </select>
             </label>
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col text-xs text-muted">Due time (optional)
+              <input type="time" className="field mt-1" value={edited.dueTime ?? ''} onChange={(e) => set({ dueTime: e.target.value || null })} aria-label="Due time" />
+            </label>
+            <label className="flex flex-col text-xs text-muted">Project (optional)
+              <input className="field mt-1" value={edited.project ?? ''} onChange={(e) => set({ project: e.target.value || null })} aria-label="Project" />
+            </label>
+          </div>
+          <label className="flex flex-col text-xs text-muted">Tags (space separated)
+            <input className="field mt-1" value={edited.tags.map((tag) => `#${tag}`).join(' ')}
+              onChange={(e) => set({ tags: [...new Set(e.target.value.split(/\s+/).map((tag) => tag.replace(/^#/, '').trim().toLowerCase()).filter(Boolean))] })}
+              aria-label="Task tags" />
+          </label>
           {edited.recurrence && (
             <p className="meta">Repeats {edited.recurrence.frequency === 'custom' ? `every ${edited.recurrence.intervalDays} days` : edited.recurrence.frequency}. Edit after saving if that is not right.</p>
           )}

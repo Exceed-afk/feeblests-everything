@@ -322,7 +322,12 @@ function HabitCard({ data, onNavigate }: GoTo) {
           {h.rate === null ? 'Nothing scheduled yet' : `${h.done} of ${h.due} days done${h.bonus > 0 ? `, +${h.bonus} bonus` : ''}`}
         </span>
       </span>
-      {h.rate === null ? <div className="h-10" /> : <span className="block pt-1.5"><WeekStrip days={h.days.slice(0, 7)} today={data.today} trackedFrom={h.trackedFrom} /></span>}
+      {h.rate === null ? <div className="h-10" /> : (
+        <span className="block pt-1.5">
+          <WeekStrip days={h.days} kind={data.kind} today={data.today} trackedFrom={h.trackedFrom} limit={data.kind === 'month' ? 7 : undefined} />
+          {data.kind === 'month' && <span className="mt-1 block text-[10px] text-muted">Last 7 days</span>}
+        </span>
+      )}
       <span className="kpi-foot">
         <Versus data={data} now={h.rate === null ? null : Math.round(h.rate)} before={h.previousRate === null ? null : Math.round(h.previousRate)}
           format={(n) => `${n}%`} points={1} prevWord="previous period" />
@@ -344,7 +349,12 @@ function MoodCard({ data, onNavigate }: GoTo) {
           {avg === null ? 'No moods logged' : `${MOOD_STYLE[wordNear(avg)].label}, ${m.logged} ${m.logged === 1 ? 'entry' : 'entries'}`}
         </span>
       </span>
-      {avg === null ? <div className="h-9" /> : <span className="chart-mood block pt-1.5"><MoodCardDot avg={avg} days={m.days} /></span>}
+      {avg === null ? <div className="h-9" /> : (
+        <span className="chart-mood block pt-1.5">
+          <MoodCardDot avg={avg} days={m.days} kind={data.kind} />
+          {data.kind === 'month' && <span className="mt-1 block text-[10px] text-muted">Last 7 days</span>}
+        </span>
+      )}
       <span className="kpi-foot">
         <Versus data={data} now={avg} before={m.previousAverage} format={(n) => n.toFixed(1)} points={1} prevWord="previous period" />
       </span>
@@ -352,11 +362,13 @@ function MoodCard({ data, onNavigate }: GoTo) {
   )
 }
 
-// The seven mood dots of the period, a compact view of the same scale as the big trend chart.
-function MoodCardDot({ avg, days }: { avg: number; days: ReviewData['mood']['days'] }) {
+// The mood dots of the period, a compact view of the same scale as the big trend chart.
+// A month is too wide for one card, so it shows the LAST seven days of the period (labelled below).
+function MoodCardDot({ avg, days, kind }: { avg: number; days: ReviewData['mood']['days']; kind: ReviewKind }) {
+  const shown = kind === 'month' ? days.slice(-7) : days.slice(0, 7)
   return (
     <span className="flex items-end gap-1" aria-hidden="true">
-      {days.slice(0, 7).map((d) => (
+      {shown.map((d) => (
         <span key={d.date} className="flex flex-1 flex-col items-center gap-1">
           {d.average === null
             ? <span className="h-1.5 w-1.5 rounded-full border border-dashed border-line" />
@@ -542,15 +554,18 @@ function HabitsPanel({ data, onNavigate }: GoTo) {
               <div className="flex items-center justify-end gap-1 text-sm font-semibold text-fg"><Flame size={14} className="warn" />{Math.max(...h.habits.map((x) => x.streak), 0)}</div>
             </div>
           </div>
+          {/* One strip of the period, then a dot per habit below: the same days are not drawn twice. */}
           <div className="mt-3">
-            <WeekStrip days={h.days.slice(0, 7)} today={data.today} trackedFrom={h.trackedFrom} />
-            <div className="legend mt-2">
+            <WeekStrip days={h.days} kind={data.kind} today={data.today} trackedFrom={h.trackedFrom} />
+          </div>
+          {data.kind === 'week' && (
+            <div className="legend mt-2.5 border-t border-line pt-2.5">
               <span><span className="hs-swatch" data-state="done" aria-hidden="true" />Completed</span>
               <span><span className="hs-swatch" data-state="partial" aria-hidden="true" />Incomplete</span>
               <span><span className="hs-swatch" data-state="rest" aria-hidden="true" />Not scheduled</span>
               <span><span className="hs-swatch" data-state="untracked" aria-hidden="true" />Not tracked</span>
             </div>
-          </div>
+          )}
           <ul className="mt-3 flex flex-col">
             {h.habits.slice(0, MAX_HABITS).map((habit) => (
               <li key={habit.id} className="border-b border-line/60 py-2 last:border-0">
@@ -620,7 +635,7 @@ function MoodPanel({ data, onNavigate }: GoTo) {
             </div>
             <span className="meta">Scale 1 rough to 5 great</span>
           </div>
-          {data.kind === 'week' && <div className="mt-3 border-t border-line pt-3"><MoodDays days={m.days} kind={data.kind} today={data.today} /></div>}
+          {/* The chart above already shows every day; a second row of the same days would just repeat it. */}
           {m.lowest && <p className="meta mt-2">Lowest: {formatDate(m.lowest.date)} ({moodStyle(m.lowest.mood).label}).</p>}
         </>
       )}

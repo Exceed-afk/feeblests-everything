@@ -13,8 +13,33 @@ export const BACKUP_FORMAT = 1
 export interface BackupEntry { id: number; date: string; title: string; body: string; mood: string | null; tags: string[]; createdAt: string; updatedAt: string }
 export interface BackupTrade { id: number; date: string; asset: string; direction: Direction; entryPrice: number; exitPrice: number | null; quantity: number; fees: number; notes: string; tags: string[]; createdAt: string; updatedAt: string }
 export interface BackupGoal { id: number; name: string; target: number | null; notes: string; createdAt: string; updatedAt: string }
-export interface BackupHabit { id: number; name: string; notes: string; days: number[]; archived: boolean; startDate: string; createdAt: string; updatedAt: string }
-export interface BackupCheckin { habitId: number; date: string; createdAt: string }
+export interface BackupHabit {
+  id: number; name: string; notes: string; days: number[]; archived: boolean; startDate: string; createdAt: string; updatedAt: string
+  // The kind of habit. Optional: backups made before habit types existed have
+  // no type, and every one of those habits was a plain "check" habit.
+  type?: 'check' | 'count' | 'duration'
+  // How much is enough, for 'count' and 'duration' habits.
+  target?: number | null
+  // The label for that number ("sessions", "min", ...).
+  unit?: string
+  // Manual position and time of day. Optional: backups made before these
+  // existed have neither, and an old habit reads as "anytime, position from
+  // its creation order".
+  sortOrder?: number
+  timeOfDay?: 'morning' | 'afternoon' | 'evening' | 'anytime'
+  // Reminder time ("HH:MM" or null) and the Logbook link ('' or
+  // 'logbook-entry'). Optional: old backups have neither.
+  reminderTime?: string | null
+  autoCompleteOn?: '' | 'logbook-entry'
+}
+// The day status is optional: backups made before skipped days existed have no
+// status, and every one of those check-ins was a plain "done".
+// The value is optional too: it only exists for 'count' and 'duration' habits.
+export interface BackupCheckin {
+  habitId: number; date: string; createdAt: string
+  status?: 'done' | 'skipped'
+  value?: number | null
+}
 export interface BackupTx { id: number; goalId: number; date: string; kind: TxKind; amount: number; note: string; createdAt: string; updatedAt: string }
 export interface BackupTask {
   id: number; title: string; notes: string; status: TaskStatus; priority: TaskPriority
@@ -24,6 +49,7 @@ export interface BackupTask {
   recurrenceRule: TaskRecurrence | null; recurrenceNext: string | null
 }
 export interface BackupTaskSubtask { id: number; taskId: number; title: string; done: boolean; sortOrder: number }
+export interface BackupTaskCompletion { taskId: number; completedAt: string }
 
 export interface BackupFile {
   app: typeof BACKUP_APP
@@ -39,6 +65,7 @@ export interface BackupFile {
   habitCheckins: BackupCheckin[]
   tasks: BackupTask[]
   taskSubtasks: BackupTaskSubtask[]
+  taskCompletions?: BackupTaskCompletion[]
 }
 
 export const countsOf = (b: Pick<BackupFile, 'logbook' | 'trades' | 'savingsGoals' | 'savingsTransactions' | 'habits' | 'habitCheckins' | 'tasks' | 'taskSubtasks'>): BackupCounts => ({
@@ -49,6 +76,13 @@ export const countsOf = (b: Pick<BackupFile, 'logbook' | 'trades' | 'savingsGoal
 // ---------- Checking an imported file ----------
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isDate = (v: unknown): boolean => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
+const isRealDate = (v: unknown): boolean => {
+  if (!isDate(v)) return false
+  const [year, month, day] = (v as string).split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+const isTime = (v: unknown): boolean => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
 const isStr = (v: unknown): v is string => typeof v === 'string'
 const isInt = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
@@ -63,8 +97,8 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
   if (data.format !== BACKUP_FORMAT) throw new Error('This backup was made by a different version of the app and cannot be read.')
   if (!isInt(data.schemaVersion) || data.schemaVersion > maxSchema)
     throw new Error('This backup comes from a newer version of the app. Update the app first, then import it.')
-  for (const k of ['habits', 'habitCheckins', 'tasks', 'taskSubtasks']) if (data[k] === undefined) data[k] = [] // older backups
-  for (const k of ['logbook', 'trades', 'savingsGoals', 'savingsTransactions', 'habits', 'habitCheckins', 'tasks', 'taskSubtasks'])
+  for (const k of ['habits', 'habitCheckins', 'tasks', 'taskSubtasks', 'taskCompletions']) if (data[k] === undefined) data[k] = [] // older backups
+  for (const k of ['logbook', 'trades', 'savingsGoals', 'savingsTransactions', 'habits', 'habitCheckins', 'tasks', 'taskSubtasks', 'taskCompletions'])
     if (!Array.isArray(data[k])) throw new Error(`The backup is missing its "${k}" list.`)
   if (!isObj(data.settings)) throw new Error('The backup is missing its settings.')
 
@@ -110,6 +144,24 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
     if (!isObj(r) || !common(r) || !isStr(r.name) || !r.name.trim() || !isStr(r.notes) || typeof r.archived !== 'boolean' ||
         !isDate(r.startDate) || !Array.isArray(r.days) || r.days.length === 0 || new Set(r.days).size !== r.days.length ||
         !r.days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) bad('Habit', i, isObj(r) ? r.id : '?')
+    // The type is optional (older backups have none, and those are 'check').
+    // If it is there it must be one of the three we know.
+    if (r.type !== undefined && r.type !== 'check' && r.type !== 'count' && r.type !== 'duration') bad('Habit', i, isObj(r) ? r.id : '?')
+    // The target is optional, but if it is there it must be a number of zero or more.
+    if (!(r.target === null || r.target === undefined || (isNum(r.target) && r.target >= 0))) bad('Habit', i, isObj(r) ? r.id : '?')
+    // The unit is optional, but if it is there it must be text.
+    if (!(r.unit === null || r.unit === undefined || isStr(r.unit))) bad('Habit', i, isObj(r) ? r.id : '?')
+    // The manual position is optional, but if it is there it must be zero or more.
+    if (!(r.sortOrder === undefined || (isNum(r.sortOrder) && r.sortOrder >= 0))) bad('Habit', i, isObj(r) ? r.id : '?')
+    // The time of day is optional, but if it is there it must be one of the four.
+    if (r.timeOfDay !== undefined && r.timeOfDay !== 'morning' && r.timeOfDay !== 'afternoon' &&
+        r.timeOfDay !== 'evening' && r.timeOfDay !== 'anytime') bad('Habit', i, isObj(r) ? r.id : '?')
+    // The reminder is optional: null or an HH:MM string (loosely checked here;
+    // cleanReminderTime normalises it on import).
+    if (!(r.reminderTime === null || r.reminderTime === undefined ||
+        (isStr(r.reminderTime) && /^\d{1,2}:\d{2}$/.test(r.reminderTime)))) bad('Habit', i, isObj(r) ? r.id : '?')
+    // The Logbook link is optional, but if it is there it must be on or off.
+    if (r.autoCompleteOn !== undefined && r.autoCompleteOn !== '' && r.autoCompleteOn !== 'logbook-entry') bad('Habit', i, isObj(r) ? r.id : '?')
   })
   const tasks = data.tasks as Record<string, unknown>[]
   // Tasks have no inserted/updated stamp pair (the table only stores created_at), so they
@@ -122,14 +174,14 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
     if (!isObj(r)) bad('Task', i, '?')
     if (!isInt(r.id) || !isStr(r.createdAt) || !isStr(r.title) || !r.title.trim() || !isStr(r.notes) ||
       !['todo', 'in-progress', 'done'].includes(String(r.status)) || !['low', 'medium', 'high'].includes(String(r.priority)) ||
-      !(r.dueDate === null || isDate(r.dueDate)) || !(r.dueTime === null || r.dueTime === undefined || isStr(r.dueTime)) ||
+      !(r.dueDate === null || isRealDate(r.dueDate)) || !(r.dueTime === null || r.dueTime === undefined || isTime(r.dueTime)) ||
       !(r.completedAt === null || isStr(r.completedAt)) ||
       !(r.deletedAt === null || r.deletedAt === undefined || isStr(r.deletedAt)) ||
       !(r.project === null || isStr(r.project)) || !isStrArray(r.tags) ||
       !(r.recurrenceRule === null || r.recurrenceRule === undefined || (isObj(r.recurrenceRule) &&
         ['daily', 'weekly', 'monthly', 'custom'].includes(String(r.recurrenceRule.frequency)) &&
         (r.recurrenceRule.frequency !== 'custom' || (Number.isInteger(r.recurrenceRule.intervalDays) && Number(r.recurrenceRule.intervalDays) > 0)))) ||
-      !(r.recurrenceNext === null || r.recurrenceNext === undefined || isDate(r.recurrenceNext)))
+      !(r.recurrenceNext === null || r.recurrenceNext === undefined || isRealDate(r.recurrenceNext)))
       bad('Task', i, typeof r.id === 'number' ? r.id : '?')
     // Normalize old-shape files into the current shape so restoreBackup always sees the new columns.
     const legacyRule = isObj(r.recurrence) ? r.recurrence : null
@@ -150,6 +202,11 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
   const checkins = data.habitCheckins as Record<string, unknown>[]
   checkins.forEach((r, i) => {
     if (!isObj(r) || !isInt(r.habitId) || !isDate(r.date) || !isStr(r.createdAt)) bad('Habit check-in', i, '?')
+    // The status is optional (older backups have none). If it is there it must
+    // be one of the two we know.
+    if (r.status !== undefined && r.status !== 'done' && r.status !== 'skipped') bad('Habit check-in', i, '?')
+    // The logged value is optional, but if it is there it must be a number of zero or more.
+    if (!(r.value === null || r.value === undefined || (isNum(r.value) && r.value >= 0))) bad('Habit check-in', i, '?')
   })
 
   seen(logbook as never, 'The logbook'); seen(trades as never, 'The trades')
@@ -160,6 +217,13 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
   const taskIds = seen(tasks as never, 'The tasks')
   seen(taskSubtasks as never, 'The task subtasks')
   for (const s of taskSubtasks as unknown as BackupTaskSubtask[]) if (!taskIds.has(s.taskId)) throw new Error(`Task subtask ${s.id} belongs to task ${s.taskId}, which is not in the file.`)
+  for (const completion of data.taskCompletions as Record<string, unknown>[]) {
+    if (!isObj(completion) || !isInt(completion.taskId) || !isStr(completion.completedAt))
+      bad('Task completion', (data.taskCompletions as unknown[]).indexOf(completion), isObj(completion) ? completion.taskId : '?')
+    if (!taskIds.has(completion.taskId as number)) {
+      throw new Error(`A task completion belongs to task ${String(completion.taskId)}, which is not in the file.`)
+    }
+  }
 
   const habitIds = seen(habits as never, 'The habits')
   const checked = new Set<string>()

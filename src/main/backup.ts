@@ -1,6 +1,7 @@
 // Export / import. Reads and writes the database only; the file dialogs live
 // in index.ts. The file format and its checks are in src/shared/backup.ts.
 import type Database from 'better-sqlite3'
+import { cleanReminderTime } from '../shared/habits'
 import { countsOf, BACKUP_APP, BACKUP_FORMAT, type BackupFile } from '../shared/backup'
 import type { BackupCounts } from '../shared/types'
 import { MIGRATIONS } from './migrations'
@@ -36,10 +37,28 @@ export function collectBackup(db: Database.Database): BackupFile {
     })),
     habits: (db.prepare('SELECT * FROM habits ORDER BY id').all() as R[]).map((r) => ({
       id: r.id, name: r.name, notes: r.notes, days: JSON.parse(r.days), archived: r.archived === 1, startDate: r.start_date,
-      createdAt: r.created_at, updatedAt: r.updated_at
+      createdAt: r.created_at, updatedAt: r.updated_at,
+      // The kind of habit. Old rows (before the column existed) read as 'check'.
+      type: r.type ?? 'check',
+      // How much is enough, for 'count' and 'duration' habits.
+      target: r.target ?? null,
+      // The label for that number.
+      unit: r.unit ?? '',
+      // Manual position and time of day. Old rows (before these existed)
+      // read as "no time of day" and keep their creation order.
+      sortOrder: r.sort_order ?? 0,
+      timeOfDay: r.time_of_day ?? 'anytime',
+      // Reminder time and the Logbook link. Old rows read as "no reminder,
+      // nothing auto-completes", which is what they meant before.
+      reminderTime: r.reminder_time ?? null,
+      autoCompleteOn: r.auto_complete_on ?? ''
     })),
     habitCheckins: (db.prepare('SELECT * FROM habit_checkins ORDER BY habit_id, date').all() as R[]).map((r) => ({
-      habitId: r.habit_id, date: r.date, createdAt: r.created_at
+      habitId: r.habit_id, date: r.date, createdAt: r.created_at,
+      // 'done' or 'skipped'. Old rows (before the column existed) read as 'done'.
+      status: r.status === 'skipped' ? 'skipped' : 'done',
+      // How much was logged that day, for 'count' and 'duration' habits.
+      value: r.value ?? null
     })),
     tasks: (db.prepare('SELECT * FROM tasks ORDER BY id').all() as R[]).map((r) => ({
       id: r.id, title: r.title, notes: r.notes, status: r.status, priority: r.priority, dueDate: r.due_date,
@@ -49,6 +68,9 @@ export function collectBackup(db: Database.Database): BackupFile {
     })),
     taskSubtasks: (db.prepare('SELECT * FROM task_subtasks ORDER BY task_id, sort_order, id').all() as R[]).map((r) => ({
       id: r.id, taskId: r.task_id, title: r.title, done: r.done === 1, sortOrder: r.sort_order
+    })),
+    taskCompletions: (db.prepare('SELECT task_id, completed_at FROM task_completions ORDER BY completed_at, id').all() as R[]).map((r) => ({
+      taskId: r.task_id, completedAt: r.completed_at
     }))
   }
 }
@@ -68,7 +90,7 @@ export function restoreBackup(db: Database.Database, b: BackupFile): BackupCount
     // on link order; a broken link is still caught by parseBackup before we get here.
     db.pragma('defer_foreign_keys = ON')
     // Goals first on the way in, last on the way out (foreign key).
-    for (const t of ['task_subtasks', 'tasks', 'habit_checkins', 'habits', 'savings_transactions', 'savings_goals', 'trades', 'logbook_entries', 'automation_events', 'settings']) db.exec(`DELETE FROM ${t}`)
+    for (const t of ['task_completions', 'task_subtasks', 'tasks', 'habit_checkins', 'habits', 'savings_transactions', 'savings_goals', 'trades', 'logbook_entries', 'automation_events', 'settings']) db.exec(`DELETE FROM ${t}`)
 
     const setting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
     for (const [k, v] of Object.entries(b.settings)) setting.run(k, JSON.stringify(v))
@@ -89,16 +111,48 @@ export function restoreBackup(db: Database.Database, b: BackupFile): BackupCount
       VALUES (@id, @goalId, @date, @kind, @amount, @note, @createdAt, @updatedAt)`)
     for (const t of b.savingsTransactions) tx.run(t)
 
-    const habit = db.prepare(`INSERT INTO habits (id, name, notes, days, archived, start_date, created_at, updated_at)
-      VALUES (@id, @name, @notes, @days, @archived, @startDate, @createdAt, @updatedAt)`)
-    for (const h of b.habits) habit.run({ ...h, days: JSON.stringify(h.days), archived: h.archived ? 1 : 0 })
+    const habit = db.prepare(`INSERT INTO habits (id, name, notes, days, archived, start_date, created_at, updated_at, type, target, unit, sort_order, time_of_day, reminder_time, auto_complete_on)
+      VALUES (@id, @name, @notes, @days, @archived, @startDate, @createdAt, @updatedAt, @type, @target, @unit, @sortOrder, @timeOfDay, @reminderTime, @autoCompleteOn)`)
+    // A backup made before habit types existed has no type: those habits were
+    // all plain "check" habits, and they keep working exactly as before.
+    // The same applies to the position, time of day, reminder and Logbook
+    // link: old backups restore with the behaviour they had.
+    for (const h of b.habits) {
+      habit.run({
+        ...h,
+        days: JSON.stringify(h.days),
+        archived: h.archived ? 1 : 0,
+        type: h.type ?? 'check',
+        target: h.target ?? null,
+        unit: h.unit ?? '',
+        sortOrder: h.sortOrder ?? h.id,
+        timeOfDay: h.timeOfDay ?? 'anytime',
+        reminderTime: cleanReminderTime(h.reminderTime),
+        autoCompleteOn: h.autoCompleteOn === 'logbook-entry' ? 'logbook-entry' : ''
+      })
+    }
 
-    const checkin = db.prepare('INSERT INTO habit_checkins (habit_id, date, created_at) VALUES (@habitId, @date, @createdAt)')
-    for (const c of b.habitCheckins) checkin.run(c)
+    const checkin = db.prepare('INSERT INTO habit_checkins (habit_id, date, created_at, status, value) VALUES (@habitId, @date, @createdAt, @status, @value)')
+    // A backup made before skipped days existed has no status: those check-ins
+    // were all plain "done" days. The logged value is new in the same way.
+    for (const c of b.habitCheckins) {
+      checkin.run({ ...c, status: c.status === 'skipped' ? 'skipped' : 'done', value: c.value ?? null })
+    }
 
     const task = db.prepare(`INSERT INTO tasks (id, title, notes, status, priority, due_date, due_time, created_at, completed_at, deleted_at, project, tags, position, recurrence_rule, recurrence_next)
       VALUES (@id, @title, @notes, @status, @priority, @dueDate, @dueTime, @createdAt, @completedAt, @deletedAt, @project, @tags, @position, @recurrenceRule, @recurrenceNext)`)
     for (const t of b.tasks) task.run({ ...t, tags: JSON.stringify(t.tags), recurrenceRule: t.recurrenceRule ? JSON.stringify(t.recurrenceRule) : null })
+    const completion = db.prepare('INSERT INTO task_completions (task_id, completed_at) VALUES (?, ?)')
+    const inserted = new Set<string>()
+    for (const c of b.taskCompletions ?? []) {
+      completion.run(c.taskId, c.completedAt)
+      inserted.add(`${c.taskId}|${c.completedAt}`)
+    }
+    for (const t of b.tasks) {
+      if (t.status === 'done' && t.completedAt && !inserted.has(`${t.id}|${t.completedAt}`)) {
+        completion.run(t.id, t.completedAt)
+      }
+    }
     const subtask = db.prepare('INSERT INTO task_subtasks (id, task_id, title, done, sort_order) VALUES (@id, @taskId, @title, @done, @sortOrder)')
     for (const s of b.taskSubtasks) subtask.run({ ...s, done: s.done ? 1 : 0 })
   })()

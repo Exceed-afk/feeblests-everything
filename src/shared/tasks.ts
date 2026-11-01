@@ -1,5 +1,5 @@
 // Task rules as plain functions, with calendar dates kept as YYYY-MM-DD text.
-import type { Task, TaskDashboard, TaskFilter, TaskInput, TaskStatus, TaskView } from './types'
+import type { Task, TaskDashboard, TaskFilter, TaskInput, TaskPriority, TaskSort, TaskStatus, TaskView } from './types'
 
 const DAY_MS = 86_400_000
 const toUtc = (iso: string): number => {
@@ -21,31 +21,41 @@ export function addTaskMonths(date: string, months: number): string {
   return first.toISOString().slice(0, 10)
 }
 
-export function nextTaskDate(date: string, recurrence: Task['recurrenceRule']): string | null {
+export function nextTaskDate(date: string, recurrence: Task['recurrenceRule'], anchorDate = date): string | null {
   if (!recurrence) return null
   if (recurrence.frequency === 'daily') return addTaskDays(date, 1)
   if (recurrence.frequency === 'weekly') return addTaskDays(date, 7)
-  if (recurrence.frequency === 'monthly') return addTaskMonths(date, 1)
+  if (recurrence.frequency === 'monthly') {
+    const [anchorYear, anchorMonth] = anchorDate.split('-').map(Number)
+    const [year, month] = date.split('-').map(Number)
+    const monthOffset = (year - anchorYear) * 12 + month - anchorMonth + 1
+    return addTaskMonths(anchorDate, Math.max(1, monthOffset))
+  }
   return addTaskDays(date, recurrence.intervalDays)
 }
 
-export function taskMatchesView(task: Task, view: TaskView, today: string): boolean {
-  // Soft-deleted tasks never appear in any view.
+export function nextTaskDateAfter(date: string, recurrence: Task['recurrenceRule'], anchorDate: string, today: string): string | null {
+  let next = nextTaskDate(date, recurrence, anchorDate)
+  while (next !== null && next <= today && recurrence !== null) next = nextTaskDate(next, recurrence, anchorDate)
+  return next
+}
+
+export function taskMatchesView(task: Task, view: TaskView, today: string, nowTime = '00:00'): boolean {
+  if (view === 'trash') return task.deletedAt !== null
   if (task.deletedAt !== null) return false
   if (view === 'completed') return task.status === 'done'
   if (task.status === 'done') return false
-  // A recurring task shows on its next due date (recurrenceNext), falling back to dueDate.
   const due = task.recurrenceNext ?? task.dueDate
-  if (view === 'today') return due !== null && due <= today
-  if (view === 'upcoming') return due !== null && due > today
-  if (view === 'overdue') return due !== null && due < today
+  if (view === 'today') return due === null || due === today
+  if (view === 'upcoming') return due === null || (due > today && due <= addTaskDays(today, 7))
+  if (view === 'overdue') return due !== null && (due < today || (due === today && task.dueTime !== null && task.dueTime < nowTime))
   return true
 }
 
 export function taskReview(tasks: Task[], start: string, end: string): { created: number; completed: number } {
   const onDay = (value: string | null): boolean => {
     if (!value) return false
-    const date = value.length === 10 ? value : localDay(value)
+    const date = value.length === 10 ? value : localTaskDay(value)
     return date !== null && date >= start && date <= end
   }
   return {
@@ -62,8 +72,8 @@ export function taskMatchesText(task: Task, text: string): boolean {
     .some((value) => value.toLowerCase().includes(needle))
 }
 
-export function filterTasks(tasks: Task[], filter: TaskFilter, today: string): Task[] {
-  return tasks.filter((task) => taskMatchesView(task, filter.view ?? 'all', today)
+export function filterTasks(tasks: Task[], filter: TaskFilter, today: string, nowTime = '00:00'): Task[] {
+  return tasks.filter((task) => taskMatchesView(task, filter.view ?? 'all', today, nowTime)
     && (!filter.priority || task.priority === filter.priority)
     && (!filter.project || task.project === filter.project)
     && (!filter.tag || task.tags.includes(filter.tag))
@@ -78,10 +88,10 @@ export function resolveOccurrences(tasks: Task[], today: string): Task[] {
   return tasks.map((task) => {
     if (!task.recurrenceRule || task.recurrenceNext === null || task.recurrenceNext > today) return task
     if (task.status === 'done') {
-      // Auto-advance: mark the completed occurrence as done for its due date and
-      // schedule the next one. The next read will show the new occurrence.
-      const next = nextTaskDate(task.recurrenceNext, task.recurrenceRule)
-      return { ...task, status: 'todo', completedAt: null, recurrenceNext: next ?? null }
+      return {
+        ...task, status: 'todo', completedAt: null,
+        subtasks: task.subtasks.map((subtask) => ({ ...subtask, done: false }))
+      }
     }
     return task
   })
@@ -89,12 +99,67 @@ export function resolveOccurrences(tasks: Task[], today: string): Task[] {
 
 // The board shows the same filtered tasks as the list, split into its three status columns.
 // Keeping the split here means both views are checked against one function, not two copies of the rules.
-export function groupTasksForBoard(tasks: Task[], filter: TaskFilter, today: string): Record<TaskStatus, Task[]> {
-  const visible = filterTasks(tasks, filter, today)
+export function groupTasksForBoard(tasks: Task[], filter: TaskFilter, today: string, nowTime = '00:00'): Record<TaskStatus, Task[]> {
+  const visible = filterTasks(tasks, filter, today, nowTime)
   return {
     'todo': visible.filter((task) => task.status === 'todo'),
     'in-progress': visible.filter((task) => task.status === 'in-progress'),
     'done': visible.filter((task) => task.status === 'done')
+  }
+}
+
+export function sortTasks(tasks: Task[], sort: TaskSort): Task[] {
+  const priority: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2 }
+  return [...tasks].sort((a, b) => {
+    if (sort === 'due-date') {
+      const dueA = a.recurrenceNext ?? a.dueDate
+      const dueB = b.recurrenceNext ?? b.dueDate
+      if (dueA === null && dueB !== null) return 1
+      if (dueA !== null && dueB === null) return -1
+      if (dueA !== dueB) return (dueA ?? '').localeCompare(dueB ?? '')
+    } else if (sort === 'priority' && priority[a.priority] !== priority[b.priority]) {
+      return priority[a.priority] - priority[b.priority]
+    }
+    return a.position - b.position || a.id - b.id
+  })
+}
+
+export function subtaskProgress(subtasks: Pick<Task['subtasks'][number], 'done'>[]): { done: number; total: number; percent: number } {
+  const done = subtasks.filter((item) => item.done).length
+  return { done, total: subtasks.length, percent: subtasks.length === 0 ? 0 : Math.round(done / subtasks.length * 100) }
+}
+
+export function pendingTaskReminders(tasks: Task[], today: string, nowTime: string, graceMinutes = 10): Task[] {
+  const now = Number(nowTime.slice(0, 2)) * 60 + Number(nowTime.slice(3, 5))
+  return tasks.filter((task) => {
+    const due = task.recurrenceNext ?? task.dueDate
+    if (task.deletedAt !== null || task.status === 'done' || due !== today || task.dueTime === null) return false
+    const dueMinutes = Number(task.dueTime.slice(0, 2)) * 60 + Number(task.dueTime.slice(3, 5))
+    const sinceDue = now - dueMinutes
+    return sinceDue >= 0 && sinceDue <= graceMinutes
+  })
+}
+
+export type TaskInlinePatch = Partial<Omit<TaskInput, 'subtasks'>>
+
+export function taskInputForEdit(task: Task, patch: TaskInlinePatch = {}): TaskInput {
+  const input: TaskInput = {
+    title: task.title, notes: task.notes, status: task.status, priority: task.priority,
+    dueDate: task.dueDate, dueTime: task.dueTime, project: task.project, tags: task.tags,
+    recurrenceRule: task.recurrenceRule, recurrenceNext: task.recurrenceNext,
+    subtasks: task.subtasks.map(({ title, done }) => ({ title, done })),
+    ...patch
+  }
+  if ('dueDate' in patch) {
+    if (task.recurrenceRule) {
+      input.dueDate = task.dueDate
+      input.recurrenceNext = patch.dueDate ?? null
+    } else {
+      input.recurrenceNext = null
+    }
+  }
+  return {
+    ...input
   }
 }
 
@@ -106,7 +171,7 @@ export function applyColumnOrder(taskIds: number[], orderedIds: number[]): numbe
   return taskIds.map((id) => (moving.has(id) ? queue.shift()! : id))
 }
 
-function localDay(isoTimestamp: string | null): string | null {
+export function localTaskDay(isoTimestamp: string | null): string | null {
   if (!isoTimestamp) return null
   const date = new Date(isoTimestamp)
   if (Number.isNaN(date.getTime())) return null
@@ -132,7 +197,7 @@ export function taskDashboard(tasks: Task[], today: string): TaskDashboard {
       return due !== null && due < today
     }).length,
     completedThisWeek: tasks.filter((task) => {
-      const day = localDay(task.completedAt)
+      const day = localTaskDay(task.completedAt)
       return task.status === 'done' && task.deletedAt === null && day !== null && day >= weekStart && day <= weekEnd
     }).length
   }
@@ -187,4 +252,3 @@ export function taskInputProblems(input: TaskInput): Partial<Record<TaskField, s
 
   return problems
 }
-

@@ -134,6 +134,26 @@ test('priority word orders', () => {
   assert.ok(b.kind === 'task' && b.priority === 'low')
 })
 
+test('task modifiers parse date, 12/24-hour time, tags, project and priority', () => {
+  const parsed = prop('task pay rent tomorrow 5pm #home #bills project:House high')
+  assert.ok(parsed.kind === 'task')
+  if (parsed.kind === 'task') {
+    assert.equal(parsed.title, 'pay rent')
+    assert.equal(parsed.dueDate, '2026-10-24')
+    assert.equal(parsed.dueTime, '17:00')
+    assert.deepEqual(parsed.tags, ['home', 'bills'])
+    assert.equal(parsed.project, 'House')
+    assert.equal(parsed.priority, 'high')
+  }
+  const twentyFourHour = prop('task call at 14:30 project:"Home Repairs"')
+  assert.ok(twentyFourHour.kind === 'task')
+  if (twentyFourHour.kind === 'task') {
+    assert.equal(twentyFourHour.dueTime, '14:30')
+    assert.equal(twentyFourHour.project, 'Home Repairs')
+    assert.equal(twentyFourHour.title, 'call at')
+  }
+})
+
 test('task with nothing after the keyword is rejected with guidance', () => {
   fails('task')
   fails('task   ')
@@ -255,9 +275,9 @@ test('matchName: exact, unique prefix, ambiguous, none', () => {
 test('describeProposal writes a full sentence the preview card can show', () => {
   assert.equal(describeProposal({ kind: 'deposit', txKind: 'deposit', amount: 200, goalName: 'Vacation fund', note: '' }),
     'Deposit of 200 to Vacation fund')
-  assert.equal(describeProposal({ kind: 'task', title: 'pay rent', dueDate: null, priority: 'medium', recurrence: { frequency: 'monthly', intervalDays: 1 } }),
+  assert.equal(describeProposal({ kind: 'task', title: 'pay rent', dueDate: null, dueTime: null, priority: 'medium', project: null, tags: [], recurrence: { frequency: 'monthly', intervalDays: 1 } }),
     'Task: pay rent (repeats monthly)')
-  assert.equal(describeProposal({ kind: 'task', title: 'call dentist', dueDate: '2026-10-30', priority: 'high', recurrence: null }),
+  assert.equal(describeProposal({ kind: 'task', title: 'call dentist', dueDate: '2026-10-30', dueTime: null, priority: 'high', project: null, tags: [], recurrence: null }),
     'Task: call dentist (due 2026-10-30, high priority)')
   assert.equal(describeProposal({ kind: 'habit-checkin', habitName: 'Meditation' }), 'Check in habit: Meditation')
   assert.equal(describeProposal({ kind: 'note', title: 'feeling tired', body: '' }), 'Note: feeling tired')

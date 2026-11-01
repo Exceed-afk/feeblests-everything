@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Density, FontChoice, Radius, TextSize, ThemeMode, UiStyle } from '../../../shared/types'
-import { FONT_STACKS, OVERRIDE_KEYS, PALETTES, STYLE_PRESETS, contrast, hexToRgb, resolveTokens } from '../../../shared/appearance'
+import { FONT_STACKS, OVERRIDE_KEYS, PALETTES, STYLE_PRESETS, cardBorder, contrast, hexToRgb, resolveTokens, rgbToHex } from '../../../shared/appearance'
 import { ACCENT_PRESETS, isDark } from '../lib/theme'
 import { resetAppearance, updateSettings, useSettings } from '../lib/settingsStore'
 import { ProgressBar } from './ProgressBar'
@@ -57,7 +57,26 @@ function StylePreview({ minimal }: { minimal: boolean }) {
   )
 }
 
-const COLOR_LABELS: Record<(typeof OVERRIDE_KEYS)[number], string> = { bg: 'Page background', panel: 'Sidebar', card: 'Cards', fg: 'Text' }
+function ThemePreview({ tokens, minimal }: { tokens: ReturnType<typeof resolveTokens>; minimal: boolean }) {
+  const border = rgbToHex(cardBorder(tokens, minimal ? 'minimal' : 'modern'))
+  const bg = minimal ? tokens.bg : tokens.surface
+  return (
+    <div className="flex h-16 overflow-hidden" style={{ background: tokens.bg, border: `1px solid ${tokens.border}`, borderRadius: minimal ? 3 : 8 }}>
+      <div className="flex w-7 shrink-0 flex-col justify-center gap-1 border-r p-1" style={{ background: minimal ? tokens.bg : tokens.sidebar, borderColor: tokens.border }}>
+        <i className="h-1 rounded-full" style={{ background: tokens.text }} />
+        <i className="h-1 rounded-full" style={{ background: tokens.muted }} />
+        <i className="h-1 rounded-full" style={{ background: tokens.muted }} />
+      </div>
+      <div className="grid flex-1 grid-cols-2 gap-1 p-1.5">
+        {[0, 1].map((index) => <i key={index} className="rounded-sm border" style={{ background: bg, borderColor: border }} />)}
+      </div>
+    </div>
+  )
+}
+
+const COLOR_LABELS: Record<(typeof OVERRIDE_KEYS)[number], string> = {
+  bg: 'Page background', sidebar: 'Sidebar', surface: 'Cards', text: 'Text'
+}
 
 // Four cards, spaced by the parent (SettingsPage wraps them in `space-y-4`).
 export function AppearanceSettings() {
@@ -73,7 +92,7 @@ export function AppearanceSettings() {
     updateSettings({ colors: { ...s.colors, [mode]: next } })
   }
   const hasCustom = Object.keys(s.colors[mode]).length > 0
-  const textContrast = contrast(hexToRgb(tokens.fg), hexToRgb(tokens.bg))
+  const textContrast = contrast(hexToRgb(tokens.text), hexToRgb(tokens.bg))
   const pickStyle = (uiStyle: UiStyle) => updateSettings({ uiStyle, ...STYLE_PRESETS[uiStyle] })
 
   return (
@@ -97,20 +116,13 @@ export function AppearanceSettings() {
       </Card>
 
       <Card title="Colours">
-        <Group title="Colour scheme" hint={`How the page, sidebar and cards are coloured in ${mode} mode.`}>
-          <div className="grid grid-cols-3 gap-3">
+        <Group title="Colour themes" hint="Every theme has light and dark variants. Accent and custom colours are independent.">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {PALETTES.map((p) => {
               const t = resolveTokens({ palette: p.id, colors: { light: {}, dark: {} } }, dark)
               return (
                 <button key={p.id} className="opt" aria-pressed={s.palette === p.id} onClick={() => updateSettings({ palette: p.id })}>
-                  <div className="flex h-14 overflow-hidden" style={{ background: t.bg, border: `1px solid ${t.line}`, borderRadius: 8 }}>
-                    <div style={{ width: 22, background: t.panel, borderRight: `1px solid ${t.line}` }} />
-                    <div className="flex flex-1 flex-col justify-center" style={{ gap: 5, padding: 8 }}>
-                      <i style={{ height: 6, width: '55%', borderRadius: 3, background: t.fg }} />
-                      <i style={{ height: 14, borderRadius: 4, background: t.card, border: `1px solid ${t.line}` }} />
-                      <i style={{ height: 4, width: '35%', borderRadius: 2, background: t.muted }} />
-                    </div>
-                  </div>
+                  <ThemePreview tokens={t} minimal={s.uiStyle === 'minimal'} />
                   <span className="opt-name">{p.name}</span>
                 </button>
               )
@@ -118,7 +130,7 @@ export function AppearanceSettings() {
           </div>
         </Group>
 
-        <Group title="Accent colour" hint="Buttons, highlights and progress bars. Text on the buttons switches to dark automatically when the colour is light.">
+        <Group title="Accent colour" hint="Buttons, highlights and progress bars. Text and icons adjust automatically for contrast.">
           <div className="flex flex-wrap items-center gap-3">
             {ACCENT_PRESETS.map((a) => (
               <button key={a.hex} title={a.name} aria-label={a.name} aria-pressed={s.accent === a.hex} onClick={() => updateSettings({ accent: a.hex })}

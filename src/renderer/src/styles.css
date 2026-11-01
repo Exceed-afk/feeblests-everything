@@ -3,39 +3,40 @@
 @tailwind utilities;
 
 /* Colour tokens as "R G B" triples so Tailwind can add opacity (bg-accent/20).
-   These are only the starting values (the same as src/shared/design.ts and the copy in index.html):
-   applyAppearance() (lib/theme.ts) overwrites them from Settings, and a cached copy is applied
-   before the first paint, so there is no flash. */
+   These defaults match the shared tokens and default settings; applyAppearance() (lib/theme.ts)
+   overwrites them from Settings, and a cached copy is applied before the first paint. */
 :root {
-  --bg: 244 245 244; --panel: 255 255 255; --card: 255 255 255; --line: 229 231 231;
-  --fg: 23 26 24; --muted: 99 112 138;
-  --accent: 7 91 56; --on-accent: 255 255 255; --accent-fg: 7 91 56;
+  --bg: 244 245 244; --surface: 254 254 254; --sidebar: 254 254 254; --border: 218 220 220; --text: 47 49 48; --muted: 99 112 138;
+  --panel: var(--sidebar); --card: var(--surface); --line: var(--border); --fg: var(--text);
+  --card-border: 231 232 232; --selected: 238 231 253;
+  --accent: 139 92 246; --on-accent: 255 255 255; --accent-fg: 116 81 197;
   --pos: 5 122 82; --neg: 197 27 69; --warn: 143 90 6; /* gains / losses / caution, 4.5:1+ on light surfaces */
-  --mood: 47 111 159; /* the neutral accent of the mood trend and goal progress */
+  --mood: rgb(47 111 159); /* the neutral accent of the mood trend and goal progress (a full colour: charts set it as CSS text) */
   --rs: 1;   /* corner roundness multiplier (tailwind.config.js: borderRadius) */
   --d: 1;    /* spacing multiplier for padding, margins and gaps (tailwind.config.js: padding, margin, gap) */
   --ts: 1;   /* text size multiplier */
   --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.04); /* soft: a card is a surface, not a floating panel */
-  --shadow-pop: 0 6px 16px -6px rgb(0 0 0 / 0.14), 0 2px 4px rgb(0 0 0 / 0.06); /* menus, tooltips */
+  --shadow-card: 0 1px 2px rgb(var(--border) / 0.24), 0 1px 3px rgb(var(--border) / 0.2); /* soft: a card is a surface, not a floating panel */
+  --shadow-pop: 0 6px 16px -6px rgb(var(--border) / 0.5), 0 2px 4px rgb(var(--border) / 0.3); /* menus, tooltips */
   --chart-grid: rgb(var(--fg) / 0.07); --chart-axis: rgb(var(--muted)); /* labels are text: full muted, 4.5:1 */
   color-scheme: light;
 }
 .dark {
-  --bg: 17 23 21; --panel: 22 29 26; --card: 27 36 32; --line: 48 59 53;
-  --fg: 241 245 242; --muted: 161 173 165;
-  --accent: 66 168 121; --on-accent: 10 20 15; --accent-fg: 89 195 142;
+  --bg: 17 23 21; --surface: 27 36 32; --sidebar: 22 29 26; --border: 48 59 53; --text: 207 211 208; --muted: 161 173 165;
+  --panel: var(--sidebar); --card: var(--surface); --line: var(--border); --fg: var(--text);
+  --card-border: 41 51 46; --selected: 49 47 75;
+  --accent: 139 92 246; --on-accent: 255 255 255; --accent-fg: 166 140 231;
   --pos: 66 197 138; --neg: 245 132 154; --warn: 229 180 80;
-  --mood: 116 178 216;
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.24), 0 1px 3px rgb(0 0 0 / 0.18);
-  --shadow-pop: 0 8px 20px -8px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
+  --mood: rgb(116 178 216);
+  --shadow-card: 0 1px 2px rgb(var(--border) / 0.3), 0 1px 3px rgb(var(--border) / 0.24);
+  --shadow-pop: 0 8px 20px -8px rgb(var(--border) / 0.6), 0 2px 6px rgb(var(--border) / 0.4);
   --chart-grid: rgb(var(--fg) / 0.09); --chart-axis: rgb(var(--muted)); /* labels are text: full muted, 4.5:1 */
   color-scheme: dark; /* dark date pickers and scrollbars */
 }
 /* Charts use HTML colours (var()), so the theme can change them without a rebuild. */
 .chart-pos { color: rgb(var(--pos)); } .chart-neg { color: rgb(var(--neg)); } .chart-mood { color: rgb(var(--mood)); }
 /* Classic minimal: flat surfaces separated by hairlines instead of shadows. Must stay after .dark. */
-[data-style='minimal'] { --shadow-card: 0 0 #0000; }
+[data-style='minimal'] { --shadow-card: 0 0 transparent; }
 
 html { font-size: calc(16px * var(--ts)); }
 html, body, #root { height: 100%; }
@@ -54,6 +55,9 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
 @keyframes check-pop { 0% { transform: scale(.85); } 55% { transform: scale(1.1); } 100% { transform: scale(1); } } /* 220ms, inside the motion budget */
 @keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* The day menu just appears in place: it must not slide, because it opens
+   under a dot that may be at the top or the bottom of the screen. */
+@keyframes pop-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* Shared building blocks, reused by every module. */
 @layer components {
@@ -109,10 +113,10 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   }
   .seg > button:hover { color: rgb(var(--fg)); }
   .seg > button:active { transform: scale(.96); }
-  .seg > button[aria-pressed='true'], .seg > button[aria-selected='true'] { background: rgb(var(--card)); color: rgb(var(--fg)); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+  .seg > button[aria-pressed='true'], .seg > button[aria-selected='true'] { background: rgb(var(--selected)); color: rgb(var(--accent-fg)); box-shadow: 0 1px 2px rgb(var(--border) / .35); }
   .seg > button[aria-pressed='true']:hover, .seg > button[aria-selected='true']:hover { color: rgb(var(--fg)); }
   [data-style='minimal'] .seg { background: transparent; }
-  [data-style='minimal'] .seg > button[aria-pressed='true'], [data-style='minimal'] .seg > button[aria-selected='true'] { background: rgb(var(--fg)); color: rgb(var(--bg)); box-shadow: none; }
+  [data-style='minimal'] .seg > button[aria-pressed='true'], [data-style='minimal'] .seg > button[aria-selected='true'] { background: rgb(var(--selected)); color: rgb(var(--accent-fg)); box-shadow: none; }
   /* A segmented control used for filters may be wider than its content: the options share the width evenly. */
   .seg-tabs > button { flex: 1 1 auto; text-align: center; }
 
@@ -167,7 +171,7 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .sb-item > svg { flex: none; }
   .sb-item:hover { background: rgb(var(--fg) / .06); color: rgb(var(--fg)); }
   .sb-item:active { transform: scale(.98); }
-  .sb-item[aria-current='page'] { background: rgb(var(--accent) / .14); color: rgb(var(--accent-fg)); font-weight: 500; }
+  .sb-item[aria-current='page'] { background: rgb(var(--selected)); color: rgb(var(--accent-fg)); font-weight: 500; }
   .sb-item[aria-current='page']::before {
     content: ''; position: absolute; left: -.75rem; top: 22%; bottom: 22%; width: 3px;
     border-radius: 0 3px 3px 0; background: rgb(var(--accent-fg));
@@ -188,7 +192,7 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
 
   /* Classic minimal: the sidebar sits flush with the page, and the active page is shown by the edge marker and weight only. */
   [data-style='minimal'] .sb { background: rgb(var(--bg)); }
-  [data-style='minimal'] .sb-item[aria-current='page'] { background: transparent; font-weight: 600; }
+  [data-style='minimal'] .sb-item[aria-current='page'] { background: rgb(var(--selected)); font-weight: 600; }
 
   /* ================= Shared page primitives (0.10) =================
      Every page uses these, so the whole app reads as one product. All spacing follows Density (--d). */
@@ -211,11 +215,12 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .scrim { background: rgb(var(--bg) / .72); backdrop-filter: blur(2px); }
 
   /* Surfaces: a one-pixel border does most of the work, the shadow only lifts the card off the page. */
-  .card { background: rgb(var(--card)); border: 1px solid rgb(var(--line)); border-radius: calc(1rem * var(--rs)); box-shadow: var(--shadow-card); }
-  [data-style='minimal'] .card { box-shadow: none; }
+  .card { background: rgb(var(--surface)); border: 1px solid rgb(var(--card-border)); border-radius: calc(1rem * var(--rs)); box-shadow: var(--shadow-card); }
+  [data-style='minimal'] .card { background: rgb(var(--bg)); border-color: rgb(var(--border)); box-shadow: none; }
   .card-pad { padding: calc(1.25rem * var(--d)); } .card-pad-sm { padding: calc(1rem * var(--d)); } .card-pad-lg { padding: calc(1.5rem * var(--d)); }
   .card-interactive { cursor: pointer; transition: border-color .15s, background-color .15s, box-shadow .15s, transform .15s; }
-  .card-interactive:hover { border-color: rgb(var(--fg) / .2); box-shadow: var(--shadow-card), 0 4px 14px -8px rgb(0 0 0 / .18); }
+  .card-interactive:hover { border-color: rgb(var(--fg) / .2); box-shadow: var(--shadow-card), 0 4px 14px -8px rgb(var(--border) / .35); }
+  [data-style='minimal'] .card-interactive:hover { border-color: rgb(var(--border)); box-shadow: none; }
   .card-interactive:active { transform: scale(.995); }
 
   /* Type scale: page title > section title > body > meta */
@@ -235,7 +240,8 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   /* ---- Review summary card ----
      One metric in charge (value, colour), a secondary line, and a tiny chart or a comparison underneath.
      Facts are aligned in their own row so four cards read as one table of numbers. */
-  .kpi { display: flex; flex-direction: column; gap: .75rem; }
+  /* text-align: the card is a <button>, and a button centres its text unless told otherwise. */
+  .kpi { display: flex; flex-direction: column; gap: .75rem; text-align: left; }
   .kpi-label { display: flex; align-items: center; justify-content: space-between; gap: .5rem; font-size: .8125rem; font-weight: 500; color: rgb(var(--muted)); }
   .kpi-value { font-size: 1.875rem; line-height: 2.125rem; font-weight: 650; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
   .kpi-sub { margin-top: .125rem; font-size: .8125rem; color: rgb(var(--muted)); }
@@ -318,25 +324,50 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .check[aria-busy='true'] { opacity: .6; pointer-events: none; }
   .check:disabled { opacity: .45; cursor: not-allowed; }
 
-  /* done = filled + tick, missed = ring + cross, rest = dashed, future = faint dots. The shape differs, not only the colour. */
+  /* The day dots. Every state differs in SHAPE as well as colour, so the meaning
+     never depends on seeing green or red:
+       done    filled circle + tick      missed  ring + cross
+       rest    dashed ring + dash        skipped ring + skip arrow
+       pending plain ring (empty)        future  dotted ring (empty) */
   .hd { display: grid; place-items: center; flex: none; border-radius: 999px; border: 1px solid rgb(var(--line)); color: transparent; cursor: pointer; transition: background-color .12s, border-color .12s, transform .08s; }
   .hd:hover:not(:disabled) { border-color: rgb(var(--accent)); }
   .hd:active:not(:disabled) { transform: scale(.9); }
   /* Done is the success green (a habit kept is a win), missed is the loss red, rest and future stay neutral. */
   .hd[data-state='done'] { background: rgb(var(--pos)); border-color: rgb(var(--pos)); color: rgb(var(--card)); }
   .hd[data-state='missed'] { border-color: rgb(var(--neg) / .55); color: rgb(var(--neg) / .8); background: rgb(var(--neg) / .06); }
-  .hd[data-state='rest'] { border-style: dashed; border-color: rgb(var(--line)); }
+  /* A rest day is not scheduled: a dashed ring with a dash, so it never looks like a missed day. */
+  .hd[data-state='rest'] { border-style: dashed; border-color: rgb(var(--line)); color: rgb(var(--muted)); }
+  /* A skipped day was due but deliberately skipped: same neutral shape as rest, different glyph. */
+  .hd[data-state='skipped'] { border-style: dashed; border-color: rgb(var(--line)); color: rgb(var(--muted)); }
+  /* Due today and not done yet: a plain empty ring. It is NOT a failure, the day is not over. */
+  .hd[data-state='pending'] { border-color: rgb(var(--fg) / .45); }
   .hd[data-state='bonus'] { border-color: rgb(var(--pos) / .5); color: rgb(var(--pos)); }
   .hd[data-state='none'] { border-style: dotted; border-color: rgb(var(--line) / .7); }
-  .hd[data-today='true'] { box-shadow: 0 0 0 2px rgb(var(--card)), 0 0 0 3.5px rgb(var(--fg) / .35); }
+  /* Today gets a slightly thicker ring so the eye finds it in the row. */
+  .hd[data-today='true'] { border-width: 2px; box-shadow: 0 0 0 2px rgb(var(--card)), 0 0 0 4px rgb(var(--fg) / .3); }
   .hd[data-state='future'] { border-style: dotted; border-color: rgb(var(--line) / .6); cursor: default; }
   .hc { border-radius: calc(.25rem * var(--rs)); }
   .hc[data-state='done'] { background: rgb(var(--pos)); }
   .hc[data-state='missed'] { background: rgb(var(--neg) / .25); }
   .hc[data-state='rest'] { background: rgb(var(--fg) / .07); }
+  .hc[data-state='skipped'] { background: rgb(var(--fg) / .05); border: 1px dashed rgb(var(--line)); }
   .hc[data-state='future'] { border: 1px dotted rgb(var(--line) / .7); background: transparent; }
   .hc[data-state='pending'] { border: 1px solid rgb(var(--fg) / .3); background: transparent; }
   .hc:hover:not([data-state='future']) { outline: 1px solid rgb(var(--fg) / .45); }
+
+  /* ---- Habits: the milestone badge and the perfect-week mark ---- */
+  /* Both are deliberately quiet: a soft outline in the accent colour, so a
+     list of habits does not turn into a wall of badges. The icon carries the
+     meaning as well, so the mark still reads without colour. */
+  .habit-milestone, .habit-perfect {
+    display: inline-flex; align-items: center; gap: .25rem;
+    padding: 0 .4rem; height: 1.1rem;
+    border: 1px solid rgb(var(--accent) / .35); border-radius: 999px;
+    color: rgb(var(--accent)); background: rgb(var(--accent) / .08);
+    font-size: 10px; line-height: 1; white-space: nowrap;
+  }
+  .habit-perfect { border-color: rgb(var(--pos) / .35); color: rgb(var(--pos)); background: rgb(var(--pos) / .08); }
+  .habit-milestone svg, .habit-perfect svg { flex: none; }
 
   /* Review habit strip: four clearly different states, by fill and shape as well as colour. */
   .hs-cell {
@@ -351,6 +382,10 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .hs-cell[data-state='pending'] { background: transparent; border: 1px solid rgb(var(--fg) / .3); }
   .hs-fill { position: absolute; inset-inline: 0; bottom: 0; background: rgb(var(--pos) / .55); }
   .hs-dash { width: .5rem; height: 1px; background: rgb(var(--muted) / .75); }
+  /* A month packs ~31 tiles into the same width, so the tiles get shorter and the ticks and crosses
+     shrink with them - otherwise the mark would fill the whole tile and lose its shape. */
+  [data-kind='month'] .hs-cell { height: 1.25rem; }
+  [data-kind='month'] .hs-mark { width: .5rem; height: .5rem; }
   .hs-swatch { display: inline-block; width: .625rem; height: .625rem; border: 1px solid transparent; border-radius: calc(.2rem * var(--rs)); }
   .hs-swatch[data-state='done'] { background: rgb(var(--pos)); }
   .hs-swatch[data-state='partial'] { background: linear-gradient(to top, rgb(var(--pos) / .55) 50%, rgb(var(--fg) / .06) 50%); border-color: rgb(var(--line)); }
@@ -437,9 +472,9 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .cp-opt > svg { flex: none; color: rgb(var(--muted)); }
   /* No fade on the highlight: holding an arrow key would otherwise leave a trail of half-lit rows. */
   .cp-opt, .cp-opt * { transition: none; }
-  .cp-opt[aria-selected='true'] { background: rgb(var(--accent) / .14); }
+  .cp-opt[aria-selected='true'] { background: rgb(var(--selected)); }
   .cp-opt[aria-selected='true'] > svg:first-child { color: rgb(var(--accent-fg)); }
-  [data-style='minimal'] .cp-opt[aria-selected='true'] { background: rgb(var(--fg) / .07); }
+  [data-style='minimal'] .cp-opt[aria-selected='true'] { background: rgb(var(--selected)); }
   .cp-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cp-group { flex: none; margin-left: auto; font-size: .75rem; color: rgb(var(--muted)); }
   .cp-opt[aria-selected='true'] .cp-group { color: rgb(var(--fg)); }
@@ -454,4 +489,41 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
     border-top: 1px solid rgb(var(--line)); font-size: .75rem; color: rgb(var(--muted));
   }
   .cp-foot > span { display: inline-flex; align-items: center; gap: .25rem; }
+
+  /* ---- The day-status popover on the Habits page ----
+     A small menu that opens next to a day dot, so a past day can be fixed.
+     It is "fixed" and placed next to the dot that was clicked, so it always
+     sits on top of the habit rows and never gets covered by them. */
+  .day-pop {
+    position: fixed; z-index: 200; min-width: 9.5rem; padding: .25rem;
+    /* The panel colour is fully opaque, so the rows behind never show through. */
+    background: rgb(var(--panel)); color: rgb(var(--fg));
+    border: 1px solid rgb(var(--line)); border-radius: calc(.75rem * var(--rs));
+    box-shadow: var(--shadow-pop); animation: pop-in .12s ease-out;
+  }
+  [data-style='minimal'] .day-pop { border-color: rgb(var(--fg) / .3); }
+  /* The heading says which day is being changed, so the user is never guessing. */
+  .day-pop-head { padding: calc(.375rem * var(--d)) calc(.5rem * var(--d)); font-size: .6875rem; color: rgb(var(--muted)); }
+  .day-pop-item {
+    display: flex; width: 100%; align-items: center; gap: .5rem;
+    padding: calc(.375rem * var(--d)) calc(.5rem * var(--d));
+    border: 0; border-radius: calc(.5rem * var(--rs)); background: transparent;
+    color: rgb(var(--fg)); font-size: .8125rem; text-align: left; cursor: pointer;
+  }
+  .day-pop-item:hover { background: rgb(var(--fg) / .07); }
+  .day-pop-item:active { background: rgb(var(--fg) / .12); }
+  .day-pop-item > svg { flex: none; color: rgb(var(--muted)); }
+  /* The choice that is already true is marked, so the menu says where the day stands. */
+  .day-pop-item[aria-checked='true'] { background: rgb(var(--selected)); font-weight: 600; }
+  .day-pop-item[aria-checked='true'] > svg { color: rgb(var(--accent-fg)); }
+  /* "Missed" and "Clear" remove a day, so they say so in red rather than by colour alone. */
+  .day-pop-item[data-tone='miss'] > svg { color: rgb(var(--neg)); }
+
+  /* The menu for logging a number (a 'count' or 'duration' habit). It is a
+     little wider than the day menu, because it holds a number and some buttons. */
+  .day-pop-value { min-width: 12rem; padding: calc(.25rem * var(--d)); }
+  .day-pop-value input[type='number'] { appearance: textfield; -moz-appearance: textfield; }
+  /* The spinner arrows would fight with the - and + buttons either side. */
+  .day-pop-value input[type='number']::-webkit-outer-spin-button,
+  .day-pop-value input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 }

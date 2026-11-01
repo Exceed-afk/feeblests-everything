@@ -266,9 +266,14 @@ function HabitsTile({ habits, onOpenHabits }: { habits: DashboardData['habits'];
     <section className="card card-pad card-interactive h-full" onClick={onOpenHabits}>
       {head}
       <div className="mt-3 flex items-end justify-between gap-3">
-        <div>
-          <div className="stat-value mt-0">{habits.done}<span className="text-muted"> / {habits.due}</span></div>
-          <div className="stat-sub">{habits.due === 0 ? 'Nothing scheduled today' : allDone ? 'All done. Nicely done.' : 'done today'}</div>
+        <div className="flex items-center gap-2.5">
+          {/* The progress ring: "X of Y due", the same numbers the Habits
+              page's header shows, worked out by the same helpers. */}
+          <ProgressRing percent={habits.due === 0 ? 0 : Math.round((habits.done / habits.due) * 100)} label={`${habits.done} of ${habits.due} habits done today`} />
+          <div>
+            <div className="stat-value mt-0">{habits.done}<span className="text-muted"> / {habits.due}</span></div>
+            <div className="stat-sub">{habits.due === 0 ? 'Nothing scheduled today' : allDone ? 'All done. Nicely done.' : 'due today'}</div>
+          </div>
         </div>
         <div className="meta flex items-center gap-1" title="Longest current streak among your habits">
           <Flame size={14} className={habits.longestStreak > 0 ? 'warn' : ''} />
@@ -295,7 +300,37 @@ function HabitsTile({ habits, onOpenHabits }: { habits: DashboardData['habits'];
         </ul>
       )}
       {more > 0 && <div className="meta mt-1">+ {more} more</div>}
+      {/* Top 3 current streaks (biggest first), from the same stats the
+          Habits page shows on each row. */}
+      {habits.topStreaks.length > 0 && (
+        <div className="meta mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line pt-2" aria-label={`Top streaks: ${habits.topStreaks.map((s) => `${s.name}, ${s.current} days`).join('; ')}`}>
+          <span className="flex shrink-0 items-center gap-1"><Flame size={12} className="warn" /> Top streaks</span>
+          {habits.topStreaks.map((s) => (
+            <span key={s.id} className="num">
+              {s.name} <span className="font-medium text-fg">{s.current}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </section>
+  )
+}
+
+// The small circular progress ring for "X of Y due today".
+// Drawn with theme tokens (currentColor), so light and dark mode both work.
+function ProgressRing({ percent, label }: { percent: number; label: string }) {
+  const radius = 9
+  const circumference = 2 * Math.PI * radius
+  const filled = (Math.max(0, Math.min(100, percent)) / 100) * circumference
+  return (
+    <svg width={26} height={26} viewBox="0 0 26 26" role="img" aria-label={`${label} (${percent}%)`} className="shrink-0">
+      {/* The empty ring, in the theme's line colour. */}
+      <circle cx={13} cy={13} r={radius} fill="none" strokeWidth={3} className="text-line" stroke="currentColor" />
+      {/* The filled arc, starting at 12 o'clock. An empty arc is simply zero long. */}
+      <circle cx={13} cy={13} r={radius} fill="none" strokeWidth={3} strokeLinecap="round"
+        strokeDasharray={`${filled} ${circumference}`} transform="rotate(-90 13 13)"
+        className="text-accent" stroke="currentColor" />
+    </svg>
   )
 }
 

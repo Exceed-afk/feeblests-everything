@@ -16,7 +16,7 @@
  */
 
 import type Database from 'better-sqlite3'
-import { filterTasks, nextTaskDate, resolveOccurrences, TASK_FIELD_ORDER, taskInputProblems } from '../shared/tasks'
+import { filterTasks, localTaskDay, nextTaskDate, nextTaskDateAfter, resolveOccurrences, TASK_FIELD_ORDER, taskInputProblems } from '../shared/tasks'
 import { cleanTags, localDate } from './util'
 import { emitAutomation } from './automations'
 import type { Task, TaskInput, TaskStatus } from '../shared/types'
@@ -80,8 +80,25 @@ export function listTasks(db: Database.Database, today: string = localDate()): T
   return resolveOccurrences(tasks, today)
 }
 
-export function listFilteredTasks(db: Database.Database, filter: Parameters<typeof filterTasks>[1], today: string = localDate()): Task[] {
-  return filterTasks(listTasks(db, today), filter, today)
+export function listCompletedTasks(db: Database.Database, date: string): Task[] {
+  const rows = db.prepare(`SELECT t.*, c.completed_at AS occurrence_completed_at
+    FROM task_completions c JOIN tasks t ON t.id = c.task_id
+    WHERE t.deleted_at IS NULL
+    ORDER BY c.completed_at DESC, c.id DESC`).all() as (TaskRow & { occurrence_completed_at: string })[]
+  const completions = rows.filter((row) => localTaskDay(row.occurrence_completed_at) === date)
+  const subtasks = db.prepare('SELECT * FROM task_subtasks ORDER BY sort_order, id').all() as SubtaskRow[]
+  return completions.map((row) => toTask({
+    ...row, status: 'done', completed_at: row.occurrence_completed_at
+  }, subtasks))
+}
+
+export function listFilteredTasks(db: Database.Database, filter: Parameters<typeof filterTasks>[1], today: string = localDate(), nowTime: string = localTime()): Task[] {
+  const source = filter.view === 'trash' ? listDeletedTasks(db) : listTasks(db, today)
+  return filterTasks(source, filter, today, nowTime)
+}
+
+function localTime(date: Date = new Date()): string {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
 export function listDeletedTasks(db: Database.Database): Task[] {
@@ -134,6 +151,9 @@ export function createTask(db: Database.Database, input: TaskInput): Task {
         recurrenceNext: task.recurrenceNext })
     const id = Number(result.lastInsertRowid)
     replaceSubtasks(db, id, task.subtasks)
+    if (task.status === 'done') {
+      db.prepare('INSERT INTO task_completions (task_id, completed_at) VALUES (?, ?)').run(id, now)
+    }
     return id
   })
   return getTask(db, run())
@@ -154,6 +174,9 @@ export function updateTask(db: Database.Database, id: number, input: TaskInput):
         recurrenceNext: task.recurrenceNext,
         completedAt: task.status === 'done' ? (previous.status === 'done' ? previous.completed_at : now) : null })
     replaceSubtasks(db, id, task.subtasks)
+    if (task.status === 'done' && previous.status !== 'done') {
+      db.prepare('INSERT INTO task_completions (task_id, completed_at) VALUES (?, ?)').run(id, now)
+    }
   })()
   return getTask(db, id)
 }
@@ -173,8 +196,13 @@ export function restoreTask(db: Database.Database, id: number): void {
   db.prepare('UPDATE tasks SET deleted_at = NULL WHERE id = ?').run(id)
 }
 
+export function deleteTaskForever(db: Database.Database, id: number): void {
+  const result = db.prepare('DELETE FROM tasks WHERE id = ? AND deleted_at IS NOT NULL').run(id)
+  if (result.changes === 0) throw new Error('Task is not in Trash')
+}
+
 export function clearTrash(db: Database.Database): void {
-  db.prepare('DELETE FROM tasks WHERE deleted_at IS NOT NULL').run()
+  db.transaction(() => db.prepare('DELETE FROM tasks WHERE deleted_at IS NOT NULL').run())()
 }
 
 export function deleteTask(db: Database.Database, id: number): void {
@@ -198,8 +226,17 @@ export function reorderPosition(db: Database.Database, id: number, newPosition: 
 }
 
 export function reorderTasks(db: Database.Database, ids: number[]): void {
-  const update = db.prepare('UPDATE tasks SET position = ? WHERE id = ?')
-  db.transaction(() => ids.forEach((id, index) => update.run(index, id)))()
+  if (!Array.isArray(ids) || ids.some((id) => !Number.isInteger(id) || id <= 0) || new Set(ids).size !== ids.length)
+    throw new Error('Choose a valid task order')
+  db.transaction(() => {
+    const active = (db.prepare('SELECT id FROM tasks WHERE deleted_at IS NULL ORDER BY position, id').all() as { id: number }[]).map((row) => row.id)
+    const moving = new Set(ids)
+    if (ids.some((id) => !active.includes(id))) throw new Error('A task in this order no longer exists')
+    let cursor = 0
+    const ordered = active.map((id) => moving.has(id) ? ids[cursor++] : id)
+    const update = db.prepare('UPDATE tasks SET position = ? WHERE id = ?')
+    ordered.forEach((id, index) => update.run(index, id))
+  })()
 }
 
 function checkTaskIds(ids: number[]): void {
@@ -214,8 +251,15 @@ export function setTasksStatus(db: Database.Database, ids: number[], status: Tas
 
 export function setTaskStatus(db: Database.Database, id: number, status: TaskStatus): Task {
   if (!['todo', 'in-progress', 'done'].includes(status)) throw new Error('Choose a valid task status')
-  const task = getTask(db, id)
+  const raw = getTask(db, id)
+  const task = resolveOccurrences([raw], localDate())[0]
   if (task.deletedAt !== null) throw new Error('Task is deleted')
+  if (raw.status !== task.status) {
+    db.transaction(() => {
+      db.prepare('UPDATE tasks SET status = ?, completed_at = NULL WHERE id = ?').run(task.status, id)
+      db.prepare('UPDATE task_subtasks SET done = 0 WHERE task_id = ?').run(id)
+    })()
+  }
   if (status !== 'done' || task.status === 'done') {
     db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?').run(status, status === 'done' ? task.completedAt : null, id)
     const updated = getTask(db, id)
@@ -225,11 +269,88 @@ export function setTaskStatus(db: Database.Database, id: number, status: TaskSta
     return updated
   }
   const now = new Date().toISOString()
+  const today = localDate()
+  const anchor = task.dueDate ?? task.recurrenceNext ?? today
+  const next = nextTaskDateAfter(task.recurrenceNext ?? task.dueDate ?? today, task.recurrenceRule, anchor, today)
   db.transaction(() => {
     db.prepare("UPDATE tasks SET status = 'done', completed_at = ?, recurrence_next = ? WHERE id = ?")
-      .run(now, nextTaskDate(task.recurrenceNext ?? task.dueDate ?? '', task.recurrenceRule), id)
+      .run(now, next, id)
+    db.prepare('INSERT INTO task_completions (task_id, completed_at) VALUES (?, ?)').run(id, now)
   })()
   void emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
   return getTask(db, id)
 }
 
+export function undoTaskStatus(db: Database.Database, id: number, status: TaskStatus, completedAt: string | null, recurrenceNext: string | null): void {
+  if (!['todo', 'in-progress', 'done'].includes(status)) throw new Error('Choose a valid task status')
+  db.transaction(() => {
+    const current = db.prepare('SELECT status, completed_at FROM tasks WHERE id = ? AND deleted_at IS NULL').get(id) as { status: TaskStatus; completed_at: string | null } | undefined
+    if (!current) throw new Error('Task not found')
+    if (current.status === 'done' && status !== 'done' && current.completed_at !== null) {
+      db.prepare('DELETE FROM task_completions WHERE task_id = ? AND completed_at = ?').run(id, current.completed_at)
+    }
+    db.prepare('UPDATE tasks SET status = ?, completed_at = ?, recurrence_next = ? WHERE id = ?')
+      .run(status, completedAt, recurrenceNext, id)
+  })()
+}
+
+export function rescheduleTasks(db: Database.Database, ids: number[], dueDate: string, dueTime: string | null = null): void {
+  checkTaskIds(ids)
+  const check = taskInputProblems({
+    title: 'Task', notes: '', status: 'todo', priority: 'medium', dueDate, dueTime,
+    project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: []
+  })
+  if (check.dueDate) throw new Error(check.dueDate)
+  if (check.dueTime) throw new Error(check.dueTime)
+  db.transaction(() => {
+    const updateOneOff = db.prepare('UPDATE tasks SET due_date = ?, due_time = ? WHERE id = ? AND deleted_at IS NULL')
+    const updateRecurring = db.prepare('UPDATE tasks SET recurrence_next = ?, due_time = ? WHERE id = ? AND deleted_at IS NULL')
+    for (const id of ids) {
+      const task = db.prepare('SELECT recurrence_rule FROM tasks WHERE id = ? AND deleted_at IS NULL').get(id) as { recurrence_rule: string | null } | undefined
+      if (!task) throw new Error('A selected task no longer exists')
+      const result = task.recurrence_rule
+        ? updateRecurring.run(dueDate, dueTime, id)
+        : updateOneOff.run(dueDate, dueTime, id)
+      if (result.changes === 0) throw new Error('A selected task no longer exists')
+    }
+  })()
+}
+
+export function setSubtaskDone(db: Database.Database, taskId: number, subtaskId: number, done: boolean): void {
+  const result = db.prepare('UPDATE task_subtasks SET done = ? WHERE id = ? AND task_id = ?')
+    .run(done ? 1 : 0, subtaskId, taskId)
+  if (result.changes === 0) throw new Error('Checklist item not found')
+}
+
+export function reorderSubtasks(db: Database.Database, taskId: number, ids: number[]): void {
+  const current = (db.prepare('SELECT id FROM task_subtasks WHERE task_id = ? ORDER BY sort_order, id').all(taskId) as { id: number }[]).map((row) => row.id)
+  if (ids.length !== current.length || new Set(ids).size !== ids.length || ids.some((id) => !current.includes(id)))
+    throw new Error('Choose a valid checklist order')
+  const update = db.prepare('UPDATE task_subtasks SET sort_order = ? WHERE id = ? AND task_id = ?')
+  db.transaction(() => ids.forEach((id, index) => update.run(index, id, taskId)))()
+}
+
+export function promoteSubtask(db: Database.Database, taskId: number, subtaskId: number): Task {
+  return db.transaction(() => {
+    const row = db.prepare('SELECT title FROM task_subtasks WHERE id = ? AND task_id = ?').get(subtaskId, taskId) as { title: string } | undefined
+    if (!row) throw new Error('Checklist item not found')
+    const created = createTask(db, {
+      title: row.title, notes: '', status: 'todo', priority: 'medium', dueDate: null, dueTime: null,
+      project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: []
+    })
+    db.prepare('DELETE FROM task_subtasks WHERE id = ? AND task_id = ?').run(subtaskId, taskId)
+    return created
+  })()
+}
+
+export function skipTaskOccurrence(db: Database.Database, id: number, today: string): Task {
+  const task = getTask(db, id)
+  if (task.deletedAt !== null) throw new Error('Task is deleted')
+  if (!task.recurrenceRule) throw new Error('This task does not repeat')
+  const next = nextTaskDate(task.recurrenceNext ?? task.dueDate ?? today, task.recurrenceRule, task.dueDate ?? today)
+  db.transaction(() => {
+    db.prepare("UPDATE tasks SET status = 'todo', completed_at = NULL, recurrence_next = ? WHERE id = ?").run(next, id)
+    db.prepare('UPDATE task_subtasks SET done = 0 WHERE task_id = ?').run(id)
+  })()
+  return getTask(db, id)
+}

@@ -23,8 +23,8 @@ export interface ColorSet { bg: string; surface: string; panel: string; card: st
 // mood keeps its own words and dots, so a rising line never claims that any mood is wrong.
 // `muted` is a shade darker than the starting #64748B so secondary text keeps 4.5:1 on the page itself, not only on cards.
 export const COLOR_TOKENS: { light: ColorSet; dark: ColorSet } = {
-  light: { bg: '#f4f5f4', surface: '#ffffff', card: '#ffffff', panel: '#ffffff', line: '#e5e7e7', fg: '#171a18', muted: '#63708a', pos: '#057a52', neg: '#c51b45', warn: '#8f5a06', mood: '#2f6f9f' },
-  dark: { bg: '#111715', surface: '#1b2420', card: '#1b2420', panel: '#161d1a', line: '#303b35', fg: '#f1f5f2', muted: '#a1ada5', pos: '#42c58a', neg: '#f5849a', warn: '#e5b450', mood: '#74b2d8' }
+  light: { bg: '#f4f5f4', surface: '#fefefe', card: '#fefefe', panel: '#fefefe', line: '#dadcdc', fg: '#2f3130', muted: '#63708a', pos: '#057a52', neg: '#c51b45', warn: '#8f5a06', mood: '#2f6f9f' },
+  dark: { bg: '#111715', surface: '#1b2420', card: '#1b2420', panel: '#161d1a', line: '#303b35', fg: '#cfd3d0', muted: '#a1ada5', pos: '#42c58a', neg: '#f5849a', warn: '#e5b450', mood: '#74b2d8' }
 }
 // The dark loss colour is a step lighter than the starting #EF7188, which could not be read on the Frost palette's
 // cards (4.08:1); every other palette passes with both.

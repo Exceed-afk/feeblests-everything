@@ -26,7 +26,8 @@ type FieldElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
 export function TaskEditor({ task, onClose, onSaved }: Props) {
   const [title, setTitle] = useState(task?.title ?? '')
   const [notes, setNotes] = useState(task?.notes ?? '')
-  const [dueDate, setDueDate] = useState(task?.dueDate ?? '')
+  const [dueDate, setDueDate] = useState(task?.recurrenceNext ?? task?.dueDate ?? '')
+  const [dueTime, setDueTime] = useState(task?.dueTime ?? '')
   const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? 'medium')
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'todo')
   const [project, setProject] = useState(task?.project ?? '')
@@ -46,12 +47,14 @@ export function TaskEditor({ task, onClose, onSaved }: Props) {
   const fields = useRef<Partial<Record<TaskField, FieldElement | null>>>({})
 
   const input = (): TaskInput => ({
-    title, notes, dueDate: dueDate || null, dueTime: null, priority, status, project,
+    title, notes,
+    dueDate: task?.recurrenceRule && frequency !== 'none' ? task.dueDate : dueDate || null,
+    dueTime: dueTime || null, priority, status, project,
     tags: addTag(tags, tagInput),
     recurrenceRule: frequency === 'none' ? null : {
       frequency, intervalDays: frequency === 'custom' ? Math.max(1, Number(interval) || 1) : 1
     },
-    recurrenceNext: null,
+    recurrenceNext: frequency === 'none' ? null : dueDate || null,
     subtasks: parseSubtasks(subtasks)
   })
 
@@ -145,15 +148,21 @@ export function TaskEditor({ task, onClose, onSaved }: Props) {
             {fieldError('title')}
           </label>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <label className="flex flex-col text-xs text-muted">Due date
               <input id="task-dueDate" type="date" className="field mt-1" value={dueDate}
                 aria-invalid={Boolean(errorText('dueDate'))} aria-describedby={describedBy('dueDate')} ref={fieldRef('dueDate')}
                 onChange={(e) => { setDueDate(e.target.value); clearFieldError('dueDate') }} />
               {fieldError('dueDate')}
             </label>
+            <label className="flex flex-col text-xs text-muted">Due time
+              <input id="task-dueTime" type="time" className="field mt-1" value={dueTime}
+                aria-invalid={Boolean(errorText('dueTime'))} aria-describedby={describedBy('dueTime')} ref={fieldRef('dueTime')}
+                onChange={(e) => { setDueTime(e.target.value); clearFieldError('dueTime') }} />
+              {fieldError('dueTime')}
+            </label>
             <label className="flex flex-col text-xs text-muted">Priority
-              <select id="task-priority" className="field mt-1" value={priority}
+              <select id="task-priority" className="field relative z-20 mt-1" value={priority}
                 aria-invalid={Boolean(errorText('priority'))} aria-describedby={describedBy('priority')} ref={fieldRef('priority')}
                 onChange={(e) => { setPriority(e.target.value as TaskPriority); clearFieldError('priority') }}>
                 <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>

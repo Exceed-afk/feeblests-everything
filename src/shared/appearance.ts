@@ -6,7 +6,7 @@
 // To add a colour scheme: add one entry to PALETTES (a light and a dark set). Nothing else to change.
 import {
   DEFAULT_INTELLIGENCE, DEFAULT_SETTINGS,
-  type ColorOverrides, type Density, type FontChoice, type IntelligenceSettings, type Radius, type Settings, type TaskLayout, type TextSize, type ThemeMode, type UiStyle
+  type ColorOverrides, type Density, type FontChoice, type IntelligenceSettings, type Radius, type Settings, type TaskLayout, type TaskSort, type TaskSavedView, type TaskPriority, type TaskView, type TextSize, type ThemeMode, type UiStyle
 } from './types'
 import { MAX_RECENT_TOOLS } from './palette'
 import { COLOR_TOKENS, accentFor } from './design'
@@ -26,7 +26,7 @@ const triple = (c: RGB): string => c.join(' ') // "R G B", so Tailwind can add o
 // t = 0 gives a, t = 1 gives b.
 export const mix = (a: RGB, b: RGB, t: number): RGB => a.map((x, i) => Math.round(x + (b[i] - x) * t)) as RGB
 
-const channel = (v: number): number => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4 }
+const channel = (v: number): number => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4 }
 const luminance = (c: RGB): number => 0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
 
 // WCAG contrast ratio, 1 (none) to 21 (black on white). Body text should reach 4.5.
@@ -51,56 +51,234 @@ const INK: RGB = [17, 23, 21] // the design system's dark page colour
 // Text colour for buttons filled with the accent: white, unless the accent is too light for it (amber, emerald).
 export const onAccent = (accent: RGB): RGB => (contrast(WHITE, accent) >= 3.5 ? WHITE : INK)
 
-// The accent as *text* (sidebar highlight, tag chips): darkened or lightened until it can be read on the page.
-export function accentText(accent: RGB, t: Tokens): RGB {
-  const bg = hexToRgb(t.bg), panel = hexToRgb(t.panel), card = hexToRgb(t.card), fg = hexToRgb(t.fg)
-  const tinted = mix(panel, accent, 0.15) // the highlighted sidebar item
-  const pickedRow = mix(card, accent, 0.14) // the selected command palette row (modern style)
-  const pickedRowMinimal = mix(card, fg, 0.07) // ...and in the classic minimal style, where it is a grey tint (lighter than the card in dark mode)
-  return ensureContrast(accent, [bg, panel, card, tinted, pickedRow, pickedRowMinimal], 4.5, fg)
+export function accentTint(accent: RGB, t: Tokens, dark: boolean): RGB {
+  return mix(hexToRgb(t.surface), accent, dark ? 0.2 : 0.14)
+}
+
+// Accent fills remain unchanged; text and icons use this adjusted accent if needed.
+export function accentText(accent: RGB, t: Tokens, dark = false): RGB {
+  const bg = hexToRgb(t.bg), sidebar = hexToRgb(t.sidebar), surface = hexToRgb(t.surface), text = hexToRgb(t.text)
+  const selected = accentTint(accent, t, dark)
+  return ensureContrast(accent, [bg, sidebar, surface, selected], 4.5, text)
 }
 
 // ---------- colour schemes ----------
 
-export interface Tokens { bg: string; panel: string; card: string; line: string; fg: string; muted: string } // #rrggbb
+export interface Tokens {
+  bg: string
+  surface: string
+  sidebar: string
+  border: string
+  text: string
+  muted: string
+} // #rrggbb
 export interface Palette { id: string; name: string; light: Tokens; dark: Tokens }
 
-// bg = page, panel = sidebar, card = raised surfaces, line = borders, fg = text, muted = secondary text.
-// "Default" is the design system's own neutral set (src/shared/design.ts), so the two never drift apart.
+const nearWhite = (rgb: RGB): RGB => rgb.every((c) => c === 255) ? [254, 254, 254] : rgb
+const nearBlack = (rgb: RGB): RGB => rgb.every((c) => c === 0) ? [1, 1, 1] : rgb
+
+function adjustedToRange(color: RGB, against: RGB, min: number, max: number, lighter: boolean): RGB {
+  const current = contrast(color, against)
+  if (current >= min && current <= max) return color
+  const target = current > max ? against : lighter ? WHITE : [0, 0, 0] as RGB
+  for (let step = 1; step <= 1000; step++) {
+    const candidate = mix(color, target, step / 1000)
+    const ratio = contrast(candidate, against)
+    if ((current > max && ratio <= (min + max) / 2) || (current < min && ratio >= (min + max) / 2)) return candidate
+  }
+  return color
+}
+
+function setContrastAtLeast(color: RGB, against: RGB, min: number, target: RGB): RGB {
+  if (contrast(color, against) >= min) return color
+  for (let step = 1; step <= 1000; step++) {
+    const candidate = mix(color, target, step / 1000)
+    if (contrast(candidate, against) >= min) return candidate
+  }
+  return color
+}
+
+function surfaceInRange(surface: RGB, bg: RGB): RGB {
+  const ratio = contrast(surface, bg)
+  if (ratio >= 1.03 && ratio <= 1.18) return surface
+  const target = ratio > 1.18 ? bg : WHITE
+  for (let step = 1; step <= 1000; step++) {
+    const candidate = mix(surface, target, step / 1000)
+    const next = contrast(candidate, bg)
+    if (ratio > 1.18 ? next <= 1.1 : next >= 1.08) return candidate
+  }
+  return surface
+}
+
+function checkedTokens(tokens: Tokens, dark: boolean): Tokens {
+  const bg = dark ? nearBlack(hexToRgb(tokens.bg)) : nearWhite(hexToRgb(tokens.bg))
+  let surface = dark ? nearBlack(hexToRgb(tokens.surface)) : nearWhite(hexToRgb(tokens.surface))
+  let sidebar = dark ? nearBlack(hexToRgb(tokens.sidebar)) : nearWhite(hexToRgb(tokens.sidebar))
+  let border = hexToRgb(tokens.border)
+  let text = hexToRgb(tokens.text)
+  let muted = hexToRgb(tokens.muted)
+  surface = surfaceInRange(surface, bg)
+  text = adjustedToRange(text, bg, 10, 14, dark)
+  border = setContrastAtLeast(border, bg, 1.25, text)
+  muted = setContrastAtLeast(muted, bg, 4.5, text)
+  return {
+    bg: rgbToHex(bg),
+    surface: rgbToHex(surface),
+    sidebar: rgbToHex(sidebar),
+    border: rgbToHex(border),
+    text: rgbToHex(text),
+    muted: rgbToHex(muted)
+  }
+}
+
+interface Hsl { h: number; s: number; l: number }
+function toHsl([r0, g0, b0]: RGB): Hsl {
+  const [r, g, b] = [r0, g0, b0].map((c) => c / 255)
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min
+  const l = (max + min) / 2
+  let h = 0
+  if (delta) {
+    if (max === r) h = ((g - b) / delta) % 6
+    else if (max === g) h = (b - r) / delta + 2
+    else h = (r - g) / delta + 4
+    h *= 60
+    if (h < 0) h += 360
+  }
+  return { h, s: delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1)), l }
+}
+
+function fromHsl({ h, s, l }: Hsl): RGB {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1))
+  const m = l - c / 2
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x]
+  return [r, g, b].map((v) => Math.round((v + m) * 255)) as RGB
+}
+
+function companionTokens(seed: Tokens, dark: boolean): Tokens {
+  const tone = (hex: string, lightness: number): RGB => {
+    const source = toHsl(hexToRgb(hex))
+    return fromHsl({ h: source.h, s: Math.min(source.s, 0.14), l: lightness })
+  }
+  const bg = tone(seed.bg, dark ? 0.11 : 0.96)
+  return {
+    bg: rgbToHex(bg),
+    surface: rgbToHex(tone(seed.surface, dark ? 0.14 : 0.985)),
+    sidebar: rgbToHex(tone(seed.sidebar, dark ? 0.08 : 0.92)),
+    border: rgbToHex(tone(seed.border, dark ? 0.21 : 0.86)),
+    text: rgbToHex(tone(seed.text, dark ? 0.88 : 0.2)),
+    muted: rgbToHex(tone(seed.muted, dark ? 0.63 : 0.42))
+  }
+}
+
+type PaletteSource = { id: string; name: string; light?: Tokens; dark?: Tokens }
+const palette = (source: PaletteSource): Palette => {
+  const light = source.light ?? companionTokens(source.dark!, false)
+  const dark = source.dark ?? companionTokens(source.light!, true)
+  return { id: source.id, name: source.name, light: checkedTokens(light, false), dark: checkedTokens(dark, true) }
+}
+
+const fromDesign = (set: typeof COLOR_TOKENS.light): Tokens => ({
+  bg: set.bg, surface: set.surface, sidebar: set.panel, border: set.line, text: set.fg, muted: set.muted
+})
+
 export const PALETTES: Palette[] = [
-  { id: 'default', name: 'Default',
-    light: COLOR_TOKENS.light, dark: COLOR_TOKENS.dark },
-  { id: 'midnight', name: 'Midnight',
-    light: { bg: '#eef2fa', panel: '#ffffff', card: '#ffffff', line: '#d9e0ef', fg: '#121a2e', muted: '#5a6784' },
-    dark: { bg: '#0b1020', panel: '#0f1629', card: '#141c33', line: '#25304f', fg: '#e6ebf7', muted: '#93a0bd' } },
-  { id: 'paper', name: 'Paper',
-    light: { bg: '#f6f1e7', panel: '#fbf8f1', card: '#fffdf8', line: '#e3dac8', fg: '#2b2620', muted: '#6f6455' },
-    dark: { bg: '#1a1714', panel: '#201c18', card: '#27221d', line: '#3a342c', fg: '#ece4d6', muted: '#a39786' } },
-  { id: 'forest', name: 'Forest',
-    light: { bg: '#eff5f1', panel: '#ffffff', card: '#ffffff', line: '#d5e3da', fg: '#14211b', muted: '#56695f' },
-    dark: { bg: '#0d1512', panel: '#111c18', card: '#172420', line: '#26382f', fg: '#e4efe9', muted: '#8ca59a' } },
-  { id: 'frost', name: 'Frost',
-    light: { bg: '#eceff4', panel: '#f7f8fb', card: '#ffffff', line: '#d8dee9', fg: '#2e3440', muted: '#586378' },
-    dark: { bg: '#2a303c', panel: '#252b36', card: '#323947', line: '#434c5e', fg: '#eceff4', muted: '#a8b1c4' } },
-  { id: 'graphite', name: 'Graphite',
-    light: { bg: '#f3f3f4', panel: '#ffffff', card: '#ffffff', line: '#e2e2e4', fg: '#111111', muted: '#636363' },
-    dark: { bg: '#0a0a0a', panel: '#111111', card: '#161616', line: '#2a2a2a', fg: '#ededed', muted: '#9a9a9a' } }
+  palette({
+    id: 'default', name: 'Default',
+    light: { ...fromDesign(COLOR_TOKENS.light), surface: '#fefefe' },
+    dark: fromDesign(COLOR_TOKENS.dark)
+  }),
+  palette({ id: 'midnight', name: 'Midnight',
+    light: { bg: '#eef2fa', surface: '#fefefe', sidebar: '#fefefe', border: '#d9e0ef', text: '#121a2e', muted: '#5a6784' },
+    dark: { bg: '#0b1020', surface: '#141c33', sidebar: '#0f1629', border: '#25304f', text: '#e6ebf7', muted: '#93a0bd' } }),
+  palette({ id: 'paper', name: 'Paper',
+    light: { bg: '#f6f1e7', surface: '#fffdf8', sidebar: '#fbf8f1', border: '#e3dac8', text: '#2b2620', muted: '#6f6455' },
+    dark: { bg: '#1a1714', surface: '#27221d', sidebar: '#201c18', border: '#3a342c', text: '#ece4d6', muted: '#a39786' } }),
+  palette({ id: 'forest', name: 'Forest',
+    light: { bg: '#eff5f1', surface: '#fefefe', sidebar: '#fefefe', border: '#d5e3da', text: '#14211b', muted: '#56695f' },
+    dark: { bg: '#0d1512', surface: '#172420', sidebar: '#111c18', border: '#26382f', text: '#e4efe9', muted: '#8ca59a' } }),
+  palette({ id: 'frost', name: 'Frost',
+    light: { bg: '#eceff4', surface: '#fefefe', sidebar: '#f7f8fb', border: '#d8dee9', text: '#2e3440', muted: '#586378' },
+    dark: { bg: '#2a303c', surface: '#323947', sidebar: '#252b36', border: '#434c5e', text: '#eceff4', muted: '#a8b1c4' } }),
+  palette({ id: 'graphite', name: 'Graphite',
+    light: { bg: '#f3f3f4', surface: '#fefefe', sidebar: '#fefefe', border: '#e2e2e4', text: '#111111', muted: '#636363' },
+    dark: { bg: '#0a0a0a', surface: '#161616', sidebar: '#111111', border: '#2a2a2a', text: '#ededed', muted: '#9a9a9a' } }),
+  palette({ id: 'mocha-cream', name: 'Mocha Cream',
+    light: { bg: '#F8F4E6', surface: '#FDFBF3', sidebar: '#F0E9D6', border: '#E0D4BC', text: '#4A3320', muted: '#80654A' } }),
+  palette({ id: 'espresso-night', name: 'Espresso Night',
+    dark: { bg: '#1B130C', surface: '#251B12', sidebar: '#130D08', border: '#3A2B1B', text: '#DDD6C3', muted: '#A0957C' } }),
+  palette({ id: 'soft-linen', name: 'Soft Linen',
+    light: { bg: '#F9F8F6', surface: '#FEFEFD', sidebar: '#F1ECE7', border: '#E0D7CF', text: '#3A322B', muted: '#776B60' } }),
+  palette({ id: 'fresh-meadow', name: 'Fresh Meadow',
+    light: { bg: '#EFF7F0', surface: '#FAFDFA', sidebar: '#E4F1E5', border: '#C6DEC8', text: '#1F3A23', muted: '#4C7050' } }),
+  palette({ id: 'warm-sand', name: 'Warm Sand',
+    light: { bg: '#f2ecde', surface: '#faf8f3', sidebar: '#f6f2e9', border: '#cfc6b1', text: '#544d41', muted: '#6f685c' },
+    dark: { bg: '#2f2c28', surface: '#3d3a35', sidebar: '#36332f', border: '#504b42', text: '#ebe2cc', muted: '#aba494' } }),
+  palette({ id: 'royal-plum', name: 'Royal Plum',
+    dark: { bg: '#1F1527', surface: '#291C34', sidebar: '#190F20', border: '#3E2B4D', text: '#E5DBEE', muted: '#A58EB8' } }),
+  palette({ id: 'sage-garden', name: 'Sage Garden',
+    dark: { bg: '#1C241B', surface: '#212C20', sidebar: '#161E15', border: '#364634', text: '#DBEADC', muted: '#9BB399' } })
 ]
 
-export const OVERRIDE_KEYS = ['bg', 'panel', 'card', 'fg'] as const
+export const OVERRIDE_KEYS = ['bg', 'sidebar', 'surface', 'text'] as const
 
-// The six colours in use: the palette's own, with the user's hand-picked ones on top.
-// Borders and secondary text are re-derived from the final background and text, so they always fit.
+export function cardBorder(tokens: Tokens, style: UiStyle): RGB {
+  return style === 'minimal'
+    ? hexToRgb(tokens.border)
+    : mix(hexToRgb(tokens.surface), hexToRgb(tokens.border), 0.65)
+}
+
+export interface ContrastMetrics {
+  textOnBackground: number
+  mutedOnBackground: number
+  borderOnBackground: number
+  surfaceOnBackground: number
+  cardBorderOnSurface: number
+}
+
+export function themeContrast(tokens: Tokens, style: UiStyle): ContrastMetrics {
+  const bg = hexToRgb(tokens.bg), surface = hexToRgb(tokens.surface)
+  const border = cardBorder(tokens, style)
+  return {
+    textOnBackground: contrast(hexToRgb(tokens.text), bg),
+    mutedOnBackground: contrast(hexToRgb(tokens.muted), bg),
+    borderOnBackground: contrast(border, bg),
+    surfaceOnBackground: contrast(surface, bg),
+    cardBorderOnSurface: contrast(border, surface)
+  }
+}
+
+// Migrate the former theme selector and recipe-era camelCase palette ids.
+export function migrateColorScheme(paletteValue: unknown, colorSchemeValue?: unknown): string | null {
+  const aliases: Record<string, string> = {
+    mochacream: 'mocha-cream', espressonight: 'espresso-night', softlinen: 'soft-linen',
+    freshmeadow: 'fresh-meadow', warmsand: 'warm-sand', royalplum: 'royal-plum', sagegarden: 'sage-garden'
+  }
+  const findId = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null
+    const slug = value.trim().toLowerCase().replace(/[\s_]+/g, '-')
+    const candidate = aliases[slug.replace(/-/g, '')] ?? slug
+    return PALETTES.some((p) => p.id === candidate) ? candidate : null
+  }
+  const savedTheme = findId(colorSchemeValue)
+  const savedPalette = findId(paletteValue)
+  return savedPalette && (savedPalette !== 'default' || !savedTheme) ? savedPalette : savedTheme ?? savedPalette
+}
+
+// The palette's own tokens, with per-mode user overrides applied afterward.
 export function resolveTokens(s: Pick<Settings, 'palette' | 'colors'>, dark: boolean): Tokens {
   const pal = PALETTES.find((p) => p.id === s.palette) ?? PALETTES[0]
   const t: Tokens = { ...(dark ? pal.dark : pal.light) }
   const picked = s.colors?.[dark ? 'dark' : 'light'] ?? {}
   let changed = false
-  for (const k of OVERRIDE_KEYS) if (isHex(picked[k])) { t[k] = picked[k]!; changed = true }
+  for (const key of OVERRIDE_KEYS) {
+    const value = picked[key]
+    if (isHex(value)) { t[key] = value; changed = true }
+  }
   if (changed) {
-    const bg = hexToRgb(t.bg), fg = hexToRgb(t.fg)
-    t.line = rgbToHex(mix(bg, fg, dark ? 0.16 : 0.12))
-    t.muted = rgbToHex(ensureContrast(mix(fg, bg, 0.4), [bg, hexToRgb(t.panel), hexToRgb(t.card)], 4.5, fg))
+    const bg = hexToRgb(t.bg), text = hexToRgb(t.text)
+    t.border = rgbToHex(mix(bg, text, dark ? 0.16 : 0.12))
+    t.muted = rgbToHex(ensureContrast(mix(text, bg, 0.4), [bg, hexToRgb(t.sidebar), hexToRgb(t.surface)], 4.5, text))
   }
   return t
 }
@@ -131,7 +309,15 @@ export const STYLE_PRESETS: Record<UiStyle, Pick<Settings, 'radius' | 'density'>
 const pick = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T => (allowed.includes(v as T) ? (v as T) : fallback)
 const cleanOverrides = (v: unknown): ColorOverrides => {
   const out: ColorOverrides = {}
-  if (v && typeof v === 'object') for (const k of OVERRIDE_KEYS) { const c = (v as Record<string, unknown>)[k]; if (isHex(c)) out[k] = c }
+  if (v && typeof v === 'object') {
+    const raw = v as Record<string, unknown>
+    const aliases: Record<string, (typeof OVERRIDE_KEYS)[number]> = { panel: 'sidebar', card: 'surface', fg: 'text' }
+    for (const key of OVERRIDE_KEYS) {
+      const oldKey = Object.keys(aliases).find((candidate) => aliases[candidate] === key)
+      const color = raw[key] ?? (oldKey ? raw[oldKey] : undefined)
+      if (isHex(color)) out[key] = color
+    }
+  }
   return out
 }
 
@@ -139,8 +325,30 @@ const cleanOverrides = (v: unknown): ColorOverrides => {
 const cleanIds = (v: unknown, max = 200): string[] =>
   Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]*$/.test(x)))].slice(0, max) : []
 
+const cleanTaskViews = (value: unknown): TaskSavedView[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is TaskSavedView => {
+    if (!item || typeof item !== 'object') return false
+    const view = item as Partial<TaskSavedView>
+    return typeof view.id === 'string' && /^[a-z0-9-]{1,48}$/.test(view.id) &&
+      typeof view.name === 'string' && Boolean(view.name.trim()) &&
+      Boolean(view.filter && typeof view.filter === 'object')
+  }).slice(0, 20).map((view) => ({
+    id: view.id,
+    name: view.name.trim().slice(0, 40),
+    filter: {
+      view: pick<TaskView>(view.filter.view, ['today', 'upcoming', 'overdue', 'all', 'completed'], 'all'),
+      text: typeof view.filter.text === 'string' ? view.filter.text.slice(0, 100) : '',
+      priority: (['low', 'medium', 'high'] as unknown[]).includes(view.filter.priority) ? view.filter.priority as TaskPriority : undefined,
+      project: typeof view.filter.project === 'string' ? view.filter.project.slice(0, 100) : undefined,
+      tag: typeof view.filter.tag === 'string' ? view.filter.tag.slice(0, 60) : undefined
+    }
+  }))
+}
+
 // Settings can come from an imported or hand-edited backup, so anything unexpected falls back to the default.
-export function normalizeSettings(raw: Partial<Record<keyof Settings, unknown>> | null | undefined): Settings {
+export type SettingsInput = Partial<Record<keyof Settings, unknown>> & { colorScheme?: unknown; colourScheme?: unknown }
+export function normalizeSettings(raw: SettingsInput | null | undefined): Settings {
   const r = raw ?? {}
   const d = DEFAULT_SETTINGS
   const colors = (r.colors && typeof r.colors === 'object' ? r.colors : {}) as Record<string, unknown>
@@ -148,7 +356,7 @@ export function normalizeSettings(raw: Partial<Record<keyof Settings, unknown>> 
     theme: pick<ThemeMode>(r.theme, ['dark', 'light', 'system'], d.theme),
     accent: isHex(r.accent) ? r.accent : d.accent,
     tagColors: r.tagColors && typeof r.tagColors === 'object' ? (r.tagColors as Settings['tagColors']) : d.tagColors,
-    palette: PALETTES.some((p) => p.id === r.palette) ? (r.palette as string) : d.palette,
+    palette: migrateColorScheme(r.palette, r.colorScheme ?? r.colourScheme) ?? d.palette,
     uiStyle: pick<UiStyle>(r.uiStyle, ['modern', 'minimal'], d.uiStyle),
     radius: pick<Radius>(r.radius, ['sharp', 'soft', 'round'], d.radius),
     density: pick<Density>(r.density, ['compact', 'comfortable', 'spacious'], d.density),
@@ -160,6 +368,8 @@ export function normalizeSettings(raw: Partial<Record<keyof Settings, unknown>> 
     sidebarClosedGroups: cleanIds(r.sidebarClosedGroups),
     recentTools: cleanIds(r.recentTools, MAX_RECENT_TOOLS),
     taskLayout: pick<TaskLayout>(r.taskLayout, ['list', 'board'], d.taskLayout),
+    taskSort: pick<TaskSort>(r.taskSort, ['manual', 'due-date', 'priority'], d.taskSort),
+    taskSavedViews: cleanTaskViews(r.taskSavedViews),
     intelligence: r.intelligence && typeof r.intelligence === 'object'
       ? {
           features: { ...DEFAULT_INTELLIGENCE.features, ...((r.intelligence as { features?: Partial<IntelligenceSettings['features']> }).features ?? {}) },
@@ -177,11 +387,15 @@ export function normalizeSettings(raw: Partial<Record<keyof Settings, unknown>> 
 export function appearanceVars(s: Settings, dark: boolean): Record<string, string> {
   const t = resolveTokens(s, dark)
   const accent = hexToRgb(accentFor(s.accent, dark))
+  const modernBorder = cardBorder(t, 'modern')
   return {
-    '--bg': triple(hexToRgb(t.bg)), '--panel': triple(hexToRgb(t.panel)), '--card': triple(hexToRgb(t.card)),
-    '--line': triple(hexToRgb(t.line)), '--fg': triple(hexToRgb(t.fg)), '--muted': triple(hexToRgb(t.muted)),
-    '--accent': triple(accent), '--on-accent': triple(onAccent(accent)), '--accent-fg': triple(accentText(accent, t)),
-    '--mood': triple(hexToRgb(dark ? COLOR_TOKENS.dark.mood : COLOR_TOKENS.light.mood)), // neutral chart accent for mood
+    '--bg': triple(hexToRgb(t.bg)), '--surface': triple(hexToRgb(t.surface)), '--sidebar': triple(hexToRgb(t.sidebar)),
+    '--border': triple(hexToRgb(t.border)), '--text': triple(hexToRgb(t.text)), '--muted': triple(hexToRgb(t.muted)),
+    '--panel': triple(hexToRgb(t.sidebar)), '--card': triple(hexToRgb(t.surface)), '--line': triple(hexToRgb(t.border)), '--fg': triple(hexToRgb(t.text)),
+    '--card-border': triple(modernBorder), '--selected': triple(accentTint(accent, t, dark)),
+    '--accent': triple(accent), '--on-accent': triple(onAccent(accent)), '--accent-fg': triple(accentText(accent, t, dark)),
+    // A full rgb() colour, not a triple: the charts use it as plain CSS text (fill: var(--mood)), where a triple is invalid.
+    '--mood': `rgb(${hexToRgb(dark ? COLOR_TOKENS.dark.mood : COLOR_TOKENS.light.mood).join(' ')})`,
     '--rs': String(RADIUS_SCALE[s.radius]), '--d': String(DENSITY_SCALE[s.density]), '--ts': String(TEXT_SCALE[s.textSize]),
     '--font-ui': FONT_STACKS[s.font]
   }

@@ -149,6 +149,67 @@ export const MIGRATIONS: string[] = [
    CREATE INDEX IF NOT EXISTS idx_tasks_due_status ON tasks(status, due_date);
    CREATE INDEX IF NOT EXISTS idx_tasks_deleted ON tasks(deleted_at);`,
 
+  // 10: habit day status. A check-in row used to mean only "done". Now it also
+  // says "skipped" (a day deliberately skipped: sick, travelling, ...).
+  // The column defaults to 'done', so every existing row keeps its meaning and
+  // no data is lost. "missed" and "rest" are still never stored.
+  `ALTER TABLE habit_checkins ADD COLUMN status TEXT NOT NULL DEFAULT 'done'
+       CHECK (status IN ('done', 'skipped'));`,
+
+  // 11: habit types. A habit is not always a yes/no thing: sometimes you count
+  // (3 sessions), sometimes you measure a time (10 minutes). These columns say
+  // which kind of habit it is and what "enough" means.
+  //   type  = 'check' | 'count' | 'duration'
+  //   target = the number to reach (how many, or how many minutes)
+  //   unit  = the label for that number ("sessions", "min", ...)
+  // Every existing habit becomes type 'check' with no target, which is exactly
+  // what it was before, so no data is lost and no habit changes meaning.
+  `ALTER TABLE habits ADD COLUMN type TEXT NOT NULL DEFAULT 'check'
+       CHECK (type IN ('check', 'count', 'duration'));
+   ALTER TABLE habits ADD COLUMN target REAL;
+   ALTER TABLE habits ADD COLUMN unit TEXT NOT NULL DEFAULT '';
+   ALTER TABLE habit_checkins ADD COLUMN value REAL;`,
+
+  // 12: habit organisation. A manual sort position for drag-and-drop, and a
+  // time of day (morning / afternoon / evening / anytime) the list can be
+  // grouped by. Existing habits keep the order they already had: sort_order
+  // starts as a copy of the creation order, and time_of_day defaults to
+  // 'anytime', which reads exactly like "no time of day". Nothing is lost.
+  `ALTER TABLE habits ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE habits ADD COLUMN time_of_day TEXT NOT NULL DEFAULT 'anytime'
+        CHECK (time_of_day IN ('morning', 'afternoon', 'evening', 'anytime'));
+   UPDATE habits SET sort_order = (
+     SELECT COUNT(*) FROM habits AS older
+     WHERE older.created_at < habits.created_at
+        OR (older.created_at = habits.created_at AND older.id < habits.id)
+   );`,
+
+  // 13: cross-module links and reminders, per habit.
+  //   reminder_time    = "HH:MM" (24-hour) or NULL for no reminder. The
+  //                      desktop notification lives in main/reminders.ts.
+  //   auto_complete_on = '' (nothing else completes the habit) or
+  //                      'logbook-entry' (writing a Logbook entry that day
+  //                      checks the habit off, if it was due). The switch
+  //                      itself lives in the Logbook module; habits only
+  //                      HEAR about new entries through the event bus, so
+  //                      the two features stay separate.
+  // Every existing habit starts with no reminder and no auto-complete,
+  // which is exactly the behaviour it had before.
+  `ALTER TABLE habits ADD COLUMN reminder_time TEXT;
+   ALTER TABLE habits ADD COLUMN auto_complete_on TEXT NOT NULL DEFAULT ''
+        CHECK (auto_complete_on IN ('', 'logbook-entry'));`,
+
+  // 14: keep a durable date for every task completion, including recurring
+  // occurrences that later reopen the same task row.
+  `CREATE TABLE task_completions (
+     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+     task_id      INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+     completed_at TEXT NOT NULL
+   );
+   CREATE INDEX idx_task_completions_completed_at ON task_completions(completed_at);
+   INSERT INTO task_completions (task_id, completed_at)
+     SELECT id, completed_at FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL;`,
+
 ]
 
 // Exposed for focused migration tests and used by the app's startup path.

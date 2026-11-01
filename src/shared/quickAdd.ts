@@ -15,7 +15,7 @@ import type { TaskRecurrence, TxKind } from './types'
 
 export type QuickAddProposal =
   | { kind: 'deposit'; txKind: TxKind; amount: number; goalName: string | null; note: string }
-  | { kind: 'task'; title: string; dueDate: string | null; priority: 'low' | 'medium' | 'high'; recurrence: TaskRecurrence | null }
+  | { kind: 'task'; title: string; dueDate: string | null; dueTime: string | null; priority: 'low' | 'medium' | 'high'; project: string | null; tags: string[]; recurrence: TaskRecurrence | null }
   | { kind: 'habit-checkin'; habitName: string }
   | { kind: 'note'; title: string; body: string }
 
@@ -111,7 +111,7 @@ const PATTERNS: Pattern[] = [
       return {
         ok: true,
         parse: {
-          proposal: { kind: 'task', title, dueDate: rec.dueDate, priority: 'medium', recurrence: rec.recurrence },
+          proposal: { kind: 'task', title, dueDate: rec.dueDate, dueTime: null, priority: 'medium', project: null, tags: [], recurrence: rec.recurrence },
           confidence: 'high',
           matchedPattern: 'task-recurring'
         }
@@ -126,12 +126,12 @@ const PATTERNS: Pattern[] = [
     build: (line, ctx) => {
       const rest = stripKeyword(line, 'task')
       if (!rest) return null
-      const { title, dueDate, priority, matched } = parseTaskBits(rest, ctx.today)
+      const { title, dueDate, dueTime, priority, project, tags, matched } = parseTaskBits(rest, ctx.today)
       if (!title) return { ok: false, error: 'Give the task a name, e.g. "task call dentist friday".' }
       return {
         ok: true,
         parse: {
-          proposal: { kind: 'task', title, dueDate, priority, recurrence: null },
+          proposal: { kind: 'task', title, dueDate, dueTime, priority, project, tags, recurrence: null },
           confidence: matched.date || matched.priority ? 'high' : 'medium',
           matchedPattern: 'task'
         }
@@ -234,22 +234,42 @@ export function parseRecurrence(rest: string): RecurrenceParse | null {
 
 // A task sentence's bits: the title is what is left after date and priority words are pulled out.
 export function parseTaskBits(rest: string, today: string): {
-  title: string; dueDate: string | null; priority: 'low' | 'medium' | 'high'; matched: { date: boolean; priority: boolean }
+  title: string; dueDate: string | null; dueTime: string | null; priority: 'low' | 'medium' | 'high'
+  project: string | null; tags: string[]; matched: { date: boolean; priority: boolean }
 } {
   let working = rest
   let priority: 'low' | 'medium' | 'high' = 'medium'
   let priorityMatched = false
+  let project: string | null = null
+  const projectMatch = /\bproject:(?:"([^"]+)"|'([^']+)'|([a-z0-9_-]+))/i.exec(working) ?? /@([a-z0-9_-]+)/i.exec(working)
+  if (projectMatch) {
+    project = (projectMatch[1] ?? projectMatch[2] ?? projectMatch[3] ?? projectMatch[4] ?? projectMatch[0].slice(1)).trim()
+    working = working.replace(projectMatch[0], ' ')
+  }
+  const tags = [...working.matchAll(/#([a-z0-9][a-z0-9_-]*)/gi)].map((match) => match[1].toLowerCase())
+  working = working.replace(/#[a-z0-9][a-z0-9_-]*/gi, ' ')
   const pm = /\b(high|medium|low)(?:\s+priority)?\b|\bpriority\s+(?:high|medium|low)\b/i.exec(working)
   if (pm) {
     const word = /high|medium|low/i.exec(pm[0])![0].toLowerCase()
     if (PRIORITIES.includes(word)) { priority = word as 'low' | 'medium' | 'high'; priorityMatched = true; working = working.replace(pm[0], ' ') }
+  }
+  const timeMatch = /\b(?:([01]?\d|2[0-3]):([0-5]\d)|([1-9]|1[0-2])(?::([0-5]\d))?\s*(am|pm))\b/i.exec(working)
+  let dueTime: string | null = null
+  if (timeMatch) {
+    if (timeMatch[1] !== undefined) dueTime = `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`
+    else {
+      let hour = Number(timeMatch[3]) % 12
+      if (timeMatch[5].toLowerCase() === 'pm') hour += 12
+      dueTime = `${String(hour).padStart(2, '0')}:${timeMatch[4] ?? '00'}`
+    }
+    working = working.replace(timeMatch[0], ' ')
   }
   const date = parseRelativeDate(working, today)
   let dueDate: string | null = null
   let dateMatched = false
   if (date) { dueDate = date.iso; working = working.replace(date.matched, ' '); dateMatched = true }
   const title = working.replace(/\s+/g, ' ').trim()
-  return { title, dueDate, priority, matched: { date: dateMatched, priority: priorityMatched } }
+  return { title, dueDate, dueTime, priority, project, tags, matched: { date: dateMatched, priority: priorityMatched } }
 }
 
 export interface RelativeDate { iso: string; matched: string }
@@ -308,7 +328,10 @@ export function describeProposal(p: QuickAddProposal): string {
     case 'task': {
       const bits: string[] = []
       if (p.dueDate) bits.push(`due ${p.dueDate}`)
+      if (p.dueTime) bits.push(`at ${p.dueTime}`)
       if (p.priority !== 'medium') bits.push(`${p.priority} priority`)
+      if (p.project) bits.push(`in ${p.project}`)
+      if (p.tags.length > 0) bits.push(p.tags.map((tag) => `#${tag}`).join(' '))
       if (p.recurrence) bits.push(`repeats ${p.recurrence.frequency === 'custom' ? `every ${p.recurrence.intervalDays} days` : p.recurrence.frequency}`)
       return `Task: ${p.title}${bits.length > 0 ? ` (${bits.join(', ')})` : ''}`
     }

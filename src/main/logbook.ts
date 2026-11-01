@@ -7,6 +7,7 @@ import { logStreak } from '../shared/dashboard'
 import { MOODS } from '../shared/types'
 import type { LogEntry, LogEntryInput, LogFilter, LogSummary, Mood, SearchGroup, TagCount } from '../shared/types'
 import { emitAutomation } from './automations'
+import { emitLogbookEntryCreated } from './events'
 
 interface Row {
   id: number; date: string; title: string; body: string; mood: string | null
@@ -75,6 +76,9 @@ export function createEntry(db: Database.Database, input: LogEntryInput): LogEnt
   // automation drafts carry the #automation tag and skip their own trigger — loop prevention.
   if (!e.tags.includes('automation')) {
     void emitAutomation(db, 'journal-entry-saved', `entry:${entry.id}`, { entryId: entry.id })
+    // Announce the new entry on the event bus (see events.ts), so other
+    // modules - like habits - can react WITHOUT this file importing them.
+    emitLogbookEntryCreated(db, { date: entry.date })
   }
   return entry
 }

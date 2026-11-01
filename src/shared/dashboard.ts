@@ -1,5 +1,10 @@
-import { isScheduled } from './habits'
-import type { Habit, HabitsToday } from './types'
+import { getDayStatus, isHabitDue } from './habits'
+import type { Habit, HabitCompletion, HabitsToday } from './types'
+
+// A habit's recorded days. Older data (and the test fixtures) may only have
+// the list of done dates; the rules fall back to that, so nothing breaks.
+const completionsOf = (h: Habit): HabitCompletion[] =>
+  h.completions ?? h.checkins.map((date) => ({ date, status: 'done' as const }))
 
 // Dashboard math that does not touch the database, so it is easy to test.
 
@@ -26,14 +31,31 @@ export function logStreak(entryDates: string[], today: string): number {
 export function habitsToday(habits: Habit[], today: string): HabitsToday {
   const active = habits.filter((h) => !h.archived)
   const items = active
-    .filter((h) => isScheduled(h.days, today))
-    .map((h) => ({ id: h.id, name: h.name, done: h.checkins.includes(today), streak: h.stats.current }))
+    // The same due-day rule as the Habits page, so the two never disagree.
+    .filter((h) => isHabitDue(h, today))
+    // "Done" also follows the shared rules, so a count or duration habit
+    // ("read 10 minutes") only counts when the target was reached.
+    .map((h) => ({
+      id: h.id, name: h.name,
+      done: getDayStatus({ days: h.days, startDate: h.startDate, type: h.type, target: h.target },
+        today, completionsOf(h), today) === 'done',
+      streak: h.stats.current
+    }))
     .sort((a, b) => Number(a.done) - Number(b.done))
+  // The three best current streaks, biggest first. The streak itself comes
+  // from habit.stats, computed by the SAME helpers the Habits page uses, so
+  // the two places can never disagree about a number.
+  const topStreaks = active
+    .filter((h) => h.stats.current > 0)
+    .sort((a, b) => b.stats.current - a.stats.current || a.name.localeCompare(b.name))
+    .slice(0, 3)
+    .map((h) => ({ id: h.id, name: h.name, current: h.stats.current }))
   return {
     total: active.length,
     due: items.length,
     done: items.filter((i) => i.done).length,
-    longestStreak: active.reduce((m, h) => Math.max(m, h.stats.current), 0),
+    longestStreak: Math.max(0, ...topStreaks.map((s) => s.current)),
+    topStreaks,
     items
   }
 }

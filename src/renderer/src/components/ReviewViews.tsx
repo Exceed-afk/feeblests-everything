@@ -16,19 +16,22 @@ const dayLabel = (kind: ReviewKind, date: string): string =>
 const TODAY = 'font-semibold text-fg'
 const OTHER = 'text-muted'
 
-// ---------- Habits per day (summary card: a compact seven-day strip) ----------
+// ---------- Habits per day (summary card: a compact strip for the whole period) ----------
 // Each day is a small tile with four clearly different states, said by shape as well as colour:
 //   completed    full success-green fill with a tick
 //   incomplete   a partial fill, or a red ring with a cross when nothing was done
 //   not scheduled a dashed, empty tile (a rest day)
 //   not tracked  a faint dotted tile with a dash (no habit existed yet)
 // Today (solid outline) and future days (dotted) keep their own quiet shapes.
-export function WeekStrip({ days, today, trackedFrom }: { days: ReviewHabits['days']; today: string; trackedFrom: string | null }) {
+// The strip covers the WHOLE period: seven tiles for a week, every day of the month for a month.
+export function WeekStrip({ days, kind, today, trackedFrom, limit }: { days: ReviewHabits['days']; kind: ReviewKind; today: string; trackedFrom: string | null; limit?: number }) {
   const full = days.filter((d) => d.due > 0 && d.done === d.due).length
   const counted = days.filter((d) => d.due > 0).length
+  // A narrow card cannot hold a whole month of tiles, so it shows the last few days of the period.
+  const shown = limit ? days.slice(-limit) : days
   return (
-    <div role="img" aria-label={`Habits by day: every habit done on ${full} of ${counted} ${counted === 1 ? 'day' : 'days'}`} className="flex gap-1.5">
-      {days.map((d) => {
+    <div role="img" aria-label={`Habits by day: every habit done on ${full} of ${counted} ${counted === 1 ? 'day' : 'days'}`} className="flex gap-1.5" data-kind={kind}>
+      {shown.map((d) => {
         const state = habitDayState(d, today, trackedFrom)
         const pct = d.due > 0 ? (d.done / d.due) * 100 : 0
         const word = state === 'future' ? 'not yet'
@@ -41,11 +44,11 @@ export function WeekStrip({ days, today, trackedFrom }: { days: ReviewHabits['da
           <div key={d.date} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={text}>
             <div className="hs-cell" data-state={state}>
               {state === 'partial' && <span className="hs-fill" style={{ height: `${pct}%` }} aria-hidden="true" />}
-              {state === 'done' && <Check size={12} strokeWidth={3} className="text-card" aria-hidden="true" />}
-              {state === 'missed' && <X size={12} strokeWidth={2.5} className="text-neg" aria-hidden="true" />}
+              {state === 'done' && <Check size={12} strokeWidth={3} className="hs-mark text-card" aria-hidden="true" />}
+              {state === 'missed' && <X size={12} strokeWidth={2.5} className="hs-mark text-neg" aria-hidden="true" />}
               {state === 'untracked' && <span className="hs-dash" aria-hidden="true" />}
             </div>
-            <span className={`h-3 text-[10px] leading-3 ${d.date === today ? TODAY : OTHER}`}>{dayLabel('week', d.date)}</span>
+            <span className={`h-3 text-[10px] leading-3 ${d.date === today ? TODAY : OTHER}`}>{dayLabel(kind, d.date)}</span>
           </div>
         )
       })}
@@ -54,22 +57,33 @@ export function WeekStrip({ days, today, trackedFrom }: { days: ReviewHabits['da
 }
 
 // ---------- Habits card: one row per habit ----------
-// A week gets a dot for every day (done = filled, missed = ring with a cross, rest = dashed, future = dotted),
-// so "which habit slipped, and when" is one glance. A month is too long for that, so it shows the bar only.
+// A dot for every day, but only a day the habit was SCHEDULED can be "done" or "missed": a rest day is never
+// painted as a win (a 4-day habit would otherwise look like 7 green days).
+// `restDays` is the habit's own schedule (0 = Monday ... 6 = Sunday) and `startDate` the day tracking began.
 export function HabitWeekRow({ habit, days, today }: { habit: ReviewHabit; days: ReviewHabitDay[]; today: string }) {
   const missed = new Set(habit.missed)
   return (
     <div className="flex items-center gap-1" role="img" aria-label={`${habit.name}: ${habit.done} done, ${habit.missed.length} missed of ${habit.due} scheduled days`}>
       {days.map((d) => {
         const future = d.date > today
-        // A day that is neither missed nor in the future: done if the habit existed, a rest day if it was not scheduled.
-        const isMissed = missed.has(d.date)
-        const state = future ? 'future' : isMissed ? 'missed' : d.date === today && habit.done < habit.due ? 'pending' : 'done'
-        const word = state === 'future' ? 'not yet' : state === 'missed' ? 'missed' : state === 'pending' ? 'not done yet' : 'done'
+        const state = habitDotState(d.date, habit, missed, future, today)
+        const word = state === 'future' ? 'not yet' : state === 'untracked' ? 'not tracked' : state === 'rest' ? 'not scheduled'
+          : state === 'missed' ? 'missed' : state === 'pending' ? 'not done yet (today)' : 'done'
         return <span key={d.date} className="hd h-4 w-4" data-state={state} data-today={d.date === today} title={`${formatDate(d.date)}: ${word}`} />
       })}
     </div>
   )
+}
+
+// The state of ONE day for ONE habit. Only a scheduled day (and not a day before tracking started) can be done,
+// missed or open; everything else is a rest day or untouched history.
+function habitDotState(date: string, habit: ReviewHabit, missed: Set<string>, future: boolean, today: string): string {
+  if (future) return 'future'
+  if (date < habit.startDate) return 'untracked' // the habit did not exist yet: not a miss
+  if (!habit.days.includes(weekdayOf(date))) return missed.has(date) ? 'done' : 'rest' // unscheduled (a bonus check-in still counts)
+  if (missed.has(date)) return 'missed'
+  if (date === today) return 'pending' // today is not missed until the day is over
+  return 'done'
 }
 
 // ---------- Mood per day ----------

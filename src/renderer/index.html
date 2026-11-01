@@ -5,24 +5,25 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
     <title>Feeblest's Everything</title>
     <style>
-      /* The design tokens, as a first paint before the app runs. lib/settingsStore.ts (bootAppearance)
-         overwrites these from the saved settings a moment later; values match src/shared/design.ts. */
+      /* First-paint defaults; lib/settingsStore.ts (bootAppearance) replaces these from saved settings. */
       :root {
-        --bg: 244 245 244; --panel: 255 255 255; --card: 255 255 255; --line: 229 231 231;
-        --fg: 23 26 24; --muted: 99 112 138;
-        --accent: 7 91 56; --on-accent: 255 255 255; --accent-fg: 7 91 56;
-        --pos: 5 122 82; --neg: 197 27 69; --warn: 143 90 6; --mood: 47 111 159;
+        --bg: 244 245 244; --surface: 254 254 254; --sidebar: 254 254 254; --border: 218 220 220; --text: 47 49 48; --muted: 99 112 138;
+        --panel: var(--sidebar); --card: var(--surface); --line: var(--border); --fg: var(--text);
+        --card-border: 231 232 232; --selected: 238 231 253;
+        --accent: 139 92 246; --on-accent: 255 255 255; --accent-fg: 116 81 197;
+        --pos: 5 122 82; --neg: 197 27 69; --warn: 143 90 6; --mood: rgb(47 111 159);
         --rs: 1; --d: 1; --ts: 1;
         --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-        --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.04);
+        --shadow-card: 0 1px 2px rgb(var(--border) / 0.24), 0 1px 3px rgb(var(--border) / 0.2);
         color-scheme: light;
       }
       html.dark {
-        --bg: 17 23 21; --panel: 22 29 26; --card: 27 36 32; --line: 48 59 53;
-        --fg: 241 245 242; --muted: 161 173 165;
-        --accent: 66 168 121; --on-accent: 10 20 15; --accent-fg: 89 195 142;
-        --pos: 66 197 138; --neg: 245 132 154; --warn: 229 180 80; --mood: 116 178 216;
-        --shadow-card: 0 1px 2px rgb(0 0 0 / 0.24), 0 1px 3px rgb(0 0 0 / 0.18);
+        --bg: 17 23 21; --surface: 27 36 32; --sidebar: 22 29 26; --border: 48 59 53; --text: 207 211 208; --muted: 161 173 165;
+        --panel: var(--sidebar); --card: var(--surface); --line: var(--border); --fg: var(--text);
+        --card-border: 41 51 46; --selected: 49 47 75;
+        --accent: 139 92 246; --on-accent: 255 255 255; --accent-fg: 166 140 231;
+        --pos: 66 197 138; --neg: 245 132 154; --warn: 229 180 80; --mood: rgb(116 178 216);
+        --shadow-card: 0 1px 2px rgb(var(--border) / 0.3), 0 1px 3px rgb(var(--border) / 0.24);
         color-scheme: dark;
       }
       html, body { margin: 0; height: 100%; background: rgb(var(--bg)); }

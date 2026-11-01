@@ -20,7 +20,8 @@ const EVERY = [0, 1, 2, 3, 4, 5, 6]
 const WEEKDAYS = [0, 1, 2, 3, 4]
 
 test('no habits gives an empty tile', () => {
-  assert.deepEqual(habitsToday([], MON), { total: 0, due: 0, done: 0, longestStreak: 0, items: [] })
+  // `topStreaks` is the dashboard widget's "top 3 streaks" list; empty when there are none.
+  assert.deepEqual(habitsToday([], MON), { total: 0, due: 0, done: 0, longestStreak: 0, topStreaks: [], items: [] })
 })
 test('counts what is scheduled today and what is done', () => {
   const t = habitsToday([habit('Read', EVERY, [MON]), habit('Walk', EVERY, [])], MON)

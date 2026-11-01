@@ -41,20 +41,36 @@ const api: EverythingApi = {
   },
   tasks: {
     list: (filter) => ipcRenderer.invoke('tasks:list', filter),
+    completed: (date) => ipcRenderer.invoke('tasks:completed', date),
+    trash: () => ipcRenderer.invoke('tasks:trash'),
     create: (input) => ipcRenderer.invoke('tasks:create', input),
     update: (id, input) => ipcRenderer.invoke('tasks:update', id, input),
     remove: (id) => ipcRenderer.invoke('tasks:remove', id),
+    restore: (id) => ipcRenderer.invoke('tasks:restore', id),
+    deleteForever: (id) => ipcRenderer.invoke('tasks:deleteForever', id),
+    clearTrash: () => ipcRenderer.invoke('tasks:clearTrash'),
+    rescheduleMany: (ids, dueDate, dueTime) => ipcRenderer.invoke('tasks:rescheduleMany', ids, dueDate, dueTime),
     setStatus: (id, status) => ipcRenderer.invoke('tasks:setStatus', id, status),
+    undoStatus: (id, status, completedAt, recurrenceNext) => ipcRenderer.invoke('tasks:undoStatus', id, status, completedAt, recurrenceNext),
     setStatusMany: (ids, status) => ipcRenderer.invoke('tasks:setStatusMany', ids, status),
     removeMany: (ids) => ipcRenderer.invoke('tasks:removeMany', ids),
-    reorder: (ids) => ipcRenderer.invoke('tasks:reorder', ids)
+    reorder: (ids) => ipcRenderer.invoke('tasks:reorder', ids),
+    setSubtaskDone: (taskId, subtaskId, done) => ipcRenderer.invoke('tasks:setSubtaskDone', taskId, subtaskId, done),
+    reorderSubtasks: (taskId, ids) => ipcRenderer.invoke('tasks:reorderSubtasks', taskId, ids),
+    promoteSubtask: (taskId, subtaskId) => ipcRenderer.invoke('tasks:promoteSubtask', taskId, subtaskId),
+    skipOccurrence: (id, today) => ipcRenderer.invoke('tasks:skipOccurrence', id, today)
   },
   habits: {
     list: () => ipcRenderer.invoke('habits:list'),
     create: (input) => ipcRenderer.invoke('habits:create', input),
     update: (id, input) => ipcRenderer.invoke('habits:update', id, input),
     remove: (id) => ipcRenderer.invoke('habits:remove', id),
-    setCheckin: (habitId, date, done) => ipcRenderer.invoke('habits:setCheckin', habitId, date, done)
+    setCheckin: (habitId, date, done) => ipcRenderer.invoke('habits:setCheckin', habitId, date, done),
+    setDayStatus: (habitId, date, status, value) => ipcRenderer.invoke('habits:setDayStatus', habitId, date, status, value),
+    // Logs how much of a count/duration habit was done on a day.
+    logValue: (habitId, date, value) => ipcRenderer.invoke('habits:logValue', habitId, date, value),
+    // Saves the new manual order after drag-and-drop (first id = top).
+    reorder: (ids) => ipcRenderer.invoke('habits:reorder', ids)
   },
   dashboard: {
     summary: (today) => ipcRenderer.invoke('dashboard:summary', today)

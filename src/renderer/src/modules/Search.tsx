@@ -1,7 +1,7 @@
 import { PageHeader } from '../components/PageHeader'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BookOpen, CandlestickChart, PiggyBank, Receipt, Search as SearchIcon, X } from 'lucide-react'
+import { BookOpen, CandlestickChart, CheckSquare, PiggyBank, Receipt, Search as SearchIcon, X } from 'lucide-react'
 import type { SearchGroup, SearchResults } from '../../../shared/types'
 import { isEmptyQuery, parseQuery } from '../../../shared/search'
 import { progressPercent } from '../../../shared/savings'
@@ -63,12 +63,12 @@ export function Search({ onOpen }: ModuleProps) {
   const more = () => setLimit((n) => n + MORE)
 
   const grandTotal = results
-    ? results.logbook.total + results.trades.total + results.goals.total + results.transactions.total
+    ? results.logbook.total + results.trades.total + results.goals.total + results.transactions.total + results.tasks.total
     : 0
 
   return (
     <div className="page page-sm">
-      <PageHeader title="Search" subtitle="Logbook, trades and savings in one place." />
+      <PageHeader title="Search" subtitle="Search your Logbook, trades, savings and tasks." />
 
       <div className="relative">
         <SearchIcon size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" />
@@ -182,6 +182,19 @@ export function Search({ onOpen }: ModuleProps) {
                 </div>
                 <div className="mt-1 text-xs capitalize text-muted">{formatDate(t.date)} · {t.kind}</div>
                 {t.note && <p className="mt-1 text-sm text-muted"><Highlight text={t.note} terms={terms} /></p>}
+              </button>
+            ))}
+          </Group>
+
+          <Group title="Tasks" icon={<CheckSquare size={14} />} group={results.tasks} onMore={more}>
+            {results.tasks.items.map((task) => (
+              <button key={task.id} className={rowClass} onClick={() => onOpen({ module: 'tasks', task })}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium"><Highlight text={task.title} terms={terms} /></span>
+                  {task.dueDate && <span className="text-xs text-muted">{formatDate(task.dueDate)}</span>}
+                </div>
+                {task.notes && <p className="mt-1 line-clamp-2 text-sm text-muted"><Highlight text={makeSnippet(task.notes, terms)} terms={terms} /></p>}
+                <TagList tags={task.tags} />
               </button>
             ))}
           </Group>

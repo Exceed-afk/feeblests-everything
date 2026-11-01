@@ -10,6 +10,7 @@ import { today } from './dates'
 export interface QuickAddSaveContext {
   goals: SavingsGoal[]
   habits: Habit[]
+  defaultTaskDueDate?: string | null
 }
 
 export interface QuickAddSaveResult { message: string }
@@ -32,13 +33,14 @@ export async function saveProposal(
   }
   if (proposal.kind === 'task') {
     await window.api.tasks.create({
-      title: proposal.title, notes: '', status: 'todo', priority: proposal.priority, dueTime: null,
-      dueDate: proposal.dueDate ?? day, project: '', tags: [], subtasks: [],
+      title: proposal.title, notes: '', status: 'todo', priority: proposal.priority, dueTime: proposal.dueTime,
+      dueDate: proposal.dueDate ?? ('defaultTaskDueDate' in ctx ? ctx.defaultTaskDueDate ?? null : day),
+      project: proposal.project, tags: proposal.tags, subtasks: [],
       recurrenceRule: proposal.recurrence ? { frequency: proposal.recurrence.frequency, intervalDays: proposal.recurrence.intervalDays } : null, recurrenceNext: null
     })
     const bits = proposal.recurrence
       ? ` repeats ${proposal.recurrence.frequency === 'custom' ? `every ${proposal.recurrence.intervalDays} days` : proposal.recurrence.frequency}`
-      : ` (due ${proposal.dueDate ?? 'today'})`
+      : ` (due ${proposal.dueDate ?? ('defaultTaskDueDate' in ctx ? ctx.defaultTaskDueDate ?? 'no date' : 'today')}${proposal.dueTime ? ` at ${proposal.dueTime}` : ''})`
     return { message: `Task "${proposal.title}" saved${bits}` }
   }
   if (proposal.kind === 'habit-checkin') {

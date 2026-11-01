@@ -10,6 +10,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added CHANGELOG file for version tracking
 
+### Appearance
+- Unified the six original colour schemes and seven named palettes into one theme list, with light and dark variants for all 13 themes
+- Replaced the six supplied palette ramps with their requested token values and added measured contrast checks for every palette, mode and interface style
+- Added legacy colour-scheme/palette setting normalization; preserved per-mode custom colours and kept accent selection independent
+- Modern cards now use the surface token with a blended border; Classic minimal cards use the page background and full border token, with token-based selected tints
+- Reduced Warm Sand's overly bright dark divider and aligned first-paint card borders and accent tints with the shared appearance tokens
+
+### Task manager (0.13.0)
+- Added date-selectable Completed history that preserves completed recurring occurrences after their task reopens; included the history in backups and added migration 14 to backfill tasks already marked complete
+- Added Trash restore/permanent-delete flows, delete undo, inline task fields, bulk rescheduling, saved views, configurable sorting, task reminders, and recurring-occurrence skip
+- Added shared quick-add parsing for due dates/times, tags, projects and priorities across Tasks, Quick capture and the command palette
+- Added task results to universal search and task actions/keyboard navigation
+- Added checklist progress, reordering and promotion; board columns and empty states now remain consistent
+- Fixed bulk rescheduling of recurring tasks to move the active occurrence while preserving the original recurrence anchor
+- Added recurrence, task filtering, sort, reminder, Trash, reschedule and subtask tests
+- Behaviour change: Today includes undated tasks but no longer includes overdue dated tasks; Upcoming includes undated tasks and is limited to the next seven days; due times can make a same-day task overdue
+- Behaviour change: recurring tasks stay completed until the next due date, then reopen with checklist progress reset; late completion advances beyond expired periods
+
+### Habits: detail view, links and reminders (0.12.0 work)
+- Habit detail view: drawer now shows 7/30/90-day completion rates and a 12-month GitHub-style heatmap with month labels
+- Logbook link: `auto_complete_on` per habit (migration 13) — a Logbook entry on a due day ticks the habit off, never overwriting an existing record; wired through a small event bus (`src/main/events.ts`) so Logbook and habits stay decoupled
+- Dashboard widget: progress ring ("X of Y due") and a Top-3 current streaks line in the "Habits today" tile
+- Reminders (v1): `reminder_time` per habit ("HH:MM"), desktop notification while the app runs when the habit is still open at its reminder time; new `src/main/reminders.ts`
+- Behaviour change: the dashboard tile counts a count/duration habit as "done" only when its target is reached (previously any check-in counted)
+
+### Habits: organisation (0.11.0 work)
+- Drag to reorder habits via a grip handle; order persisted in a new `habits.sort_order` column (migration 12, backfilled from creation order)
+- Optional `time_of_day` per habit (morning / afternoon / evening / anytime) with a "Group by time" toggle on the Habits page
+- New `habits:reorder` IPC call; backups round-trip the new fields
+- Restoring an archived habit moves it to the end of the list; partial updates (restore) no longer reset type/target/unit/time of day
+
 ### Fixed
 - Fixed floating-point rounding in fmtPnl using round8
 - Fixed fmtAmount to strip sign for consistent locale formatting

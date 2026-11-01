@@ -25,6 +25,9 @@ let n = 0
 const test = (name: string, fn: () => void) => { fn(); n++; console.log('ok  ', name) }
 
 test('a valid backup is accepted', () => { parse(base()) })
+test('a legacy backup defaults missing task completion history to an empty list', () => {
+  assert.deepEqual(parse(base()).taskCompletions, [])
+})
 
 test('every known mood is accepted, and so is no mood', () => {
   for (const mood of ['great', 'good', 'okay', 'low', 'rough', null]) {
@@ -72,7 +75,8 @@ test('the screens get a safe fallback for an unknown mood', () => {
 const withHabits = () => ({
   ...base(),
   habits: [{ id: 1, name: 'Read', notes: '', days: [0, 1, 2], archived: false, startDate: '2026-10-01', ...stamp }],
-  habitCheckins: [{ habitId: 1, date: '2026-10-01', createdAt: '2026-10-01T00:00:00Z' }]
+  // The status is optional: backups made before skipped days existed have none.
+  habitCheckins: [{ habitId: 1, date: '2026-10-01', createdAt: '2026-10-01T00:00:00Z', status: 'done' as 'done' | 'skipped' | undefined }]
 })
 
 test('a backup made before habits existed still imports, with no habits', () => {
@@ -106,6 +110,16 @@ test('a check-in with a bad date is rejected', () => {
 })
 test('habit lists that are not lists are rejected', () => {
   const b = withHabits(); (b as { habits: unknown }).habits = 'nope'; rejects(b, /missing its "habits" list/)
+})
+test('a check-in with no status is accepted (an old backup: it was a done day)', () => {
+  const b = withHabits(); parse(b)
+})
+test('a check-in with a done or skipped status is accepted', () => {
+  const b = withHabits(); b.habitCheckins[0].status = 'skipped'; parse(b)
+  const c = withHabits(); c.habitCheckins[0].status = 'done'; parse(c)
+})
+test('a check-in with an unknown status is rejected', () => {
+  const b = withHabits(); (b.habitCheckins[0] as unknown as { status: unknown }).status = 'maybe'; rejects(b, /Habit check-in #1/)
 })
 // ---- tasks / recurrence ----
 const stampRow = (over: Record<string, unknown>): Record<string, unknown> =>

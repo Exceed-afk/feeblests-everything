@@ -1,19 +1,23 @@
 {
   "name": "feeblests-everything",
   "productName": "Feeblest's Everything",
-  "version": "0.10.0",
+  "version": "0.13.0",
   "description": "Personal logbook, trade tracker and savings tracker",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/backup-validation.ts && tsx tests/habits.ts && tsx tests/briefing.ts && tsx tests/automations.ts && tsx tests/quickAdd.ts && tsx tests/insights.ts && tsx tests/assistant.ts && tsx tests/trades.ts && tsx tests/savings.ts && tsx tests/dashboard.ts && tsx tests/appearance.ts && tsx tests/url.ts && tsx tests/tools.ts && tsx tests/palette.ts && tsx tests/registry.ts && tsx tests/review.ts && tsx tests/design.ts && tsx tests/capture.ts && tsx tests/calendar.ts && tsx tests/tasks.ts && tsx tests/insightsData.ts",
+    "build:native": "node scripts/build-native.mjs",
+    "test": "tsx tests/palette-recipes.ts && tsx tests/backup-validation.ts && tsx tests/migrations.ts && tsx tests/habits.ts && tsx tests/habits-rules.ts && tsx tests/habits-history.ts && tsx tests/habits-stats.ts && tsx tests/habits-types.ts && tsx tests/habits-db.ts && tsx tests/habits-organisation.ts && tsx tests/habits-links.ts && tsx tests/briefing.ts && tsx tests/automations.ts && tsx tests/quickAdd.ts && tsx tests/insights.ts && tsx tests/assistant.ts && tsx tests/trades.ts && tsx tests/savings.ts && tsx tests/dashboard.ts && tsx tests/appearance.ts && tsx tests/url.ts && tsx tests/tools.ts && tsx tests/palette.ts && tsx tests/registry.ts && tsx tests/review.ts && tsx tests/design.ts && tsx tests/capture.ts && tsx tests/calendar.ts && tsx tests/tasks.ts && tsx tests/insightsData.ts",
     "postinstall": "electron-builder install-app-deps",
     "dist": "electron-vite build && electron-builder --win",
     "preview": "vite build --config vite.preview.config.ts && node scripts/preview-server.mjs"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "better-sqlite3": "^11.5.0"
   },
   "devDependencies": {

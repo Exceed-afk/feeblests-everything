@@ -41,9 +41,9 @@ const data: ReviewData = {
   habits: {
     due: 18, done: 13, rate: (13 / 18) * 100, bonus: 1, previousRate: 61, trackedFrom: days[0],
     habits: [
-      { id: 1, name: 'Read 20 pages', due: 7, done: 5, rate: (5 / 7) * 100, bonus: 0, streak: 2, missed: ['2026-10-27', '2026-10-30'] },
-      { id: 2, name: 'Train', due: 4, done: 3, rate: 75, bonus: 1, streak: 3, missed: ['2026-10-29'] },
-      { id: 3, name: 'No phone before 9', due: 7, done: 5, rate: (5 / 7) * 100, bonus: 0, streak: 0, missed: ['2026-10-26', '2026-10-31'] }
+      { id: 1, name: 'Read 20 pages', due: 7, done: 5, rate: (5 / 7) * 100, bonus: 0, streak: 2, missed: ['2026-10-27', '2026-10-30'], days: [0, 1, 2, 3, 4, 5, 6], startDate: '2026-09-01' },
+      { id: 2, name: 'Train', due: 4, done: 3, rate: 75, bonus: 1, streak: 3, missed: ['2026-10-29'], days: [0, 2, 4, 6], startDate: '2026-10-01' },
+      { id: 3, name: 'No phone before 9', due: 4, done: 3, rate: 75, bonus: 0, streak: 0, missed: ['2026-10-26'], days: [0, 1, 2, 3, 4], startDate: '2026-10-28' }
     ],
     days: days.map((date, i) => ({ date, due: 3, done: [3, 2, 3, 2, 1, 2, 0][i] }))
   },
