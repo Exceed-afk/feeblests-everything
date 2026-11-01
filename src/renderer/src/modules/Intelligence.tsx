@@ -65,22 +65,22 @@ export function Intelligence() {
 
   const toggle = (key: keyof IntelligenceFeatureToggles) => {
     setSaveError('')
-    const current = getCurrentSettings().intelligence
-    const enabled = !current.features[key]
+    const currentFeatures = getCurrentSettings().intelligence?.features ?? DEFAULT_INTELLIGENCE.features
+    const enabled = !currentFeatures[key]
     const revision = (toggleRevision.current[key] ?? 0) + 1
     toggleRevision.current[key] = revision
-    applyFromMain({ intelligence: { features: { ...current.features, [key]: enabled } } })
+    applyFromMain({ intelligence: { features: { ...currentFeatures, [key]: enabled } } })
 
     void window.api.intelligence.set({ [key]: enabled })
       .then((saved) => {
         if (toggleRevision.current[key] !== revision) return
-        const latest = getCurrentSettings().intelligence
-        applyFromMain({ intelligence: { features: { ...latest.features, [key]: saved.features[key] } } })
+        const latestFeatures = getCurrentSettings().intelligence?.features ?? DEFAULT_INTELLIGENCE.features
+        applyFromMain({ intelligence: { features: { ...latestFeatures, [key]: saved.features[key] } } })
       })
       .catch((error) => {
         if (toggleRevision.current[key] !== revision) return
-        const latest = getCurrentSettings().intelligence
-        applyFromMain({ intelligence: { features: { ...latest.features, [key]: current.features[key] } } })
+        const latestFeatures = getCurrentSettings().intelligence?.features ?? DEFAULT_INTELLIGENCE.features
+        applyFromMain({ intelligence: { features: { ...latestFeatures, [key]: currentFeatures[key] } } })
         setSaveError(errMsg(error))
       })
   }
