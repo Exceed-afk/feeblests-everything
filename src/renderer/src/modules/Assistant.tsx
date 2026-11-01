@@ -160,6 +160,14 @@ export function Assistant() {
                               <dt className="meta">Result computed on this computer</dt>
                               <dd className="mt-0.5 num">{fmtAmount(x.disclosure.result)}</dd>
                             </div>
+                            {x.disclosure.previousRange && x.disclosure.previousResult !== null && (
+                              <div>
+                                <dt className="meta">Previous period, computed on this computer</dt>
+                                <dd className="mt-0.5 num">
+                                  {x.disclosure.previousRange.from} → {x.disclosure.previousRange.to}: {fmtAmount(x.disclosure.previousResult)}
+                                </dd>
+                              </div>
+                            )}
                           </>
                         ) : (
                           <div>

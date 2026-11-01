@@ -430,6 +430,7 @@ export const ASSISTANT_SYSTEM_PROMPT =
     'use range kinds today, yesterday, this_week, last_week, this_month, last_month, this_year, all_time, ' +
     'or {"kind":"last_n_days","n":1..1830}, or {"kind":"between","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}. ' +
     'Add a filters object only when useful, copying relevant words from the question without guessing, such as {"filters":{"asset":"XAUUSD"}}. ' +
+    'Add "compare":"previous" only when the user asks for a comparison; otherwise use "compare":null. ' +
     ASSISTANT_FUNCTIONS.map((f) => `${f.name} supports filters: ${f.supports.join(', ') || 'none'}.`).join(' ') + ' ' +
     'For unsupported questions, reply with {"function":"cannot_answer"}. ' +
     'Choose "function" from this list:\n' +
@@ -444,7 +445,7 @@ export const ASSISTANT_USER_PROMPT = (question: string, today: string): string =
 // ---------- parsing the reply (the model's ONE function call) ----------
 
 export type AssistantCall =
-    | { kind: 'function'; functionName: string; rangeSpec: RangeSpec; filters: AssistantFilters; question: string }
+    | { kind: 'function'; functionName: string; rangeSpec: RangeSpec; filters: AssistantFilters; compare: 'previous' | null; question: string }
     | { kind: 'none' }
 
 export type RangeSpec =
@@ -489,7 +490,7 @@ export function parseAssistantReply(raw: string): { ok: true; call: AssistantCal
     if (start < 0 || end <= start) return { ok: false, error: failureText('model') }
     let obj: unknown
     try { obj = JSON.parse(text.slice(start, end + 1)) } catch { return { ok: false, error: failureText('model') } }
-    const o = obj as { function?: unknown; range?: unknown; filters?: unknown; question?: unknown }
+    const o = obj as { function?: unknown; range?: unknown; filters?: unknown; compare?: unknown; question?: unknown }
     if (typeof o.function !== 'string') return { ok: false, error: failureText('model') }
     if (o.function === 'cannot_answer' || !functionByName(o.function)) return { ok: true, call: { kind: 'none' } }
     const rangeSpec = parseRangeSpec(o.range)
@@ -506,8 +507,12 @@ export function parseAssistantReply(raw: string): { ok: true; call: AssistantCal
         }
         filters = parsedFilters
     }
+    const compare = o.compare === undefined || o.compare === null
+        ? null
+        : o.compare === 'previous' ? 'previous' : undefined
+    if (compare === undefined) return { ok: false, error: failureText('model') }
     const question = typeof o.question === 'string' && o.question.trim() ? o.question.trim() : ''
-    return { ok: true, call: { kind: 'function', functionName: o.function, rangeSpec, filters, question } }
+    return { ok: true, call: { kind: 'function', functionName: o.function, rangeSpec, filters, compare, question } }
 }
 
 // Cleans a model answer: drops reasoning blocks and keeps the JSON object the
@@ -547,6 +552,25 @@ export const lastMonthRange = (today: string): DateRange => {
 export const thisYearRange = (today: string): DateRange => {
     const year = today.slice(0, 4)
     return { from: `${year}-01-01`, to: `${year}-12-31` }
+}
+
+export function previousRange(range: DateRange): DateRange {
+    const spanDays = (Date.parse(`${range.to}T00:00:00.000Z`) - Date.parse(`${range.from}T00:00:00.000Z`)) / 86_400_000 + 1
+    const to = addDays(range.from, -1)
+    return { from: addDays(to, -(spanDays - 1)), to }
+}
+
+export function comparisonChange(current: number, previous: number): {
+    change: number
+    percent: number | null
+    direction: 'up' | 'down' | 'unchanged'
+} {
+    const change = round8(current - previous)
+    return {
+        change,
+        percent: previous === 0 ? null : round8((change / Math.abs(previous)) * 100),
+        direction: change > 0 ? 'up' : change < 0 ? 'down' : 'unchanged'
+    }
 }
 
 export function resolveRange(spec: RangeSpec, today: string): DateRange {
@@ -591,6 +615,9 @@ export type AssistantDisclosure =
     range: DateRange
     filters: FilterDisclosure
     result: number
+    compare: 'previous' | null
+    previousRange: DateRange | null
+    previousResult: number | null
     })
     | (AssistantDisclosureBase & { kind: 'cannot_answer' })
 

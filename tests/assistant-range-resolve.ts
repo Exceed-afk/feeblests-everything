@@ -124,6 +124,7 @@ test('the previous date range shape remains valid as an explicit between range',
       functionName: 'savings_total',
       rangeSpec: { kind: 'between', from: '2026-10-01', to: '2026-10-31' },
       filters: {},
+      compare: null,
       question: ''
     }
   })
