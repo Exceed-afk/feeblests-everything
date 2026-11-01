@@ -5,7 +5,7 @@
 // nothing else; no request exists to make.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eraser, MessageCircleQuestion, SendHorizonal } from 'lucide-react'
-import type { AssistantExchange, AssistantKeyStatus, AssistantSettings } from '../../../shared/assistant'
+import type { AssistantExchange, AssistantFunctionInfo, AssistantKeyStatus, AssistantSettings } from '../../../shared/assistant'
 import { failureText, keyStateLabel, MAX_ASSISTANT_QUESTION_LENGTH } from '../../../shared/assistant'
 void failureText
 import { today } from '../lib/dates'
@@ -22,7 +22,7 @@ export function Assistant() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [showFunctions, setShowFunctions] = useState(false)
-  const [functions, setFunctions] = useState<{ name: string; description: string }[]>([])
+  const [functions, setFunctions] = useState<AssistantFunctionInfo[]>([])
   const bottom = useRef<HTMLDivElement>(null)
 
   const reload = useCallback(async () => {
@@ -30,6 +30,7 @@ export function Assistant() {
       const [s, k] = await Promise.all([window.api.intelligence.assistant.get(), window.api.intelligence.assistant.keyStatus()])
       setSettings(s); setKeyState(k)
     } catch (e) { setError(errMsg(e)) }
+    try { setFunctions(await window.api.intelligence.assistant.functions()) } catch (e) { setError(errMsg(e)) }
   }, [])
   useEffect(() => { reload() }, [reload])
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'nearest' }) }, [exchanges])
@@ -52,11 +53,6 @@ export function Assistant() {
       }
     } catch (e) { setError(errMsg(e)) }
     setBusy(false)
-  }
-
-  const loadFunctions = async (): Promise<void> => {
-    if (functions.length > 0) return setShowFunctions((v) => !v)
-    try { setFunctions(await window.api.intelligence.assistant.functions()); setShowFunctions(true) } catch (e) { setError(errMsg(e)) }
   }
 
   return (
@@ -104,7 +100,14 @@ export function Assistant() {
             <>
               <div className="mt-5 flex flex-col gap-3" aria-live="polite">
                 {exchanges.length === 0 && (
-                  <p className="meta">Try: “how much did I save last month?” · “how many tasks did I finish this week?” · “what's my mood average over the last 30 days?”</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="meta">Try:</span>
+                    {functions.flatMap((f) => f.examples).map((example) => (
+                      <button key={example} type="button" className="btn" disabled={busy} onClick={() => setQuestion(example)}>
+                        {example}
+                      </button>
+                    ))}
+                  </div>
                 )}
                 {exchanges.map((x, i) => (
                   <article key={i} className="card card-pad">
@@ -121,17 +124,26 @@ export function Assistant() {
                           <dt className="meta">Fixed instructions block</dt>
                           <dd className="mt-0.5">{x.disclosure.systemPromptChars} characters — function names only, no data.</dd>
                         </div>
-                        <div>
-                          <dt className="meta">Function chosen by the model</dt>
-                          <dd className="mt-0.5 num">{x.disclosure.functionName} · {x.disclosure.range.from} → {x.disclosure.range.to}</dd>
-                        </div>
-                        <div>
-                          <dt className="meta">Result computed on this computer</dt>
-                          <dd className="mt-0.5 num">{fmtAmount(x.disclosure.result)}</dd>
-                        </div>
+                        {x.disclosure.kind === 'computed' ? (
+                          <>
+                            <div>
+                              <dt className="meta">Function chosen by the model</dt>
+                              <dd className="mt-0.5 num">{x.disclosure.functionName} · {x.disclosure.range.from} → {x.disclosure.range.to}</dd>
+                            </div>
+                            <div>
+                              <dt className="meta">Result computed on this computer</dt>
+                              <dd className="mt-0.5 num">{fmtAmount(x.disclosure.result)}</dd>
+                            </div>
+                          </>
+                        ) : (
+                          <div>
+                            <dt className="meta">Function chosen by the model</dt>
+                            <dd className="mt-0.5">None. This question is not supported, so no user data was read.</dd>
+                          </div>
+                        )}
                         <div>
                           <dt className="meta">Rows sent to the provider</dt>
-                          <dd className="mt-0.5">None. Only the text above left this computer; the number was worked out locally and never sent back.</dd>
+                          <dd className="mt-0.5">None. Only the text above left this computer; any supported result is worked out locally and never sent back.</dd>
                         </div>
                       </dl>
                     </details>
@@ -154,7 +166,7 @@ export function Assistant() {
                 <button className="btn" onClick={() => { setExchanges([]); setError('') }} disabled={exchanges.length === 0}>
                   <Eraser size={14} /> Clear history
                 </button>
-                <button className="btn" aria-expanded={showFunctions} onClick={loadFunctions}>
+                <button className="btn" aria-expanded={showFunctions} onClick={() => setShowFunctions((v) => !v)}>
                   {showFunctions ? 'Hide' : 'Show'} the data functions
                 </button>
                 <span className="meta">Chats are not saved anywhere — closing the page clears them.</span>

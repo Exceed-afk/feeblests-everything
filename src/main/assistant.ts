@@ -12,10 +12,10 @@ import { safeStorage } from 'electron'
 import type Database from 'better-sqlite3'
 import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
-  assistantQuestionError, assistantReady, assistantSettingsPatchError, checkEndpoint, clampRange, cleanModelText, failureText,
+  assistantQuestionError, assistantReady, assistantSettingsPatchError, CANNOT_ANSWER_MESSAGE, checkEndpoint, clampRange, cleanModelText, failureText,
   functionByName, normalizeAssistantPatch,
   parseAssistantReply,
-  type AssistantExchange, type AssistantKeyStatus, type AssistantProvider, type AssistantRows, type AssistantSettings,
+  type AssistantExchange, type AssistantFunctionInfo, type AssistantKeyStatus, type AssistantProvider, type AssistantRows, type AssistantSettings,
   type AskOutcome
 } from '../shared/assistant'
 import { listEntries } from './logbook'
@@ -180,6 +180,23 @@ export async function askAssistant(db: Database.Database, question: string, toda
   const cleaned = cleanModelText(http.text)
   const parsed = parseAssistantReply(cleaned.ok ? cleaned.text : http.text)
   if (!parsed.ok) return { ok: false, error: parsed.error }
+  if (parsed.call.kind === 'none') {
+    const userPrompt = ASSISTANT_USER_PROMPT(question, today)
+    return {
+      ok: true,
+      exchange: {
+        question: question.trim(),
+        answer: CANNOT_ANSWER_MESSAGE,
+        disclosure: {
+          kind: 'cannot_answer',
+          question: userPrompt,
+          systemPromptChars: ASSISTANT_SYSTEM_PROMPT.length,
+          userPromptChars: userPrompt.length
+        },
+        at: new Date().toISOString()
+      }
+    }
+  }
   const clamped = clampRange(parsed.call.range, today)
   if (!clamped.ok) return { ok: false, error: failureText('range') }
 
@@ -206,6 +223,7 @@ export async function askAssistant(db: Database.Database, question: string, toda
     answer,
     // Adjustment 3: full disclosure of what was sent and what came back.
     disclosure: {
+      kind: 'computed',
       question: ASSISTANT_USER_PROMPT(question, today),
       systemPromptChars: ASSISTANT_SYSTEM_PROMPT.length,
       userPromptChars: ASSISTANT_USER_PROMPT(question, today).length,
@@ -219,7 +237,7 @@ export async function askAssistant(db: Database.Database, question: string, toda
 }
 
 // The function list for the Intelligence page's plain-language table.
-export const assistantFunctionList = (): { name: string; description: string }[] =>
-  ASSISTANT_FUNCTIONS.map((f) => ({ name: f.name, description: f.description }))
+export const assistantFunctionList = (): AssistantFunctionInfo[] =>
+  ASSISTANT_FUNCTIONS.map(({ name, description, examples }) => ({ name, description, examples }))
 
 export { DEFAULT_ASSISTANT }

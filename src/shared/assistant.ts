@@ -193,8 +193,16 @@ export function clampRange(range: DateRange, today: string): ClampRangeResult {
 
 export interface AssistantFunctionDef {
     name: string
+    label: string
     description: string // goes into the prompt
+    examples: string[]
     run: (rows: AssistantRows, range: DateRange, today?: string) => number
+}
+
+export interface AssistantFunctionInfo {
+    name: string
+    description: string
+    examples: string[]
 }
 
 const inRange = (date: string, r: DateRange): boolean => date >= r.from && date <= r.to
@@ -212,17 +220,23 @@ const completedOn = (completion: TaskCompletion, r: DateRange): boolean => {
 export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
     {
         name: 'savings_total',
+        label: 'savings total',
         description: 'Net savings (deposits minus withdrawals) for a date range.',
+        examples: ['How much did I save last month?'],
         run: (rows, r) => round8(rows.txs.filter((t) => inRange(t.date, r)).reduce((a, t) => a + signedAmount(t.kind, t.amount), 0))
     },
     {
         name: 'trade_pnl',
+        label: 'trade P&L',
         description: 'Total profit and loss of trades dated in a date range (a trade counts on its entry date; open trades are not counted).',
+        examples: ['What was my total trade P&L this month?'],
         run: (rows, r) => round8(rows.trades.filter((t) => t.pnl !== null && inRange(t.date, r)).reduce((a, t) => a + (t.pnl as number), 0))
     },
     {
         name: 'habit_completion_rate',
+        label: 'habit completion',
         description: 'Percentage of scheduled habit days checked off in a date range; 0 when nothing was scheduled.',
+        examples: ['What was my habit completion rate this week?'],
         run: (rows, r, today = r.to) => {
             const totals = rows.habits.reduce((sum, habit) => {
                 const rate = habitRateInRange(habit, r.from, r.to, today)
@@ -233,12 +247,16 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
     },
     {
         name: 'tasks_completed',
+        label: 'tasks completed',
         description: 'How many tasks were completed in a date range.',
+        examples: ['How many tasks did I complete this week?'],
         run: (rows, r) => rows.completions.filter((completion) => completedOn(completion, r)).length
     },
     {
         name: 'mood_average',
+        label: 'mood average',
         description: 'Average mood (1 rough to 5 great) of journal entries dated in a date range; 0 when none were logged.',
+        examples: ["What's my mood average over the last 30 days?"],
         run: (rows, r) => {
             const m = moodScores(rows.entries, r)
             return m.length === 0 ? 0 : round8(m.reduce((a, b) => a + b, 0) / m.length)
@@ -246,7 +264,9 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
     },
     {
         name: 'journal_entries',
+        label: 'journal entries',
         description: 'How many journal entries were written in a date range.',
+        examples: ['How many journal entries did I write this month?'],
         run: (rows, r) => rows.entries.filter((e) => !isAutomationEntry(e) && inRange(e.date, r)).length
     }
 ]
@@ -259,18 +279,21 @@ export const functionByName = (name: string): AssistantFunctionDef | undefined =
 export const ASSISTANT_SYSTEM_PROMPT =
     'You answer questions about the user\'s personal logbook, savings, trades, habits and tasks. ' +
     'You cannot see any raw data. Reply with ONLY one JSON object, no prose, in this exact shape: ' +
-    '{"function":"<name>","range":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"},"question":"<the user\'s question, repeated back>"} ' +
+    '{"function":"<name>","range":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"},"question":"<the user\'s question, repeated back>"}; ' +
+    'if none of the functions fits, reply with {"function":"cannot_answer"}. ' +
     'Choose "function" from this list:\n' +
     ASSISTANT_FUNCTIONS.map((f) => `- ${f.name}: ${f.description}`).join('\n') +
     '\nThe range must be a contiguous span of calendar days that answers the question. ' +
-    'If no function fits exactly, use the closest one. Never invent a function name.'
+    'Do not guess or use the closest function when none fits. Never invent a function name.'
 
 export const ASSISTANT_USER_PROMPT = (question: string, today: string): string =>
     `Today is ${today}. Question: ${question.trim()}`
 
 // ---------- parsing the reply (the model's ONE function call) ----------
 
-export interface AssistantCall { functionName: string; range: DateRange; question: string }
+export type AssistantCall =
+    | { kind: 'function'; functionName: string; range: DateRange; question: string }
+    | { kind: 'none' }
 
 export function parseAssistantReply(raw: string): { ok: true; call: AssistantCall } | { ok: false; error: string } {
     const text = raw.trim()
@@ -280,14 +303,15 @@ export function parseAssistantReply(raw: string): { ok: true; call: AssistantCal
     let obj: unknown
     try { obj = JSON.parse(text.slice(start, end + 1)) } catch { return { ok: false, error: failureText('model') } }
     const o = obj as { function?: unknown; range?: unknown; question?: unknown }
-    if (typeof o.function !== 'string' || !functionByName(o.function)) return { ok: false, error: failureText('model') }
+    if (typeof o.function !== 'string') return { ok: false, error: failureText('model') }
+    if (o.function === 'cannot_answer' || !functionByName(o.function)) return { ok: true, call: { kind: 'none' } }
     const r = (o.range ?? {}) as { from?: unknown; to?: unknown }
     const iso = (v: unknown): string | null =>
         typeof v === 'string' && isRealDate(v) ? v : null
     const from = iso(r.from), to = iso(r.to)
     if (!from || !to || from > to) return { ok: false, error: failureText('model') }
     const question = typeof o.question === 'string' && o.question.trim() ? o.question.trim() : ''
-    return { ok: true, call: { functionName: o.function, range: { from, to }, question } }
+    return { ok: true, call: { kind: 'function', functionName: o.function, range: { from, to }, question } }
 }
 
 // Cleans a model answer: drops reasoning blocks and keeps the JSON object the
@@ -323,14 +347,23 @@ export const lastNDays = (today: string, n: number): DateRange => ({ from: addDa
 
 // ---------- what the renderer is told about one turn (adjustment 3) ----------
 
-export interface AssistantDisclosure {
+interface AssistantDisclosureBase {
     question: string // exactly what was sent as the user turn
     systemPromptChars: number // size of the fixed instructions block
     userPromptChars: number // size of the user turn
+}
+
+export type AssistantDisclosure =
+    | (AssistantDisclosureBase & {
+    kind: 'computed'
     functionName: string
     range: DateRange
     result: number
-}
+    })
+    | (AssistantDisclosureBase & { kind: 'cannot_answer' })
+
+export const CANNOT_ANSWER_MESSAGE =
+    `I can't compute that yet. I can answer: ${ASSISTANT_FUNCTIONS.map((f) => f.label).join(', ')}.`
 
 export interface AssistantExchange {
     question: string

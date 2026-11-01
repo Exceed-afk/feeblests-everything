@@ -206,7 +206,7 @@ test('a well-formed model reply parses to one call', () => {
   const raw = '{"function":"savings_total","range":{"from":"2026-10-01","to":"2026-10-31"},"question":"how much did I save?"}'
   const r = parseAssistantReply(raw)
   assert.ok(r.ok)
-  assert.deepEqual(!r.ok ? null : r.call, { functionName: 'savings_total', range: { from: '2026-10-01', to: '2026-10-31' }, question: 'how much did I save?' })
+  assert.deepEqual(!r.ok ? null : r.call, { kind: 'function', functionName: 'savings_total', range: { from: '2026-10-01', to: '2026-10-31' }, question: 'how much did I save?' })
 })
 test('a reply wrapped in prose or think-blocks still parses', () => {
   const raw = 'Some preamble {"function":"tasks_completed","range":{"from":"2026-10-19","to":"2026-10-25"},"question":"q"} trailing'
@@ -214,7 +214,8 @@ test('a reply wrapped in prose or think-blocks still parses', () => {
   assert.ok(r.ok)
 })
 test('invented function names, bad dates and non-JSON are refused', () => {
-  assert.equal(parseAssistantReply('{"function":"delete_everything","range":{"from":"2026-10-01","to":"2026-10-31"},"question":"q"}').ok, false)
+  const unknown = parseAssistantReply('{"function":"delete_everything","range":{"from":"2026-10-01","to":"2026-10-31"},"question":"q"}')
+  assert.deepEqual(unknown, { ok: true, call: { kind: 'none' } })
   assert.equal(parseAssistantReply('{"function":"tasks_completed","range":{"from":"nope","to":"2026-10-25"},"question":"q"}').ok, false)
   assert.equal(parseAssistantReply('{"function":"tasks_completed","range":{"from":"2026-10-31","to":"2026-10-01"},"question":"q"}').ok, false) // reversed
   assert.equal(parseAssistantReply('no json here at all').ok, false)

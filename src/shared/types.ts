@@ -69,7 +69,7 @@ interface IntelligenceApiInner {
     keyStatus(): Promise<AssistantKeyStatus>
     setKey(key: string): Promise<{ ok: true } | { ok: false; error: string }>
     clearKey(): Promise<void>
-    functions(): Promise<{ name: string; description: string }[]>
+    functions(): Promise<AssistantFunctionInfo[]>
     ask(question: string, today: string): Promise<AskOutcome>
   }
 }
@@ -607,7 +607,7 @@ export type { DailyBriefing, BriefingTasks, BriefingHabits, BriefingSavings, Bri
 import { round8 } from './math'
 import type { InsightsResult } from './insights'
 import type { DailyBriefing } from './briefing'
-import type { AssistantSettings, AssistantExchange, AssistantKeyStatus, AskOutcome } from './assistant'
+import type { AssistantSettings, AssistantExchange, AssistantFunctionInfo, AssistantKeyStatus, AskOutcome } from './assistant'
 export type { InsightsResult } from './insights'
 
 // ---------- Insights ----------
