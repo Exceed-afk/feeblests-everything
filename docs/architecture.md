@@ -511,7 +511,7 @@ sequenceDiagram
 | Logbook | `logbook_entries` | list/create/update/delete, tags, search, its data to calendar/review/dashboard/briefing via its query functions | shared (moods, search parsing) |
 | Trades | `trades` | CRUD, meta, search; P&L *computed* by src/shared/trades.ts | shared/trades, shared/math |
 | Savings | `savings_goals`, `savings_transactions` | CRUD + search, balance derived | shared/savings (progress) |
-| Habits | `habits`, `habit_checkins` | CRUD, day-status, logValue, reorder; listens to logbook events (auto-complete) | shared/habits (all rules), main/events.ts |
+| Habits | `habits`, `habit_checkins` | CRUD, day-status, logValue, reorder; legacy check-in toggles use day-status replacement; listens to logbook events (auto-complete) | shared/habits (all rules), main/events.ts |
 | Tasks | `tasks`, `task_subtasks` | CRUD, status, bulk, reorder, recurrence resolution | shared/tasks |
 | Intelligence (automations/insights/assistant) | `automation_events`; **writes into `settings`** (`intelligence`, `automations`, `insightDismissals`, `assistant`, `assistantKeyBlob`) | toggles, activity log, insights build/dismiss, assistant ask | automations emit from tool writes, including newly closed trades; shared/insights* |
 | Search (main) | none | `runSearch` bundling | logbook/trades/savings search fns, shared/search |

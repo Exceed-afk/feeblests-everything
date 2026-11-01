@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clearing or deleting automation activity now hides rows without allowing old triggers to repeat (append-only migration 15)
 - Automation drafts remain visible but no longer count as user writing in streaks, authored-entry totals, or journal mood statistics
 - Entering a closed losing trade now creates its loss-reflection draft when its trade date is today or up to three days earlier; older and future-dated trades are ignored
+- Capture and Calendar check-ins now replace a skipped status with done; unchecking clears the day as before
 
 ### Appearance
 - Unified the six original colour schemes and seven named palettes into one theme list, with light and dark variants for all 13 themes
