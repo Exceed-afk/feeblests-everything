@@ -23,7 +23,7 @@ import { listTrades } from './trades'
 import { listAllTransactions } from './savings'
 import { listHabits } from './habits'
 import { listCompletions, listTasks } from './tasks'
-import { deleteSetting, getSettings, setSetting, getDb } from './db'
+import { deleteSetting, getSettings, setSetting } from './db'
 import { isDate } from './util'
 
 const TIMEOUT_MS = 30_000
@@ -222,4 +222,4 @@ export async function askAssistant(db: Database.Database, question: string, toda
 export const assistantFunctionList = (): { name: string; description: string }[] =>
   ASSISTANT_FUNCTIONS.map((f) => ({ name: f.name, description: f.description }))
 
-export { DEFAULT_ASSISTANT, getDb }
+export { DEFAULT_ASSISTANT }

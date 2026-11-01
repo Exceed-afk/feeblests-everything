@@ -22,6 +22,23 @@ function fireLoss(db: ReturnType<typeof openAutomationDb>, key = 'trade:1') {
   })
 }
 
+test('automation draft inserts cover every required logbook column', () => {
+  const db = openAutomationDb()
+  try {
+    const insertColumns = new Set(['date', 'title', 'body', 'mood', 'tags', 'created_at', 'updated_at'])
+    const requiredColumns = db.prepare('PRAGMA table_info(logbook_entries)').all() as {
+      name: string; notnull: number; dflt_value: unknown; pk: number
+    }[]
+    const missing = requiredColumns
+      .filter((column) => column.notnull === 1 && column.dflt_value === null && column.pk === 0)
+      .filter((column) => !insertColumns.has(column.name))
+      .map((column) => column.name)
+    assert.deepEqual(missing, [], 'new required logbook columns must be added to createAutomationEntry')
+  } finally {
+    db.close()
+  }
+})
+
 test('the same automation trigger creates only one draft', () => {
   const db = openAutomationDb()
   try {

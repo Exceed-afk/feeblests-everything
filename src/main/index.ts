@@ -28,7 +28,6 @@ import {
   assistantFunctionList, askAssistant
 } from './assistant'
 import type { AssistantSettings } from '../shared/assistant'
-import { listTasks } from './tasks'
 import type { AutomationSettings } from '../shared/automations'
 import type { CaptureSettings, HabitInput, IntelligenceFeatureToggles, ReviewKind, TaskInput, TaskStatus, TaskFilter, ExportResult, ImportPreview, ImportResult, SavingsGoalInput, SavingsTxInput, LogEntryInput, LogFilter, TradeFilter, TradeInput } from '../shared/types'
 import { DEFAULT_INTELLIGENCE, DEFAULT_SETTINGS, type IntelligenceSettings } from '../shared/types'
@@ -208,12 +207,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('automations:activity', () => automationActivity(getDb()))
   ipcMain.handle('automations:activity:delete', (_e, id: number) => deleteAutomationActivity(getDb(), id))
   ipcMain.handle('automations:activity:clear', () => clearAutomationActivity(getDb()))
-  ipcMain.handle('automations:staleTasks', () => {
-    const today = localDate()
-    return listTasks(getDb(), today)
-      .filter((t) => t.status !== 'done' && t.dueDate !== null && t.dueDate < today)
-      .map((t) => ({ id: t.id, title: t.title, daysOverdue: Math.round((Date.parse(today) - Date.parse(t.dueDate as string)) / 86_400_000) }))
-  })
+  ipcMain.handle('automations:staleTasks', () => tasks.overdueTasks(getDb(), localDate()))
   ipcMain.handle('insights:build', (_e, today: string) => getInsights(getDb(), today))
   ipcMain.handle('insights:dismiss', (_e, id: string, dismissed: boolean) => setInsightDismissed(getDb(), id, dismissed))
   ipcMain.handle('capture:status', () => capture.status())

@@ -4,7 +4,7 @@ import { openDatabase } from './sqlite'
 import { MIGRATIONS, applyMigrations } from '../src/main/migrations'
 import { addTaskMonths, applyColumnOrder, filterTasks, groupTasksForBoard, localTaskDay, nextTaskDate, nextTaskDateAfter, pendingTaskReminders, sortTasks, subtaskProgress, taskInputForEdit, taskInputProblems, taskReview } from '../src/shared/tasks'
 import { normalizeSettings } from '../src/shared/appearance'
-import { clearTrash, createTask, deleteTaskForever, deleteTasks, listCompletedTasks, listDeletedTasks, listTasks, promoteSubtask, reorderSubtasks, reorderTasks, rescheduleTasks, restoreTask, setSubtaskDone, setTaskStatus, setTasksStatus, skipTaskOccurrence, softDeleteTask, undoTaskStatus, updateTask } from '../src/main/tasks'
+import { clearTrash, createTask, deleteTaskForever, deleteTasks, listCompletedTasks, listDeletedTasks, listTasks, overdueTasks, promoteSubtask, reorderSubtasks, reorderTasks, rescheduleTasks, restoreTask, setSubtaskDone, setTaskStatus, setTasksStatus, skipTaskOccurrence, softDeleteTask, undoTaskStatus, updateTask } from '../src/main/tasks'
 import { resolveOccurrences } from '../src/shared/tasks'
 import { collectBackup, restoreBackup } from '../src/main/backup'
 import { runSearch } from '../src/main/search'
@@ -181,6 +181,25 @@ test('bulk status and delete change every chosen task in one go', () => {
   assert.equal(listTasks(db).find((t) => t.id === b)!.status, 'done')
   deleteTasks(db, [a, b])
   assert.deepEqual(listTasks(db).map((t) => t.id), [c])
+  db.close()
+})
+
+test('overdueTasks returns overdue active tasks with local-calendar day counts', () => {
+  const db = openTaskDb()
+  const overdue = createTask(db, {
+    title: 'Overdue', notes: '', status: 'todo', priority: 'medium', dueDate: '2026-10-24', dueTime: null,
+    project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: []
+  })
+  createTask(db, {
+    title: 'Due today', notes: '', status: 'todo', priority: 'medium', dueDate: '2026-10-26', dueTime: null,
+    project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: []
+  })
+  createTask(db, {
+    title: 'Completed', notes: '', status: 'done', priority: 'medium', dueDate: '2026-10-24', dueTime: null,
+    project: null, tags: [], recurrenceRule: null, recurrenceNext: null, subtasks: []
+  })
+  const result = overdueTasks(db, '2026-10-26')
+  assert.deepEqual(result, [{ id: overdue.id, title: 'Overdue', daysOverdue: 2 }])
   db.close()
 })
 

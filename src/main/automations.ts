@@ -17,7 +17,6 @@ import {
   type AutomationAction, type AutomationEventData, type AutomationEventKind, type AutomationSettings
 } from '../shared/automations'
 import { getSettings, setSetting } from './db'
-import { getDb } from './db'
 import { cleanTags, localDate } from './util'
 
 // Reads settings from ANY database handle (the app's global one, or a test's in-memory one),
@@ -117,6 +116,7 @@ function createAutomationEntry(db: Database.Database, action: Extract<Automation
   const now = new Date().toISOString()
   const tags = JSON.stringify(cleanTags([...action.tags, AUTOMATION_TAG]))
   const body = `Created by an automation — safe to delete.\n\n${action.body}`
+  // Writes date, title, body, mood, tags, created_at and updated_at; the schema test guards new required columns.
   const info = db.prepare(
     `INSERT INTO logbook_entries (date, title, body, mood, tags, created_at, updated_at)
      VALUES (?, ?, ?, NULL, ?, ?, ?)`
@@ -148,5 +148,3 @@ export function clearAutomationActivity(db: Database.Database): void {
 export const emitOn = (db: Database.Database) =>
   (event: AutomationEventKind, key: string, data: import('../shared/automations').AutomationEventData, extra?: { overdueTasks?: { id: number; title: string; daysOverdue: number }[] }) =>
     emitAutomation(db, event, key, data, extra)
-
-export { getDb }

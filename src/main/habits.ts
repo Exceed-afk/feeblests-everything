@@ -271,21 +271,25 @@ export function autoCompleteOnDay(db: Database.Database, date: string): void {
   const today = localDate()
   if (date > today) return // a future entry cannot complete a future day
 
-  const habits = listHabits(db, today).habits.filter((h) => !h.archived && h.autoCompleteOn === 'logbook-entry')
-  for (const h of habits) {
+  const habits = db.prepare(
+    "SELECT id, days, start_date FROM habits WHERE auto_complete_on = 'logbook-entry' AND archived = 0"
+  ).all() as { id: number; days: string; start_date: string }[]
+  for (const habit of habits) {
     // The effective start (habit's start date or its first record) decides
     // when tracking began, exactly like everywhere else in the app.
-    const firstRow = db.prepare('SELECT MIN(date) AS d FROM habit_checkins WHERE habit_id = ?').get(h.id) as { d: string | null }
+    const firstRow = db.prepare('SELECT MIN(date) AS d FROM habit_checkins WHERE habit_id = ?').get(habit.id) as { d: string | null }
     const completions: HabitCompletion[] = firstRow.d ? [{ date: firstRow.d, status: 'done' }] : []
-    if (!isHabitDue(h, date, effectiveStart({ days: h.days, startDate: h.startDate }, completions))) continue
+    const days = JSON.parse(habit.days) as number[]
+    const schedule = { days, startDate: habit.start_date }
+    if (!isHabitDue(schedule, date, effectiveStart(schedule, completions))) continue
 
-    const existing = db.prepare('SELECT habit_id FROM habit_checkins WHERE habit_id = ? AND date = ?').get(h.id, date)
+    const existing = db.prepare('SELECT habit_id FROM habit_checkins WHERE habit_id = ? AND date = ?').get(habit.id, date)
     if (existing) continue // there is already a record; what you wrote stays
 
     db.prepare(
       `INSERT INTO habit_checkins (habit_id, date, created_at, status) VALUES (?, ?, ?, 'done')
        ON CONFLICT(habit_id, date) DO NOTHING`
-    ).run(h.id, date, new Date().toISOString())
+    ).run(habit.id, date, new Date().toISOString())
   }
 }
 

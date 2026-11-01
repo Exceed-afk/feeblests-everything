@@ -80,6 +80,16 @@ export function listTasks(db: Database.Database, today: string = localDate()): T
   return resolveOccurrences(tasks, today)
 }
 
+export function overdueTasks(db: Database.Database, today: string): { id: number; title: string; daysOverdue: number }[] {
+  return listTasks(db, today)
+    .filter((task) => task.status !== 'done' && task.dueDate !== null && task.dueDate < today)
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      daysOverdue: Math.round((Date.parse(today) - Date.parse(task.dueDate as string)) / 86_400_000)
+    }))
+}
+
 export function listCompletedTasks(db: Database.Database, date: string): Task[] {
   const rows = db.prepare(`SELECT t.*, c.completed_at AS occurrence_completed_at
     FROM task_completions c JOIN tasks t ON t.id = c.task_id
