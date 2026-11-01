@@ -156,12 +156,13 @@ export function Intelligence() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 id="activity-title" className="section-title">Automation activity</h2>
             {activity.length > 0 && (
-              <button className="btn btn-sm" onClick={async () => { await window.api.intelligence.automations.clearActivity(); refreshAutomation() }}>
+              <button className="btn btn-sm" title="Hides the list. Automations will not repeat old triggers."
+                onClick={async () => { await window.api.intelligence.automations.clearActivity(); refreshAutomation() }}>
                 Clear list
               </button>
             )}
           </div>
-          <p className="mt-1 text-sm text-muted">Everything an automation did, and when. Nothing here is silent; nothing here is hidden.</p>
+          <p className="mt-1 text-sm text-muted">Everything an automation did, and when. Clearing hides these records without allowing old triggers to repeat.</p>
           {activity.length === 0 ? (
             <div className="mt-4">
               <EmptyState compact title="Nothing yet" text="Automations will list what they do here, each with the time it happened." />

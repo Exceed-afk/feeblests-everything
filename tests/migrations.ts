@@ -58,4 +58,19 @@ assert.deepEqual(
   [{ taskId: 1, completedAt: '2026-10-26T11:00:00.000Z' }]
 )
 db13.close()
-console.log('task schema migration checks passed')
+
+// Migration 15 adds the hidden flag without hiding or removing existing activity.
+const db14 = openDatabase()
+for (let i = 0; i < 14; i++) db14.exec(MIGRATIONS[i])
+db14.pragma('user_version = 14')
+db14.prepare(`INSERT INTO automation_events (rule, event, event_key, label, entry_id, created_at)
+  VALUES ('loss-reflection', 'trade-closed', 'loss-reflection:trade:1', 'A draft', 1, 'now')`).run()
+applyMigrations(db14)
+assert.equal(db14.pragma('user_version', { simple: true }), MIGRATIONS.length)
+assert.deepEqual(
+  db14.prepare('SELECT rule, event_key, hidden FROM automation_events').all(),
+  [{ rule: 'loss-reflection', event_key: 'loss-reflection:trade:1', hidden: 0 }]
+)
+db14.close()
+
+console.log('schema migration checks passed')

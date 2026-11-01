@@ -210,6 +210,8 @@ export const MIGRATIONS: string[] = [
    INSERT INTO task_completions (task_id, completed_at)
      SELECT id, completed_at FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL;`,
 
+  // 15: hide automation activity without removing the durable dedupe claims.
+  `ALTER TABLE automation_events ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`,
 ]
 
 // Exposed for focused migration tests and used by the app's startup path.

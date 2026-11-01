@@ -14,10 +14,11 @@
 import type Database from 'better-sqlite3'
 import {
   DEFAULT_AUTOMATIONS, AUTOMATION_TAG, guardAction, runAutomation,
-  type AutomationAction, type AutomationEvent, type AutomationEventKind, type AutomationSettings
+  type AutomationAction, type AutomationEventData, type AutomationEventKind, type AutomationSettings
 } from '../shared/automations'
 import { getSettings, setSetting } from './db'
 import { getDb } from './db'
+import { localDate } from './util'
 
 // Reads settings from ANY database handle (the app's global one, or a test's in-memory one),
 // so emitAutomation works before the app's global handle exists.
@@ -58,41 +59,42 @@ function emitAutomationUnsafe(
   db: Database.Database,
   event: AutomationEventKind,
   key: string, // "trade:12", "goal:3:first-reach": one event, once per rule, ever
-  data: Parameters<typeof runAutomation>[0]['data'] extends never ? never : import('../shared/automations').AutomationEventData,
+  data: AutomationEventData,
   extra: { overdueTasks?: { id: number; title: string; daysOverdue: number }[]; date?: string } = {}
 ): EmitResult {
   const settings = automationSettings(db)
-  const today = extra.date ?? new Date().toISOString().slice(0, 10)
+  const today = extra.date ?? localDate()
   const outcomes = runAutomation({ kind: event, date: today, data }, {
     settings,
     overdueTasks: extra.overdueTasks
   })
   if (outcomes.length === 0) return { fired: [] }
 
-  const insert = db.prepare(
+  const claim = db.prepare(
     `INSERT INTO automation_events (rule, event, event_key, label, entry_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, NULL, ?) ON CONFLICT(rule, event_key) DO NOTHING`
   )
+  const setEntry = db.prepare('UPDATE automation_events SET entry_id = ? WHERE id = ?')
   const fired: EmitResult['fired'] = []
-  for (const outcome of outcomes) {
-    for (let i = 0; i < outcome.actions.length; i++) {
-      const action = guardAction(outcome.actions[i]) // refuse anything but create/message
-      if (!action) continue
-      const label = outcome.labels[i]
-      const dedupKey = `${outcome.ruleId}:${key}`
-      const existing = db.prepare('SELECT id, entry_id FROM automation_events WHERE rule = ? AND event_key = ?')
-        .get(outcome.ruleId, dedupKey) as { id: number; entry_id: number | null } | undefined
-      if (existing) continue // this rule already answered this exact trigger: loop closed
+  db.transaction(() => {
+    for (const outcome of outcomes) {
+      for (let i = 0; i < outcome.actions.length; i++) {
+        const action = guardAction(outcome.actions[i]) // refuse anything but create/message
+        if (!action) continue
+        const label = outcome.labels[i]
+        const dedupKey = i === 0 ? `${outcome.ruleId}:${key}` : `${outcome.ruleId}:${key}#${i}`
+        const claimResult = claim.run(outcome.ruleId, event, dedupKey, label, new Date().toISOString())
+        if (claimResult.changes === 0) continue
 
-      let entryId: number | null = null
-      if (action.type === 'create-draft-entry') entryId = createAutomationEntry(db, action)
-
-      const at = new Date().toISOString()
-      const info = insert.run(outcome.ruleId, event, dedupKey, label, entryId, at)
-      fired.push({ rule: outcome.ruleId, label, entryId })
-      void info
+        let entryId: number | null = null
+        if (action.type === 'create-draft-entry') {
+          entryId = createAutomationEntry(db, action, today)
+          setEntry.run(entryId, claimResult.lastInsertRowid)
+        }
+        fired.push({ rule: outcome.ruleId, label, entryId })
+      }
     }
-  }
+  })()
   return { fired }
 }
 
@@ -111,9 +113,8 @@ export function emitAutomation(...args: Parameters<typeof emitAutomationUnsafe>)
 // obvious in the Logbook exactly where it came from. Deleting it in the Logbook
 // deletes it like any other entry — automations never re-create the same one (the
 // dedup row above stays, and the entry id recorded there goes stale, which is fine).
-function createAutomationEntry(db: Database.Database, action: Extract<AutomationAction, { type: 'create-draft-entry' }>): number {
+function createAutomationEntry(db: Database.Database, action: Extract<AutomationAction, { type: 'create-draft-entry' }>, today: string): number {
   const now = new Date().toISOString()
-  const today = new Date().toISOString().slice(0, 10)
   const tags = JSON.stringify([...new Set([...action.tags, AUTOMATION_TAG])])
   const body = `Created by an automation — safe to delete.\n\n${action.body}`
   const info = db.prepare(
@@ -129,18 +130,18 @@ function createAutomationEntry(db: Database.Database, action: Extract<Automation
 // the Settings page offers "show all".
 export function automationActivity(db: Database.Database, limit = 50): ReturnType<typeof toActivity>[] {
   const rows = limit > 0
-    ? (db.prepare('SELECT * FROM automation_events ORDER BY id DESC LIMIT ?').all(limit) as Row[])
-    : (db.prepare('SELECT * FROM automation_events ORDER BY id DESC').all() as Row[])
+    ? (db.prepare('SELECT * FROM automation_events WHERE hidden = 0 ORDER BY id DESC LIMIT ?').all(limit) as Row[])
+    : (db.prepare('SELECT * FROM automation_events WHERE hidden = 0 ORDER BY id DESC').all() as Row[])
   return rows.map(toActivity)
 }
 
 export function deleteAutomationActivity(db: Database.Database, id: number): void {
-  db.prepare('DELETE FROM automation_events WHERE id = ?').run(id)
+  db.prepare('UPDATE automation_events SET hidden = 1 WHERE id = ?').run(id)
 }
 
 // Clear the whole Activity list (does NOT touch any entry an automation created).
 export function clearAutomationActivity(db: Database.Database): void {
-  db.prepare('DELETE FROM automation_events').run()
+  db.prepare('UPDATE automation_events SET hidden = 1 WHERE hidden = 0').run()
 }
 
 // Convenience for tool code: the db handle + emit, so a module can fire an event in one line.

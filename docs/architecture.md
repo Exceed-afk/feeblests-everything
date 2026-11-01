@@ -28,7 +28,7 @@ Last verified: 2026-11-01 (package.json `0.12.0`). Every path and name below was
 | State | React `useState` per page + one settings store (`useSyncExternalStore`) | Page data refetched from SQLite on every load/write; only settings live in memory across pages |
 | Bridge | Electron `contextBridge` (`window.api`, `src/preload/index.ts`) | The only path between UI and data; ~60 typed IPC channels |
 | Logic | Pure rule modules in `src/shared/*.ts` | Streaks, recurrence, palette fuzzy match, appearance — tested with plain `tsx` |
-| Data | better-sqlite3, one file at `userData/data/everything.db` | 10 tables, 13 append-only migrations, WAL |
+| Data | better-sqlite3, one file at `userData/data/everything.db` | 10 tables, 15 append-only migrations, WAL |
 
 **Data flow in one paragraph:** every module page calls a promise-style method on `window.api`; the preload script turns it into `ipcRenderer.invoke('channel', payload)`; the matching handler in `src/main/index.ts` calls a query function in `src/main/<module>.ts` with the SQLite handle from `src/main/db.ts`; the result (plain JSON objects, never DB handles) resolves back to the page, which stores it in local `useState` and re-renders. Writes follow the same path in reverse, and pages re-fetch their lists after each write — there is no client-side data cache to keep in sync.
 
@@ -65,7 +65,7 @@ src/
   main/                  Electron main process; owns the database
     index.ts             Window creation, every IPC handler, app lifecycle
     db.ts                SQLite connection, settings get/set, daily backups
-    migrations.ts        13 append-only migrations (user_version)
+    migrations.ts        15 append-only migrations (user_version)
     habits.ts            habits + habit_checkins queries, stats from shared rules
     logbook.ts           logbook_entries; emits the entry-created event
     trades.ts            trades queries and P&L metadata
@@ -159,7 +159,7 @@ All `ipcMain.handle` calls live in `src/main/index.ts`; all caller wrappers in `
 | calendar | `calendar:month` | `YYYY-MM`, today | `getCalendar` | Calendar |
 | briefing | `briefing:build` | today | `getBriefing` | Briefing |
 | search | `search:run` | text, limit | `runSearch` | Search page || automations | `automations:get` / `set` | settings patch | `automationSettings` / `setAutomationSettings` (writes `settings.intelligence`) | Intelligence page |
-| automations | `automations:activity` / `activity:delete` / `activity:clear` | id | `automationActivity` / `deleteAutomationActivity` / `clearAutomationActivity` (automation_events) | Intelligence page |
+| automations | `automations:activity` / `activity:delete` / `activity:clear` | id | `automationActivity` / `deleteAutomationActivity` / `clearAutomationActivity` (automation_events; delete/clear mark rows hidden) | Intelligence page |
 | automations | `automations:staleTasks` | – | filters `listTasks` overdue | Intelligence stale-task automation |
 | insights | `insights:build` / `dismiss` | today / id, dismissed | `getInsights` / `setInsightDismissed` (writes settings) | Insights, Review |
 | capture | `capture:status` / `configure` / `open` / `hide` / `openMain` / `resize` / `saved` | settings patch / height | capture.ts controller | Capture window, CaptureSettings, quickAddSave |
@@ -521,6 +521,7 @@ sequenceDiagram
 
 **Cross-boundary call-outs (as-is in the code):**
 - `src/main/automations.ts` catches and logs failures from automation settings, rules, or activity writes. Each event emitter can therefore fail independently without turning a completed Logbook, trade, savings, task, or habit save into an apparent failure.
+- Automation activity uses a transactional claim-before-action flow; its unique event key remains durable when a row is hidden. Draft dates use the machine's local calendar date.
 - `settings:set` accepts only `DEFAULT_SETTINGS` keys and rejects main-owned settings; `settings:getAll` excludes the encrypted assistant key. Intelligence features, automations, and insight dismissals are stored separately and written by the main process.
 - `assistantKeyBlob` is deleted when the user removes a key. `assistant:keyStatus` reports whether a saved blob can be read on this computer without returning the key itself.
 - Assistant settings patches keep only known, length-limited values; a cloud URL change clears confirmation. Requests refuse redirects and limit questions to 500 characters. JSON backup restores reset the provider and cloud confirmation, retaining only a valid model name and local URL while dropping imported key blobs and legacy provider values.

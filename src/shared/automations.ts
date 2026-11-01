@@ -72,7 +72,7 @@ export const DEFAULT_AUTOMATIONS: AutomationSettings = {
 // ---------- the activity log row shape ----------
 // What one fired rule did, as the caller records it (the automation_events table
 // holds exactly this). Nothing here is a user's data: these rows describe what
-// the AUTOMATION did, and deleting one never touches the entry it may have made.
+// the AUTOMATION did; hiding one never touches its draft or releases its dedupe claim.
 
 export interface AutomationActivity {
   id: number
