@@ -75,14 +75,14 @@ test('habit_completion_rate counts scheduled days only', () => {
   // Weekdays-only habit; the range is Mon 19 – Fri 23 Oct, all 5 scheduled, 3 checked.
   const h = habit('Read', [0, 1, 2, 3, 4], ['2026-10-19', '2026-10-20', '2026-10-21'])
   const r = f.run(rows({ habits: [h] }), full({ from: '2026-10-19', to: '2026-10-23' }))
-  assert.equal(r, 60) // 3 checked of 5 scheduled
+  assert.equal(r, 75) // 3 checked of 4 elapsed due days; today is still pending
 })
 test('habit_completion_rate ignores archived habits and counts only scheduled days', () => {
   const f = functionByName('habit_completion_rate')!
   const archived = { ...habit('Old', EVERY, ['2026-10-20']), archived: true } // ignored
   const weekend = habit('Fun', [5, 6], ['2026-10-24']) // Sat 24 scheduled + checked; Sun 25 scheduled + unchecked
   const r = f.run(rows({ habits: [archived, weekend] }), full({ from: '2026-10-19', to: '2026-10-25' }))
-  assert.equal(r, 50) // 1 of 2 scheduled weekend days done
+  assert.equal(r, 100) // Sunday is still pending, so only Saturday enters the rate
 })
 test('tasks_completed matches completion timestamps on their local day', () => {
   const f = functionByName('tasks_completed')!

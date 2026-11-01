@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Intelligence
 - Cloud confirmation is tied to the normalized address; assistant requests reject redirects and questions over 500 characters
 - Assistant date ranges reject impossible dates, clamp future endpoints to today, and reject ranges longer than five years to avoid unbounded habit calculations
+- Assistant, Insights and Habits now share due-day, skip, target and effective-start rules; future, archived and still-pending-today days no longer affect rates
 - Restoring a JSON backup resets the assistant provider and cloud confirmation while retaining the model and local URL; imported key blobs are ignored. JSON exports omit the encrypted key blob, but daily local database copies may contain it
 
 ### Automations

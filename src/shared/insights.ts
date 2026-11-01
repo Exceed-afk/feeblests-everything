@@ -11,7 +11,7 @@
 //    the correlation's n and r), so the reader can judge for themselves.
 //
 // Dates are "YYYY-MM-DD" text; weekday arithmetic is UTC, like everywhere else.
-import { addDays, weekdayOf, WEEKDAY_NAMES } from './habits'
+import { addDays, habitRateInRange, weekdayOf, WEEKDAY_NAMES } from './habits'
 import { isAutomationEntry } from './automations'
 import { round8 } from './math'
 import { MOOD_SCORE } from './types'
@@ -89,14 +89,11 @@ export function buildInsightDays(i: InsightsInput): InsightDay[] {
       }).length
     })
   }
-  // Habit completion per scheduled day (days before a habit existed are not missed).
-  const scheduled = i.habits.filter((h) => !h.archived)
   for (const day of days) {
-    for (const h of scheduled) {
-      if (day.date < h.startDate) continue
-      if (!h.days.includes(weekdayOf(day.date))) continue
-      day.habitDue++
-      if (h.checkins.includes(day.date)) day.habitDone++
+    for (const habit of i.habits) {
+      const rate = habitRateInRange(habit, day.date, day.date, i.today)
+      day.habitDue += rate.due
+      day.habitDone += rate.done
     }
   }
   return days

@@ -14,7 +14,7 @@ import { round8 } from './math'
 import { signedAmount } from './savings'
 import { isAutomationEntry } from './automations'
 import { MOOD_SCORE } from './types'
-import { addDays, weekdayOf } from './habits'
+import { addDays, habitRateInRange, weekdayOf } from './habits'
 import type { Habit, LogEntry, Mood, SavingsTx, Task, Trade } from './types'
 
 // ---------- provider modes ----------
@@ -192,7 +192,7 @@ export function clampRange(range: DateRange, today: string): ClampRangeResult {
 export interface AssistantFunctionDef {
     name: string
     description: string // goes into the prompt
-    run: (rows: AssistantRows, range: DateRange) => number
+    run: (rows: AssistantRows, range: DateRange, today?: string) => number
 }
 
 const inRange = (date: string, r: DateRange): boolean => date >= r.from && date <= r.to
@@ -200,25 +200,6 @@ const inRange = (date: string, r: DateRange): boolean => date >= r.from && date 
 const moodScores = (entries: LogEntry[], r: DateRange): number[] =>
     entries.filter((e) => !isAutomationEntry(e) && e.mood !== null && e.mood in MOOD_SCORE && inRange(e.date, r))
         .map((e) => MOOD_SCORE[e.mood as Mood])
-
-// Habit scheduled days in the range: iterate the RANGE's days (not just the check-ins),
-// so a scheduled-but-unchecked day counts against the rate. A check-in on a rest day is
-// neither done nor scheduled. Days before the habit existed are not missed.
-const habitScheduledDays = (habits: Habit[], r: DateRange): { done: number; scheduled: number } => {
-    let done = 0, scheduled = 0
-    for (const h of habits) {
-        if (h.archived) continue
-        if (h.startDate > r.to) continue // did not exist yet in this window
-        const checked = new Set(h.checkins)
-        const from = r.from < h.startDate ? h.startDate : r.from
-        for (let d = from; d <= r.to; d = addDays(d, 1)) {
-            if (!h.days.includes(weekdayOf(d))) continue
-            scheduled++
-            if (checked.has(d)) done++
-        }
-    }
-    return { done, scheduled }
-}
 
 const completedOn = (t: Task, r: DateRange): boolean => {
     if (t.status !== 'done' || !t.completedAt) return false
@@ -243,9 +224,12 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
     {
         name: 'habit_completion_rate',
         description: 'Percentage of scheduled habit days checked off in a date range; 0 when nothing was scheduled.',
-        run: (rows, r) => {
-            const { done, scheduled } = habitScheduledDays(rows.habits, r)
-            return scheduled === 0 ? 0 : round8((done / scheduled) * 100)
+        run: (rows, r, today = r.to) => {
+            const totals = rows.habits.reduce((sum, habit) => {
+                const rate = habitRateInRange(habit, r.from, r.to, today)
+                return { done: sum.done + rate.done, due: sum.due + rate.due }
+            }, { done: 0, due: 0 })
+            return totals.due === 0 ? 0 : round8((totals.done / totals.due) * 100)
         }
     },
     {

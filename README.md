@@ -184,7 +184,7 @@ Add habits you want to do regularly and check them off day by day. Each habit ha
   - A **skipped** day (sick day, travel) neither adds to nor breaks a streak.
   - A check-in on a **rest day** is a bonus: it counts in the total only, never in a streak or a rate.
   - Days before a habit existed are not missed. If a habit was checked off before it was created, tracking is treated as having started on that earlier day.
-- Streaks and rates are always calculated from the check-ins (`src/shared/habits.ts`), never stored. The shared helpers are `isHabitDue`, `getDayStatus`, `calculateCurrentStreak`, `calculateBestStreak` and `calculateCompletionRate`, so the Habits page, the Review page and the Dashboard can never disagree. The queries are in `src/main/habits.ts`.
+- Streaks and rates are always calculated from completion records (`src/shared/habits.ts`), never stored; legacy habits fall back to their check-ins. `habitRateInRange` applies the same due-day, skipped-day, target and effective-start rules used by the Habits page, Assistant and Insights; future days and a still-pending day today are excluded from rates. The shared helpers keep the Habits page, Review, Dashboard, Assistant and Insights consistent. The queries are in `src/main/habits.ts`.
 - The Dashboard's "Habits today" tile uses the same rules, computed for the date the page sends.
 - Habits and check-ins are in the JSON export and import. Backups made before habits existed still import (they just contain no habits).
 

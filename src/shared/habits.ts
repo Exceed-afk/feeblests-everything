@@ -2,7 +2,7 @@
 // process and the UI. Dates are "YYYY-MM-DD" text; the arithmetic below works
 // on the calendar date itself, so time zones and daylight saving cannot shift it.
 import { round8 } from './math'
-import type { HabitStats, TimeOfDay } from './types'
+import type { Habit, HabitStats, TimeOfDay } from './types'
 
 export const WEEKDAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 export const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
@@ -482,6 +482,35 @@ export function effectiveStart(habit: HabitSchedule, completions: HabitCompletio
   for (const c of completions) starts.push(c.date)
   if (starts.length === 0) return undefined
   return starts.sort()[0]
+}
+
+export function habitRateInRange(
+  habit: Habit,
+  from: string,
+  to: string,
+  today: string
+): { done: number; due: number } {
+  const end = to < today ? to : today
+  if (habit.archived || from > end) return { done: 0, due: 0 }
+
+  const completions = habit.completions?.length
+    ? habit.completions
+    : habit.checkins.map((date) => ({ date, status: 'done' as const }))
+  const start = effectiveStart(habit, completions)
+  let done = 0
+  let due = 0
+
+  for (let date = from; date <= end; date = addDays(date, 1)) {
+    const status = getDayStatus(habit, date, completions, today, start)
+    if (status === 'done') {
+      done++
+      due++
+    } else if (status === 'missed' || status === 'skipped') {
+      due++
+    }
+  }
+
+  return { done, due }
 }
 
 // ---------- Phase 5: organisation (ordering and time of day) ----------

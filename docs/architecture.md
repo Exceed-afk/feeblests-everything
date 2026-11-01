@@ -541,7 +541,7 @@ Rules a new contributor must follow, as they actually work in the code:
 - **`src/main/<module>.ts` files stay thin**: fetch/save/SQL + validation. They receive the `Database` handle; they never import each other's tables (aggregators like dashboard.ts are the exception at the top).
 - **The renderer never touches SQL or Electron directly** — only `window.api` methods typed by `EverythingApi` in `src/shared/types.ts`. Preload additions must mirror an `ipcMain.handle`.
 - **Theme uses tokens only** — no hardcoded colours; Tailwind colour names map to CSS variables set by `applyAppearance` (`src/shared/appearance.ts` decides values; `styles.css` consumes them).
-- **Dates are local `YYYY-MM-DD` strings**; stats/rules live in `src/shared/habits.ts` so the Habits page, Review, Calendar and Dashboard can never disagree.
+- **Dates are local `YYYY-MM-DD` strings**; stats/rules live in `src/shared/habits.ts`, including `habitRateInRange` shared by the Habits page, Assistant and Insights so due days, skips, targets, effective starts, future dates and a still-pending day today are handled consistently.
 - **Schema change = append a migration** to `src/main/migrations.ts`, bump nothing else (`user_version` does the rest); default new columns so old data keeps its meaning.
 - **Where state lives**: settings → settingsStore; everything else → DB + page `useState` refetch. Don't cache domain data in the renderer.
 - **Update `README.md`/CHANGELOG** when behaviour changes; list every behaviour change explicitly.

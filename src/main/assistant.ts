@@ -191,7 +191,7 @@ export async function askAssistant(db: Database.Database, question: string, toda
   const range = clamped.range
   let result: number
   try {
-    result = fn.run(rows, range)
+    result = fn.run(rows, range, today)
   } catch {
     return { ok: false, error: failureText('model') }
   }
