@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Intelligence feature toggles now update the sidebar and palette immediately instead of waiting for an app restart
+- Intelligence checkboxes update immediately while saving and revert with an explicit error if persistence fails
 - Automation failures are logged and skipped so they cannot make an already-saved Logbook entry, trade, savings, task, or habit change appear to fail
 - Intelligence feature changes now merge in the main process; automation settings and insight dismissals move to independent settings keys without losing their saved values
 - The Intelligence provider picker and Assistant now use the same provider setting; legacy provider choices are moved during the existing settings-key migration

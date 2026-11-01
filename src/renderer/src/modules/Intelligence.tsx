@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useState, useCallback } from 'react'
+import { useMemo, useEffect, useState, useCallback, useRef } from 'react'
 import { Brain, Trash2, Zap } from 'lucide-react'
 import { DEFAULT_INTELLIGENCE, type IntelligenceFeatureToggles } from '../../../shared/types'
 import { DEFAULT_AUTOMATIONS, type AutomationSettings, type AutomationActivity } from '../../../shared/automations'
@@ -9,7 +9,7 @@ import {
 import { errMsg } from '../lib/errors'
 
 const PLATFORM = typeof process !== 'undefined' ? process.platform : 'unknown'
-import { applyFromMain, useSettings } from '../lib/settingsStore'
+import { applyFromMain, getCurrentSettings, useSettings } from '../lib/settingsStore'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
 
@@ -55,6 +55,7 @@ export function Intelligence() {
   const [automations, setAutomations] = useState<AutomationSettings>(DEFAULT_AUTOMATIONS)
   const [activity, setActivity] = useState<AutomationActivity[]>([])
   const [saveError, setSaveError] = useState('')
+  const toggleRevision = useRef<Partial<Record<keyof IntelligenceFeatureToggles, number>>>({})
 
   const refreshAutomation = () => {
     window.api.intelligence.automations.get().then(setAutomations).catch(() => undefined)
@@ -64,9 +65,24 @@ export function Intelligence() {
 
   const toggle = (key: keyof IntelligenceFeatureToggles) => {
     setSaveError('')
-    void window.api.intelligence.set({ [key]: !features[key] })
-      .then((intelligence) => applyFromMain({ intelligence }))
-      .catch((error) => setSaveError(errMsg(error)))
+    const current = getCurrentSettings().intelligence
+    const enabled = !current.features[key]
+    const revision = (toggleRevision.current[key] ?? 0) + 1
+    toggleRevision.current[key] = revision
+    applyFromMain({ intelligence: { features: { ...current.features, [key]: enabled } } })
+
+    void window.api.intelligence.set({ [key]: enabled })
+      .then((saved) => {
+        if (toggleRevision.current[key] !== revision) return
+        const latest = getCurrentSettings().intelligence
+        applyFromMain({ intelligence: { features: { ...latest.features, [key]: saved.features[key] } } })
+      })
+      .catch((error) => {
+        if (toggleRevision.current[key] !== revision) return
+        const latest = getCurrentSettings().intelligence
+        applyFromMain({ intelligence: { features: { ...latest.features, [key]: current.features[key] } } })
+        setSaveError(errMsg(error))
+      })
   }
 
   const setAutomation = (patch: Partial<AutomationSettings>) => {
