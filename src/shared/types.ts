@@ -70,7 +70,7 @@ interface IntelligenceApiInner {
     setKey(key: string): Promise<{ ok: true } | { ok: false; error: string }>
     clearKey(): Promise<void>
     functions(): Promise<AssistantFunctionInfo[]>
-    ask(question: string, today: string): Promise<AskOutcome>
+    ask(question: string, today: string, previousRequest?: import('./assistant').AssistantFollowUp | null): Promise<AskOutcome>
   }
 }
 

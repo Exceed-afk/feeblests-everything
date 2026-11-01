@@ -527,6 +527,7 @@ export const ASSISTANT_SYSTEM_PROMPT =
     'You answer questions about the user\'s personal logbook, savings, trades, habits and tasks. ' +
     'You cannot see any raw data. Reply with ONLY one JSON object, no prose, with function, range, and question fields. ' +
     'Optionally include filters, compare:"previous", or limit (biggest_losses and biggest_wins only); ' +
+    'when a Previous request is included, use it to interpret short follow-ups and never repeat or infer its result. ' +
     'use range kinds today, yesterday, this_week, last_week, this_month, last_month, this_year, all_time, ' +
     'or {"kind":"last_n_days","n":1..1830}, or {"kind":"between","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}. ' +
     'Add a filters object only when useful, copying relevant words from the question without guessing, such as {"filters":{"asset":"XAUUSD"}}. ' +
@@ -540,14 +541,33 @@ export const ASSISTANT_SYSTEM_PROMPT =
     'The range must be a contiguous span of calendar days that answers the question. ' +
     'Do not guess or use the closest function when none fits. Never invent a function name.'
 
-export const ASSISTANT_USER_PROMPT = (question: string, today: string): string =>
-    `Today is ${today}. Question: ${question.trim()}`
+export const assistantPreviousRequestText = (previousRequest: AssistantFollowUp | null): string | null => {
+    if (!previousRequest) return null
+    return JSON.stringify({
+        function: previousRequest.functionName,
+        range: previousRequest.rangeSpec,
+        ...(Object.keys(previousRequest.filters).length > 0 ? { filters: previousRequest.filters } : {})
+    })
+}
+
+export const ASSISTANT_USER_PROMPT = (
+    question: string,
+    today: string,
+    previousRequest: AssistantFollowUp | null = null
+): string =>
+    `Today is ${today}.${previousRequest ? ` Previous request: ${assistantPreviousRequestText(previousRequest)}.` : ''} Question: ${question.trim()}`
 
 // ---------- parsing the reply (the model's ONE function call) ----------
 
 export type AssistantCall =
     | { kind: 'function'; functionName: string; rangeSpec: RangeSpec; filters: AssistantFilters; compare: 'previous' | null; limit?: number; question: string }
     | { kind: 'none' }
+
+export interface AssistantFollowUp {
+    functionName: string
+    rangeSpec: RangeSpec
+    filters: AssistantFilters
+}
 
 export type RangeSpec =
     | { kind: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_year' | 'all_time' }
@@ -582,6 +602,22 @@ function parseRangeSpec(value: unknown): RangeSpec | null {
             : null
     }
     return { kind: range.kind as Exclude<RangeSpec['kind'], 'last_n_days' | 'between'> }
+}
+
+export function normalizeAssistantFollowUp(value: unknown): AssistantFollowUp | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const previous = value as Record<string, unknown>
+    if (typeof previous.functionName !== 'string' || !functionByName(previous.functionName)) return null
+    const rangeSpec = parseRangeSpec(previous.rangeSpec)
+    if (!rangeSpec || !previous.filters || typeof previous.filters !== 'object' || Array.isArray(previous.filters)) return null
+    const filters: AssistantFilters = {}
+    for (const [name, filter] of Object.entries(previous.filters)) {
+        if (!FILTER_NAMES.includes(name as FilterName) || typeof filter !== 'string' || !filter.trim() || filter.length > MAX_ASSISTANT_QUESTION_LENGTH) {
+            return null
+        }
+        filters[name as FilterName] = filter.trim()
+    }
+    return { functionName: previous.functionName, rangeSpec, filters }
 }
 
 export function parseAssistantReply(raw: string): { ok: true; call: AssistantCall } | { ok: false; error: string } {
@@ -719,6 +755,7 @@ interface AssistantDisclosureBase {
     question: string // exactly what was sent as the user turn
     systemPromptChars: number // size of the fixed instructions block
     userPromptChars: number // size of the user turn
+    previousRequestSent: string | null
 }
 
 export type AssistantDisclosure =

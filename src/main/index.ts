@@ -263,7 +263,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('assistant:setKey', (_e, key: string) => storeKey(String(key ?? '')))
   ipcMain.handle('assistant:clearKey', () => { clearKey() })
   ipcMain.handle('assistant:functions', () => assistantFunctionList())
-  ipcMain.handle('assistant:ask', (_e, question: string, today: string) => askAssistant(getDb(), String(question ?? ''), today))
+  ipcMain.handle('assistant:ask', (_e, question: string, today: string, previousRequest: unknown) =>
+    askAssistant(getDb(), String(question ?? ''), today, previousRequest))
 
   ipcMain.handle('backup:applyImport', async (): Promise<ImportResult> => {
     if (!pendingImport) throw new Error('Choose a backup file first.')

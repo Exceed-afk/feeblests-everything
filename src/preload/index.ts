@@ -131,7 +131,7 @@ const api: EverythingApi = {
       setKey: (key) => ipcRenderer.invoke('assistant:setKey', key),
       clearKey: () => ipcRenderer.invoke('assistant:clearKey'),
       functions: () => ipcRenderer.invoke('assistant:functions'),
-      ask: (question, today) => ipcRenderer.invoke('assistant:ask', question, today)
+      ask: (question, today, previousRequest) => ipcRenderer.invoke('assistant:ask', question, today, previousRequest)
     }
   }
 }

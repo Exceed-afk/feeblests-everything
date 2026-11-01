@@ -285,8 +285,8 @@ function AssistantProviderSection({ features }: {
           <dt className="meta font-medium">What leaves this computer</dt>
           <dd className="mt-1 leading-relaxed">
             {aiProvider === 'off' && <>Nothing. Ever. There is no request to send.</>}
-            {aiProvider === 'local' && <>One short text block per question — your question's words — to <span className="num">{assistant.localUrl}</span>. Loopback only: it cannot point anywhere else. No data rows, no history, no key (none is needed).</>}
-            {aiProvider === 'cloud' && <>The same one text block per question, plus your API key in a header, over https to <span className="num">{assistant.cloudUrl}</span>. Read the provider's privacy policy first. Under every answer the Assistant page shows exactly what was sent.</>}
+            {aiProvider === 'local' && <>One short text block per question — your question's words, and for follow-ups only the previous function, date range and filters — to <span className="num">{assistant.localUrl}</span>. Loopback only: it cannot point anywhere else. No data rows, previous results, or key (none is needed).</>}
+            {aiProvider === 'cloud' && <>The same text block, plus your API key in a header, over https to <span className="num">{assistant.cloudUrl}</span>. Follow-ups include only the previous function, date range and filters, never its result. Read the provider's privacy policy first. Under every answer the Assistant page shows exactly what was sent.</>}
           </dd>
         </div>
       </dl>
@@ -356,7 +356,7 @@ function AssistantProviderSection({ features }: {
       )}
 
       <p className="mt-3 text-xs text-muted">
-        The assistant is read-only: it can compute one number per question and nothing else. It cannot create, edit or delete anything.
+        The assistant is read-only: it can compute one numeric or list result per question and nothing else. It cannot create, edit or delete anything.
         {features.aiAssistant ? ' The AI-assistant toggle above is on.' : ' Turn on the AI-assistant toggle above to make the Assistant page appear.'}
       </p>
     </section>

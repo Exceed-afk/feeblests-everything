@@ -5,7 +5,7 @@
 // nothing else; no request exists to make.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eraser, MessageCircleQuestion, SendHorizonal } from 'lucide-react'
-import type { AssistantExchange, AssistantFunctionInfo, AssistantKeyStatus, AssistantSettings } from '../../../shared/assistant'
+import type { AssistantExchange, AssistantFollowUp, AssistantFunctionInfo, AssistantKeyStatus, AssistantSettings } from '../../../shared/assistant'
 import { failureText, keyStateLabel, MAX_ASSISTANT_QUESTION_LENGTH } from '../../../shared/assistant'
 void failureText
 import { today } from '../lib/dates'
@@ -18,6 +18,7 @@ export function Assistant() {
   const [settings, setSettings] = useState<AssistantSettings | null>(null)
   const [keyState, setKeyState] = useState<AssistantKeyStatus | null>(null)
   const [exchanges, setExchanges] = useState<AssistantExchange[]>([])
+  const [previousRequest, setPreviousRequest] = useState<AssistantFollowUp | null>(null)
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -44,9 +45,17 @@ export function Assistant() {
     if (busy || !question.trim()) return
     setBusy(true); setError('')
     try {
-      const r = await window.api.intelligence.assistant.ask(question, today())
+      const r = await window.api.intelligence.assistant.ask(question, today(), previousRequest)
       if (r.ok) {
-        setExchanges((all) => [...all, (r as { exchange: AssistantExchange }).exchange])
+        const exchange = (r as { exchange: AssistantExchange }).exchange
+        setExchanges((all) => [...all, exchange])
+        if (exchange.disclosure.kind === 'computed') {
+          setPreviousRequest({
+            functionName: exchange.disclosure.functionName,
+            rangeSpec: exchange.disclosure.rangeSpec,
+            filters: exchange.disclosure.filters.sent
+          })
+        }
         setQuestion('')
       } else {
         setError((r as { error: string }).error)
@@ -60,8 +69,8 @@ export function Assistant() {
       <PageHeader title="Assistant" subtitle={
         settings === null ? 'Loading…'
           : settings.provider === 'off' ? 'Off. Choose a provider on the Intelligence page.'
-            : settings.provider === 'local' ? `Local model at ${settings.localUrl}. Your data stays on this computer.`
-              : `Cloud provider at ${settings.cloudUrl}. Each question is sent over the internet — see under every answer what was sent.`
+            : settings.provider === 'local' ? `Local model at ${settings.localUrl}. Follow-ups include only the previous function, range and filters — never its result.`
+              : `Cloud provider at ${settings.cloudUrl}. Each question and the previous request's function, date range and filters for follow-ups are sent over the internet — see under every answer what was sent.`
       }>
         <MessageCircleQuestion size={20} className="text-accent" />
       </PageHeader>
@@ -124,6 +133,12 @@ export function Assistant() {
                           <dt className="meta">Fixed instructions block</dt>
                           <dd className="mt-0.5">{x.disclosure.systemPromptChars} characters — function names only, no data.</dd>
                         </div>
+                        {x.disclosure.previousRequestSent && (
+                          <div>
+                            <dt className="meta">Previous request sent</dt>
+                            <dd className="mt-0.5 break-all font-mono">{x.disclosure.previousRequestSent}</dd>
+                          </div>
+                        )}
                         {x.disclosure.kind === 'computed' ? (
                           <>
                             <div>
@@ -195,7 +210,7 @@ export function Assistant() {
                         )}
                         <div>
                           <dt className="meta">Rows sent to the provider</dt>
-                          <dd className="mt-0.5">None. Only the text above left this computer; any supported result is worked out locally and never sent back.</dd>
+                          <dd className="mt-0.5">None. Only the user turn and previous request details shown above left this computer; computed results never go back to the provider.</dd>
                         </div>
                       </dl>
                     </details>
@@ -215,7 +230,8 @@ export function Assistant() {
               </form>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button className="btn" onClick={() => { setExchanges([]); setError('') }} disabled={exchanges.length === 0}>
+                <button className="btn" onClick={() => { setExchanges([]); setPreviousRequest(null); setError('') }}
+                  disabled={exchanges.length === 0 && previousRequest === null}>
                   <Eraser size={14} /> Clear history
                 </button>
                 <button className="btn" aria-expanded={showFunctions} onClick={() => setShowFunctions((v) => !v)}>
@@ -227,7 +243,7 @@ export function Assistant() {
               {showFunctions && (
                 <section className="card card-pad mt-3" aria-label="Data functions the model may call">
                   <h2 className="section-title">The only functions it can call</h2>
-                  <p className="mt-1 text-sm text-muted">Read-only, one number each, run on this computer. The model picks one; it never sees rows or queries.</p>
+                  <p className="mt-1 text-sm text-muted">Read-only numeric or list results, run on this computer. The model picks one; it never sees rows or queries.</p>
                   <ul className="mt-2 flex flex-col gap-1 text-sm">
                     {functions.map((f) => (
                       <li key={f.name}>

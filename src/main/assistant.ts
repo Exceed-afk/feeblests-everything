@@ -6,14 +6,14 @@
 // What leaves the computer per question (shown to the user under each answer):
 //   - the fixed instruction block (ASSISTANT_SYSTEM_PROMPT, no user data),
 //   - one user turn: "Today is <date>. Question: <their question>",
-//   - nothing else. No rows, no SQL, no history. The local result never travels
-//     to the provider again.
+//   - nothing else. No rows, no SQL, no conversation history or results. The
+//     local result never travels to the provider again.
 import { safeStorage } from 'electron'
 import type Database from 'better-sqlite3'
 import {
-  ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, DEFAULT_ASSISTANT,
+  ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, assistantPreviousRequestText, DEFAULT_ASSISTANT,
   assistantQuestionError, assistantReady, assistantSettingsPatchError, CANNOT_ANSWER_MESSAGE, checkEndpoint, clampRange, cleanModelText, comparisonChange, failureText,
-  functionByName, listEmptyMessage, matchFilters, normalizeAssistantPatch,
+  functionByName, listEmptyMessage, matchFilters, normalizeAssistantFollowUp, normalizeAssistantPatch,
   parseAssistantReply, previousRange, resolveRange,
   type AssistantExchange, type AssistantFunctionInfo, type AssistantKeyStatus, type AssistantProvider, type AssistantResult, type AssistantRows, type AssistantSettings,
   type AskOutcome
@@ -119,12 +119,12 @@ const loadRows = (db: Database.Database, today: string, range: { from: string; t
 
 type HttpResult = { ok: true; text: string } | { ok: false; kind: 'offline' | 'badkey' | 'timeout' | 'http' | 'model' }
 
-async function callProvider(url: string, key: string | null, model: string, question: string, today: string): Promise<HttpResult> {
+async function callProvider(url: string, key: string | null, model: string, userPrompt: string): Promise<HttpResult> {
   const body = {
     model,
     messages: [
       { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
-      { role: 'user', content: ASSISTANT_USER_PROMPT(question, today) }
+      { role: 'user', content: userPrompt }
     ],
     temperature: 0
   }
@@ -155,7 +155,7 @@ async function callProvider(url: string, key: string | null, model: string, ques
   }
 }
 
-export async function askAssistant(db: Database.Database, question: string, today: string): Promise<AskOutcome> {
+export async function askAssistant(db: Database.Database, question: string, today: string, previousRequestInput?: unknown): Promise<AskOutcome> {
   const settings = assistantSettings()
   const masterOn = ((getSettings().intelligence as { features?: { aiAssistant?: boolean } } | undefined)?.features?.aiAssistant) ?? false
   if (!assistantReady(settings, masterOn)) {
@@ -165,6 +165,13 @@ export async function askAssistant(db: Database.Database, question: string, toda
   const questionError = assistantQuestionError(question)
   if (questionError) return { ok: false, error: questionError }
   if (!isDate(today)) throw new Error('Date must look like 2026-10-25')
+  const previousRequest = previousRequestInput === undefined || previousRequestInput === null
+    ? null
+    : normalizeAssistantFollowUp(previousRequestInput)
+  if (previousRequestInput !== undefined && previousRequestInput !== null && previousRequest === null) {
+    return { ok: false, error: 'The previous request could not be reused. Clear the conversation and try again.' }
+  }
+  const userPrompt = ASSISTANT_USER_PROMPT(question, today, previousRequest)
 
   const endpoint = settings.provider === 'cloud' ? settings.cloudUrl : settings.localUrl
   const endpointCheck = checkEndpoint(endpoint, settings.provider)
@@ -175,14 +182,13 @@ export async function askAssistant(db: Database.Database, question: string, toda
     return { ok: false, error: 'No API key saved yet. Paste it under Intelligence → AI provider (it is stored encrypted, or not at all).' }
   }
 
-  const http = await callProvider(endpoint, key, settings.model, question, today)
+  const http = await callProvider(endpoint, key, settings.model, userPrompt)
   if (!http.ok) return { ok: false, error: failureText(http.kind) }
 
   const cleaned = cleanModelText(http.text)
   const parsed = parseAssistantReply(cleaned.ok ? cleaned.text : http.text)
   if (!parsed.ok) return { ok: false, error: parsed.error }
   if (parsed.call.kind === 'none') {
-    const userPrompt = ASSISTANT_USER_PROMPT(question, today)
     return {
       ok: true,
       exchange: {
@@ -192,7 +198,8 @@ export async function askAssistant(db: Database.Database, question: string, toda
           kind: 'cannot_answer',
           question: userPrompt,
           systemPromptChars: ASSISTANT_SYSTEM_PROMPT.length,
-          userPromptChars: userPrompt.length
+          userPromptChars: userPrompt.length,
+          previousRequestSent: assistantPreviousRequestText(previousRequest)
         },
         at: new Date().toISOString()
       }
@@ -255,9 +262,10 @@ export async function askAssistant(db: Database.Database, question: string, toda
     // Adjustment 3: full disclosure of what was sent and what came back.
     disclosure: {
       kind: 'computed',
-      question: ASSISTANT_USER_PROMPT(question, today),
+      question: userPrompt,
       systemPromptChars: ASSISTANT_SYSTEM_PROMPT.length,
-      userPromptChars: ASSISTANT_USER_PROMPT(question, today).length,
+      userPromptChars: userPrompt.length,
+      previousRequestSent: assistantPreviousRequestText(previousRequest),
       functionName: fn.name,
       rangeSpec,
       range,
