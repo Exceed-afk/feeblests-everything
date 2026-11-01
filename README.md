@@ -275,7 +275,7 @@ All maths lives in the pure module `src/shared/insights.ts` (tested in `tests/in
 
 ## Automations
 Automations are small, predictable helpers — **not** a general rule builder. Each one listens for one thing happening (a tool event), decides from its own toggle and a number, and either **creates a draft** or **shows a message**. All four are off by default, each with its own card on the Intelligence page.
-- **Loss reflection drafts**: a trade closing at a loss bigger than your threshold creates a draft logbook entry with reflection prompts. The entry is tagged `#automation`, its first line says "Created by an automation — safe to delete", and deleting it in the Logbook deletes it like any entry. Drafts remain visible, but do not count as writing in streaks, authored-entry totals, or journal mood statistics.
+- **Loss reflection drafts**: a trade closing at a loss bigger than your threshold creates a draft logbook entry with reflection prompts. This also covers trades entered already closed when their trade date is today or up to three days earlier; older and future-dated trades are ignored. The entry is tagged `#automation`, its first line says "Created by an automation — safe to delete", and deleting it in the Logbook deletes it like any entry. Drafts remain visible, but do not count as writing in streaks, authored-entry totals, or journal mood statistics.
 - **Goal celebrations**: a savings goal reaching its target shows a celebration message and suggests setting a new goal.
 - **Broken streak notes**: a habit streak of 7 or more days breaking shows a gentle note (on the Daily briefing's "From your automations" area).
 - **Stale overdue tasks**: a task overdue for more than N days is surfaced in the Daily briefing.

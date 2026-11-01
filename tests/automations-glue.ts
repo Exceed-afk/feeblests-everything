@@ -17,7 +17,9 @@ function openAutomationDb() {
 }
 
 function fireLoss(db: ReturnType<typeof openAutomationDb>, key = 'trade:1') {
-  return emitAutomation(db, 'trade-closed', key, { tradeId: 1, tradePnl: -60, tradeAsset: 'XAUUSD' })
+  return emitAutomation(db, 'trade-closed', key, {
+    tradeId: 1, tradePnl: -60, tradeAsset: 'XAUUSD', tradeDate: localDate()
+  })
 }
 
 test('the same automation trigger creates only one draft', () => {

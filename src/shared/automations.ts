@@ -10,6 +10,7 @@
 // what the caller records.
 //
 // Dates are "YYYY-MM-DD" text, like everywhere else.
+import { addDays } from './habits'
 
 // ---------- events ----------
 // To add a trigger: add one entry here. To add a rule: write it in RULES below,
@@ -27,6 +28,7 @@ export interface AutomationEventData {
   tradeId?: number
   tradePnl?: number
   tradeAsset?: string
+  tradeDate?: string
   goalId?: number
   goalName?: string
   depositAmount?: number
@@ -115,6 +117,8 @@ export function lossReflectionRule(): AutomationRule {
     run: (event, settings) => {
       if (!settings.lossReflection) return []
       if (event.kind !== 'trade-closed') return []
+      const tradeDate = event.data.tradeDate
+      if (!tradeDate || tradeDate > event.date || tradeDate < addDays(event.date, -3)) return []
       const loss = event.data.tradePnl
       if (loss === undefined || loss >= 0 || -loss <= settings.lossThreshold) return []
       const asset = event.data.tradeAsset ?? 'the trade'

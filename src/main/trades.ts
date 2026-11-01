@@ -81,7 +81,13 @@ export function createTrade(db: Database.Database, input: TradeInput): Trade {
     `INSERT INTO trades (date, asset, direction, entry_price, exit_price, quantity, fees, notes, tags, created_at, updated_at)
      VALUES (@date, @asset, @direction, @entry, @exit, @quantity, @fees, @notes, @tags, @now, @now)`
   ).run({ ...t, now })
-  return getTrade(db, Number(info.lastInsertRowid))
+  const trade = getTrade(db, Number(info.lastInsertRowid))
+  if (trade.exitPrice !== null && trade.pnl !== null) {
+    emitAutomation(db, 'trade-closed', `trade:${trade.id}`, {
+      tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset, tradeDate: trade.date
+    })
+  }
+  return trade
 }
 
 export function updateTrade(db: Database.Database, id: number, input: TradeInput): Trade {
@@ -94,7 +100,9 @@ export function updateTrade(db: Database.Database, id: number, input: TradeInput
   const trade = getTrade(db, id)
   // A trade CLOSING (was open, now has an exit) is an automation event.
   if (before && before.exit_price === null && trade.exitPrice !== null && trade.pnl !== null) {
-    emitAutomation(db, 'trade-closed', `trade:${trade.id}`, { tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset })
+    emitAutomation(db, 'trade-closed', `trade:${trade.id}`, {
+      tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset, tradeDate: trade.date
+    })
   }
   return trade
 }

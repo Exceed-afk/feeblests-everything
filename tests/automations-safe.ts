@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { applyMigrations } from '../src/main/migrations'
+import { localDate } from '../src/main/util'
 import { createEntry } from '../src/main/logbook'
 import { createTrade, updateTrade } from '../src/main/trades'
 import { openDatabase } from './sqlite'
@@ -45,7 +46,7 @@ test('closing a trade saves when automation activity cannot be recorded', () => 
     JSON.stringify({ lossReflection: true, lossThreshold: 50 })
   )
   const open = createTrade(db, {
-    date: '2026-10-25', asset: 'XAUUSD', direction: 'long',
+    date: localDate(), asset: 'XAUUSD', direction: 'long',
     entryPrice: 100, exitPrice: null, quantity: 1, fees: 0, notes: '', tags: []
   })
 

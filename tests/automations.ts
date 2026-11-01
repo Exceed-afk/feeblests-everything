@@ -13,7 +13,10 @@ const test = (name: string, fn: () => void) => { fn(); n++; console.log('ok  ', 
 
 const settings = (over: Partial<AutomationSettings> = {}): AutomationSettings => ({ ...DEFAULT_AUTOMATIONS, ...over })
 const ev = (kind: AutomationEvent['kind'], data: AutomationEvent['data'] = {}, date = '2026-10-23'): AutomationEvent =>
-  ({ kind, date, data })
+  ({
+    kind, date,
+    data: kind === 'trade-closed' && data.tradeDate === undefined ? { ...data, tradeDate: date } : data
+  })
 
 const run = (event: AutomationEvent, s: AutomationSettings, overdueTasks?: { id: number; title: string; daysOverdue: number }[]) =>
   runAutomation(event, { settings: s, overdueTasks })
@@ -69,6 +72,15 @@ test('a small loss or a win makes nothing', () => {
   assert.deepEqual(run(ev('trade-closed', { tradePnl: -20, tradeAsset: 'X' }), s), []) // smaller than threshold
   assert.deepEqual(run(ev('trade-closed', { tradePnl: -50, tradeAsset: 'X' }), s), []) // equal, not bigger
   assert.deepEqual(run(TRADE_WIN, s), []) // a win
+})
+
+test('loss reflections require a trade date within the last three days', () => {
+  const s = settings({ lossReflection: true, lossThreshold: 50 })
+  assert.deepEqual(run(ev('trade-closed', { tradePnl: -80, tradeDate: '2026-09-23' }), s), [])
+  assert.deepEqual(run(ev('trade-closed', { tradePnl: -80, tradeDate: '2026-10-24' }), s), [])
+  assert.deepEqual(run({
+    ...TRADE_LOSS, data: { tradeId: 1, tradePnl: -80, tradeAsset: 'XAUUSD' }
+  }, s), [])
 })
 
 test("the threshold is the user's, not a constant", () => {

@@ -513,7 +513,7 @@ sequenceDiagram
 | Savings | `savings_goals`, `savings_transactions` | CRUD + search, balance derived | shared/savings (progress) |
 | Habits | `habits`, `habit_checkins` | CRUD, day-status, logValue, reorder; listens to logbook events (auto-complete) | shared/habits (all rules), main/events.ts |
 | Tasks | `tasks`, `task_subtasks` | CRUD, status, bulk, reorder, recurrence resolution | shared/tasks |
-| Intelligence (automations/insights/assistant) | `automation_events`; **writes into `settings`** (`intelligence`, `automations`, `insightDismissals`, `assistant`, `assistantKeyBlob`) | toggles, activity log, insights build/dismiss, assistant ask | automations emit from logbook/habits writes; shared/insights* |
+| Intelligence (automations/insights/assistant) | `automation_events`; **writes into `settings`** (`intelligence`, `automations`, `insightDismissals`, `assistant`, `assistantKeyBlob`) | toggles, activity log, insights build/dismiss, assistant ask | automations emit from tool writes, including newly closed trades; shared/insights* |
 | Search (main) | none | `runSearch` bundling | logbook/trades/savings search fns, shared/search |
 | Dashboard / Review / Calendar / Briefing / Insights | none (aggregators) | one-request snapshots | **every module's query functions** + shared aggregators (src/shared/dashboard.ts, review.ts, insightsData.ts, calendar.ts) |
 | Settings (core) | `settings` | get/set to everyone | shared/appearance (normalisation) |
