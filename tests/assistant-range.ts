@@ -11,7 +11,7 @@ const test = (name: string, fn: () => void) => { fn(); n++; console.log('ok  ', 
 
 const today = '2026-10-23'
 const rows: AssistantRows = {
-  txs: [], trades: [], tasks: [], entries: [],
+  txs: [], trades: [], tasks: [], completions: [], entries: [],
   habits: [{
     id: 1, name: 'Daily', notes: '', days: [0, 1, 2, 3, 4, 5, 6], archived: false,
     startDate: '2026-10-01', checkins: [],

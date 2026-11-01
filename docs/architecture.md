@@ -332,6 +332,7 @@ Tables are created in `src/main/migrations.ts`; all queries are in the named mod
 | `habits` | habits.ts | `id` | – (single-row reads dominate) | name, days(JSON number[]), archived, start_date, type, target, unit, sort_order, time_of_day, reminder_time, auto_complete_on | Habits |
 | `habit_checkins` | habits.ts | **composite** `(habit_id, date)` | the PK | status ('done'/'skipped'), value (count/duration), created_at | Habits |
 | `tasks` | tasks.ts | `id` | `idx_tasks_due_status`, `idx_tasks_deleted` | title, status, priority, due_date/due_time, position, recurrence_rule(JSON)/recurrence_next, deleted_at, tags(JSON), project | Tasks |
+| `task_completions` | tasks.ts | `id` | `idx_task_completions_completed_at` | task_id (FK), completed_at (each historical occurrence) | Tasks, Assistant, Insights |
 | `task_subtasks` | tasks.ts | `id` | – | task_id (FK CASCADE), title, done, sort_order | Tasks |
 | `automation_events` | automations.ts | `id` | `idx_automation_once(rule,event_key)` unique | rule, event, event_key, label, entry_id | Intelligence automations |
 

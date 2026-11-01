@@ -193,6 +193,7 @@ Tasks live in one SQLite list with views (Today / Upcoming / Overdue / All / Com
 
 ### Recurring tasks: the contract
 A recurring task is a row whose `recurrence` field holds `{ frequency, intervalDays }`. Occurrences are ordinary task rows linked by `parent_task_id`. The rules are also written as a comment at the top of `src/main/tasks.ts`; the one-child rule is enforced by a unique index (migration 7).
+Completed occurrences are retained separately in `task_completions` (migration 14); Assistant and Insights use that history so advancing a recurring task does not erase its earlier completion counts.
 
 ### The task editor
 Title, due date, priority and status are up top; project, tags, notes, checklist and repeat live under a collapsible **Advanced** section (a real button with `aria-expanded`). It opens by itself when the task being edited already has any of those set, and while it is hidden its button shows a one-line summary of what is set, so nothing set is ever hidden. Validation runs from one shared function, `taskInputProblems` in `src/shared/tasks.ts` (tests in `tests/tasks.ts`): it returns one plain "what to fix" message per bad field, the editor shows each next to its field (with `aria-invalid`/`aria-describedby`, focusing the first bad one on a failed save) and the main process throws the first message too, so both sides agree. Past due dates stay allowed — an overdue task is a real state — while impossible dates are refused. The editor follows the other editors' keyboard rules: `Esc` closes, `Ctrl+Enter` saves.

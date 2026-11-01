@@ -13,9 +13,10 @@
 // Dates are "YYYY-MM-DD" text; weekday arithmetic is UTC, like everywhere else.
 import { addDays, habitRateInRange, weekdayOf, WEEKDAY_NAMES } from './habits'
 import { isAutomationEntry } from './automations'
+import { localTaskDay } from './tasks'
 import { round8 } from './math'
 import { MOOD_SCORE } from './types'
-import type { Habit, LogEntry, Mood, SavingsTx, Task, Trade } from './types'
+import type { Habit, LogEntry, Mood, SavingsTx, Task, TaskCompletion, Trade } from './types'
 
 export const MIN_DAYS = 4        // each group of a comparison needs at least this many days
 export const MIN_WEEKS = 4       // the window must span at least this many distinct weeks
@@ -61,6 +62,7 @@ export interface InsightsInput {
   end: string // window end, inclusive
   habits: Habit[]
   tasks: Task[]
+  completions: TaskCompletion[]
   trades: Trade[]
   txs: SavingsTx[]
   entries: LogEntry[]
@@ -81,12 +83,7 @@ export function buildInsightDays(i: InsightsInput): InsightDay[] {
       tradePnl: round8(closed.reduce((a, t) => a + (t.pnl as number), 0)),
       tradeClosed: closed.length,
       savingsNet: round8(byDate(i.txs).reduce((a, t) => a + (t.kind === 'deposit' ? t.amount : -t.amount), 0)),
-      tasksDone: i.tasks.filter((t) => {
-        if (t.status !== 'done' || !t.completedAt) return false
-        const c = new Date(t.completedAt)
-        if (Number.isNaN(c.getTime())) return false
-        return `${c.getFullYear()}-${String(c.getMonth() + 1).padStart(2, '0')}-${String(c.getDate()).padStart(2, '0')}` === d
-      }).length
+      tasksDone: i.completions.filter((completion) => localTaskDay(completion.completedAt) === d).length
     })
   }
   for (const day of days) {

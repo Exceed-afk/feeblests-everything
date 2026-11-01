@@ -36,9 +36,16 @@ const task = (id_: number, completedAt: string | null): Task => ({
   createdAt: '2026-08-01', completedAt, deletedAt: null, dueTime: null, project: null, tags: [], position: id_, recurrenceRule: null, recurrenceNext: null, subtasks: []
 })
 
-const input = (over: Partial<InsightsInput> = {}): InsightsInput => ({
-  today: END, start: START, end: END, habits: [], tasks: [], trades: [], txs: [], entries: [], ...over
-})
+const input = (over: Partial<InsightsInput> = {}): InsightsInput => {
+  const tasks = over.tasks ?? []
+  const completions = over.completions ?? tasks.flatMap((t) =>
+    t.completedAt ? [{ taskId: t.id, completedAt: t.completedAt }] : []
+  )
+  return {
+    today: END, start: START, end: END, habits: [], tasks, trades: [], txs: [], entries: [], ...over,
+    completions
+  }
+}
 
 // Convenience: every day in the window has the habit scheduled and checked (or not) per a mask.
 const fullHabits = (checked: (date: string) => boolean): Habit[] => [habit('All', daysBetween(START, END).filter(checked))]

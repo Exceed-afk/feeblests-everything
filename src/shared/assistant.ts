@@ -15,7 +15,8 @@ import { signedAmount } from './savings'
 import { isAutomationEntry } from './automations'
 import { MOOD_SCORE } from './types'
 import { addDays, habitRateInRange, weekdayOf } from './habits'
-import type { Habit, LogEntry, Mood, SavingsTx, Task, Trade } from './types'
+import { localTaskDay } from './tasks'
+import type { Habit, LogEntry, Mood, SavingsTx, Task, TaskCompletion, Trade } from './types'
 
 // ---------- provider modes ----------
 
@@ -162,6 +163,7 @@ export interface AssistantRows {
     trades: Trade[]
     habits: Habit[]
     tasks: Task[]
+    completions: TaskCompletion[]
     entries: LogEntry[]
 }
 
@@ -201,12 +203,9 @@ const moodScores = (entries: LogEntry[], r: DateRange): number[] =>
     entries.filter((e) => !isAutomationEntry(e) && e.mood !== null && e.mood in MOOD_SCORE && inRange(e.date, r))
         .map((e) => MOOD_SCORE[e.mood as Mood])
 
-const completedOn = (t: Task, r: DateRange): boolean => {
-    if (t.status !== 'done' || !t.completedAt) return false
-    const d = new Date(t.completedAt)
-    if (Number.isNaN(d.getTime())) return false
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    return inRange(iso, r)
+const completedOn = (completion: TaskCompletion, r: DateRange): boolean => {
+    const date = localTaskDay(completion.completedAt)
+    return date !== null && inRange(date, r)
 }
 
 // The table. Adding a function = one entry here; the prompt is built from it automatically.
@@ -235,7 +234,7 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
     {
         name: 'tasks_completed',
         description: 'How many tasks were completed in a date range.',
-        run: (rows, r) => rows.tasks.filter((t) => completedOn(t, r)).length
+        run: (rows, r) => rows.completions.filter((completion) => completedOn(completion, r)).length
     },
     {
         name: 'mood_average',

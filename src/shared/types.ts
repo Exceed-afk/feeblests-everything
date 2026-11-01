@@ -447,6 +447,7 @@ export interface Task {
   recurrenceNext: string | null // next due date resolved from the rule, or null
   subtasks: TaskSubtask[]
 }
+export interface TaskCompletion { taskId: number; completedAt: string }
 export type TaskInput = Pick<Task, 'title' | 'notes' | 'status' | 'priority' | 'dueDate' | 'dueTime' | 'project' | 'tags' | 'recurrenceRule' | 'recurrenceNext'> & {
   subtasks: Pick<TaskSubtask, 'title' | 'done'>[]
 }

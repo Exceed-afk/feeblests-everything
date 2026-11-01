@@ -22,7 +22,7 @@ import { listEntries } from './logbook'
 import { listTrades } from './trades'
 import { listAllTransactions } from './savings'
 import { listHabits } from './habits'
-import { listTasks } from './tasks'
+import { listCompletions, listTasks } from './tasks'
 import { deleteSetting, getSettings, setSetting, getDb } from './db'
 import { isDate } from './util'
 
@@ -105,11 +105,12 @@ export function keyStatus(): AssistantKeyStatus {
 
 // ---------- the rows the chosen function may read ----------
 
-const loadRows = (db: Database.Database, today: string): AssistantRows => ({
+const loadRows = (db: Database.Database, today: string, range: { from: string; to: string }): AssistantRows => ({
   txs: listAllTransactions(db),
   trades: listTrades(db),
   habits: listHabits(db, today).habits,
   tasks: listTasks(db, today),
+  completions: listCompletions(db, range),
   entries: listEntries(db)
 })
 
@@ -187,8 +188,8 @@ export async function askAssistant(db: Database.Database, question: string, toda
 
   // The ONE local, read-only run. Nothing here writes: AssistantRows is built from
   // SELECT-only queries, and fn returns a number.
-  const rows = loadRows(db, today)
   const range = clamped.range
+  const rows = loadRows(db, today, range)
   let result: number
   try {
     result = fn.run(rows, range, today)

@@ -8,7 +8,7 @@ import { listEntries } from './logbook'
 import { listTrades } from './trades'
 import { listAllTransactions } from './savings'
 import { listHabits } from './habits'
-import { listTasks } from './tasks'
+import { listCompletions, listTasks } from './tasks'
 import { getSettings, setSetting } from './db'
 import { isDate } from './util'
 
@@ -27,6 +27,7 @@ export function getInsights(db: Database.Database, today: string): InsightsResul
     end: today,
     habits: listHabits(db, today).habits,
     tasks: listTasks(db, today),
+    completions: listCompletions(db, { from: start, to: today }),
     trades: listTrades(db),
     txs: listAllTransactions(db),
     entries: listEntries(db, { from: start, to: today })

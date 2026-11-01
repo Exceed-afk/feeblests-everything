@@ -36,7 +36,7 @@ const task = (completedAt: string | null): Task => ({
 
 const EVERY = [0, 1, 2, 3, 4, 5, 6]
 const rows = (over: Partial<AssistantRows> = {}): AssistantRows => ({
-  txs: [], trades: [], habits: [], tasks: [], entries: [], ...over
+  txs: [], trades: [], habits: [], tasks: [], completions: [], entries: [], ...over
 })
 const full = (r: DateRange): DateRange => r
 const THIS_WEEK = weekRange(TODAY)
@@ -86,14 +86,14 @@ test('habit_completion_rate ignores archived habits and counts only scheduled da
 })
 test('tasks_completed matches completion timestamps on their local day', () => {
   const f = functionByName('tasks_completed')!
-  const r = f.run(rows({
-    tasks: [
-      task('2026-10-20T10:00:00.000Z'),
-      task('2026-10-21T23:30:00.000-04:00'), // local day 2026-10-21
-      task(null),
-      task('2026-10-01T10:00:00.000Z') // outside the week
-    ]
-  }), THIS_WEEK)
+  const tasks = [
+    task('2026-10-20T10:00:00.000Z'),
+    task('2026-10-21T23:30:00.000-04:00'), // local day 2026-10-21
+    task(null),
+    task('2026-10-01T10:00:00.000Z') // outside the week
+  ]
+  const completions = tasks.flatMap((t) => t.completedAt ? [{ taskId: t.id, completedAt: t.completedAt }] : [])
+  const r = f.run(rows({ tasks, completions }), THIS_WEEK)
   assert.equal(r, 2)
 })
 test('mood_average averages the 1-5 scores in range, 0 when none', () => {

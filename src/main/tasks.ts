@@ -19,7 +19,7 @@ import type Database from 'better-sqlite3'
 import { filterTasks, localTaskDay, nextTaskDate, nextTaskDateAfter, resolveOccurrences, TASK_FIELD_ORDER, taskInputProblems } from '../shared/tasks'
 import { cleanTags, localDate } from './util'
 import { emitAutomation } from './automations'
-import type { Task, TaskInput, TaskStatus } from '../shared/types'
+import type { Task, TaskCompletion, TaskInput, TaskStatus } from '../shared/types'
 
 interface TaskRow extends TaskRowBase {
   due_date: string | null
@@ -90,6 +90,19 @@ export function listCompletedTasks(db: Database.Database, date: string): Task[] 
   return completions.map((row) => toTask({
     ...row, status: 'done', completed_at: row.occurrence_completed_at
   }, subtasks))
+}
+
+export function listCompletions(db: Database.Database, range: { from: string; to: string }): TaskCompletion[] {
+  const rows = db.prepare(`SELECT c.task_id, c.completed_at
+    FROM task_completions c JOIN tasks t ON t.id = c.task_id
+    WHERE t.deleted_at IS NULL
+    ORDER BY c.completed_at, c.id`).all() as { task_id: number; completed_at: string }[]
+  return rows.flatMap((row) => {
+    const date = localTaskDay(row.completed_at)
+    return date !== null && date >= range.from && date <= range.to
+      ? [{ taskId: row.task_id, completedAt: row.completed_at }]
+      : []
+  })
 }
 
 export function listFilteredTasks(db: Database.Database, filter: Parameters<typeof filterTasks>[1], today: string = localDate(), nowTime: string = localTime()): Task[] {
