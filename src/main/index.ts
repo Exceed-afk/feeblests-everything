@@ -6,6 +6,7 @@ import { initDatabase, getSettings, setSetting, dataDir, getDb, safetyCopy } fro
 import { collectBackup, currentCounts, restoreBackup } from './backup'
 import { countsOf, parseBackup, tradesToCsv, type BackupFile } from '../shared/backup'
 import { normalizeSettings, resolveTokens } from '../shared/appearance'
+import { mergeFeatures } from '../shared/intelligence'
 import { MIGRATIONS } from './migrations'
 import { startReminders } from './reminders'
 import { listEntries, listTags, createEntry, updateEntry, deleteEntry } from './logbook'
@@ -30,10 +31,13 @@ import type { AssistantSettings } from '../shared/assistant'
 import { listTasks } from './tasks'
 import type { AutomationSettings } from '../shared/automations'
 import type { CaptureSettings, HabitInput, IntelligenceFeatureToggles, ReviewKind, TaskInput, TaskStatus, TaskFilter, ExportResult, ImportPreview, ImportResult, SavingsGoalInput, SavingsTxInput, LogEntryInput, LogFilter, TradeFilter, TradeInput } from '../shared/types'
-import { DEFAULT_INTELLIGENCE, type IntelligenceSettings } from '../shared/types'
+import { DEFAULT_INTELLIGENCE, DEFAULT_SETTINGS, type IntelligenceSettings } from '../shared/types'
 import { localDate } from './util'
 
 const APP_NAME = "Feeblest's Everything"
+const MAIN_ONLY_SETTINGS = new Set([
+  'intelligence', 'automations', 'insightDismissals', 'assistant', 'assistantKeyBlob', 'dailyCheckState'
+])
 
 let mainWindow: BrowserWindow | null = null
 let quitting = false // set once the app is really quitting, so the hidden capture window may close then
@@ -136,8 +140,16 @@ app.whenReady().then(async () => {
   })
 
   // Each ipcMain.handle is one function the UI may call (see preload/index.ts).
-  ipcMain.handle('settings:getAll', () => getSettings())
+  ipcMain.handle('settings:getAll', () => {
+    const { assistantKeyBlob, ...safeSettings } =
+      getSettings() as ReturnType<typeof getSettings> & { assistantKeyBlob?: unknown }
+    void assistantKeyBlob
+    return safeSettings
+  })
   ipcMain.handle('settings:set', (_e, key: string, value: unknown) => {
+    if (MAIN_ONLY_SETTINGS.has(key) || !Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key)) {
+      throw new Error('That setting cannot be changed from here.')
+    }
     setSetting(key, value)
     if (key === 'theme' && (value === 'dark' || value === 'light' || value === 'system')) nativeTheme.themeSource = value
   })
@@ -241,9 +253,15 @@ app.whenReady().then(async () => {
     const saved = getSettings()
     return { features: saved.intelligence?.features ?? DEFAULT_INTELLIGENCE.features, aiProvider: saved.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider }
   })
-  ipcMain.handle('intelligence:set', (_e, features: Partial<IntelligenceFeatureToggles>) => {
+  ipcMain.handle('intelligence:set', (_e, features: Partial<IntelligenceFeatureToggles>): IntelligenceSettings => {
     const saved = getSettings()
-    setSetting('intelligence', { ...saved.intelligence, features: { ...DEFAULT_INTELLIGENCE.features, ...features }, aiProvider: saved.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider })
+    const next: IntelligenceSettings = {
+      ...saved.intelligence,
+      features: mergeFeatures(saved.intelligence?.features, features),
+      aiProvider: saved.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider
+    }
+    setSetting('intelligence', next)
+    return next
   })
   ipcMain.handle('intelligence:setAiProvider', (_e, provider: 'off' | 'local' | 'cloud') => {
     const saved = getSettings()

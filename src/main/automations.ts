@@ -36,14 +36,14 @@ const toActivity = (r: Row) => ({
 // ---------- settings ----------
 
 export function automationSettings(handle?: Database.Database): AutomationSettings {
-  const saved = (handle ? getSettingsFrom(handle) : getSettings()).intelligence ?? { features: { dailyBriefing: true, automations: false, smartQuickAdd: false, insights: false, aiAssistant: false }, aiProvider: 'off' as const }
-  const a = (saved as { automations?: Partial<AutomationSettings> }).automations
+  const saved = (handle ? getSettingsFrom(handle) : getSettings()) as ReturnType<typeof getSettings> & { automations?: Partial<AutomationSettings> }
+  const a = saved.automations
   return { ...DEFAULT_AUTOMATIONS, ...a }
 }
 
 export function setAutomationSettings(patch: Partial<AutomationSettings>): AutomationSettings {
   const next = { ...automationSettings(), ...patch }
-  setSetting('intelligence', { ...getSettings().intelligence, automations: next })
+  setSetting('automations', next)
   return next
 }
 

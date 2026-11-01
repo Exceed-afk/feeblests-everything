@@ -51,7 +51,7 @@ export const DEFAULT_SETTINGS: Settings = {
 // the main process answers it (see src/main/index.ts).
 interface IntelligenceApiInner {
   get(): Promise<IntelligenceSettings>
-  set(features: Partial<IntelligenceFeatureToggles>): Promise<void>
+  set(features: Partial<IntelligenceFeatureToggles>): Promise<IntelligenceSettings>
   setAiProvider(provider: 'off' | 'local' | 'cloud'): Promise<void>
   automations: {
     get(): Promise<AutomationSettings>
@@ -598,7 +598,6 @@ import type { AutomationSettings, AutomationActivity } from './automations'
 export interface IntelligenceSettings {
   features: IntelligenceFeatureToggles
   aiProvider: 'off' | 'local' | 'cloud' // built in step 6
-  automations?: AutomationSettings // step 3: per-rule toggles
 }
 
 export type { AutomationSettings, AutomationActivity }

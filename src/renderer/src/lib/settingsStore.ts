@@ -35,6 +35,10 @@ export async function loadSettings(): Promise<void> {
   setTagColors(saved.tagColors)
 }
 
+export function applyFromMain(patch: Partial<Settings>): void {
+  set(normalizeSettings({ ...current, ...patch }))
+}
+
 // Dragging a colour picker fires many changes a second: the screen follows each one, the database gets the last one.
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 function persist(key: keyof Settings, value: Settings[keyof Settings]): void {

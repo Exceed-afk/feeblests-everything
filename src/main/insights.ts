@@ -1,7 +1,6 @@
 // Insights: fetches the window's rows and hands them to the pure statistics
-// module (src/shared/insights.ts). Nothing new is stored; dismissed insight ids
-// live in the settings under `intelligence.dismissedInsights` so a dismissal is
-// remembered but stays visible in the settings if the user wants it back.
+// module (src/shared/insights.ts). Dismissed insight ids live in their own
+// settings key so they are not coupled to the Intelligence feature toggles.
 import type Database from 'better-sqlite3'
 import { buildInsights, MIN_WEEKS } from '../shared/insights'
 import type { InsightsResult } from '../shared/insights'
@@ -32,8 +31,8 @@ export function getInsights(db: Database.Database, today: string): InsightsResul
     txs: listAllTransactions(db),
     entries: listEntries(db, { from: start, to: today })
   })
-  const saved = getSettings().intelligence as { dismissedInsights?: string[] } | undefined
-  return { ...result, dismissed: saved?.dismissedInsights ?? [] }
+  const saved = getSettings() as ReturnType<typeof getSettings> & { insightDismissals?: string[] }
+  return { ...result, dismissed: saved.insightDismissals ?? [] }
 }
 
 // Remember (or forget) a dismissed insight id. Only ids the engine actually
@@ -42,14 +41,11 @@ export function setInsightDismissed(db: Database.Database, id: string, dismissed
   void db
   const KNOWN = ['savings-by-habits', 'trades-by-habits', 'mood-by-tasks', 'mood-vs-tasks']
   if (!KNOWN.includes(id)) throw new Error('Unknown insight id')
-  const savedRaw = getSettings().intelligence
-  const saved = (savedRaw === undefined || savedRaw === null
-    ? {}
-    : JSON.parse(JSON.stringify(savedRaw))) as Record<string, unknown>
-  const current = new Set((saved.dismissedInsights as string[] | undefined) ?? [])
+  const saved = getSettings() as ReturnType<typeof getSettings> & { insightDismissals?: string[] }
+  const current = new Set(saved.insightDismissals ?? [])
   if (dismissed) current.add(id)
   else current.delete(id)
-  setSetting('intelligence', { ...saved, dismissedInsights: [...current] })
+  setSetting('insightDismissals', [...current])
   return [...current]
 }
 

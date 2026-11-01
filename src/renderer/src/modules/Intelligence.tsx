@@ -3,10 +3,10 @@ import { Brain, Trash2, Zap } from 'lucide-react'
 import { DEFAULT_INTELLIGENCE, type IntelligenceFeatureToggles, type IntelligenceSettings } from '../../../shared/types'
 import { DEFAULT_AUTOMATIONS, type AutomationSettings, type AutomationActivity } from '../../../shared/automations'
 import { CLOUD_CONFIRM_PHRASE, type AssistantSettings } from '../../../shared/assistant'
+import { errMsg } from '../lib/errors'
 
 const PLATFORM = typeof process !== 'undefined' ? process.platform : 'unknown'
-import { useSettings } from '../lib/settingsStore'
-import { updateSettings } from '../lib/settingsStore'
+import { applyFromMain, getCurrentSettings, useSettings } from '../lib/settingsStore'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
 
@@ -51,6 +51,7 @@ export function Intelligence() {
   const features = s.intelligence?.features ?? DEFAULT_INTELLIGENCE.features
   const [automations, setAutomations] = useState<AutomationSettings>(DEFAULT_AUTOMATIONS)
   const [activity, setActivity] = useState<AutomationActivity[]>([])
+  const [saveError, setSaveError] = useState('')
 
   const refreshAutomation = () => {
     window.api.intelligence.automations.get().then(setAutomations).catch(() => undefined)
@@ -59,14 +60,10 @@ export function Intelligence() {
   useEffect(() => { refreshAutomation() }, [])
 
   const toggle = (key: keyof IntelligenceFeatureToggles) => {
-    updateSettings({
-      intelligence: {
-        ...DEFAULT_INTELLIGENCE,
-        features: { ...features, [key]: !features[key] },
-        aiProvider: s.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider,
-        automations: { ...DEFAULT_AUTOMATIONS, ...s.intelligence?.automations }
-      }
-    })
+    setSaveError('')
+    void window.api.intelligence.set({ [key]: !features[key] })
+      .then((intelligence) => applyFromMain({ intelligence }))
+      .catch((error) => setSaveError(errMsg(error)))
   }
 
   const setAutomation = (patch: Partial<AutomationSettings>) => {
@@ -77,14 +74,12 @@ export function Intelligence() {
   const aiProvider = s.intelligence?.aiProvider ?? DEFAULT_INTELLIGENCE.aiProvider
 
   const setAiProvider = (provider: IntelligenceSettings['aiProvider']) => {
-    updateSettings({
-      intelligence: {
-        ...DEFAULT_INTELLIGENCE,
-        features,
-        aiProvider: provider,
-        automations: { ...DEFAULT_AUTOMATIONS, ...s.intelligence?.automations }
-      }
-    })
+    setSaveError('')
+    void window.api.intelligence.setAiProvider(provider)
+      .then(() => applyFromMain({
+        intelligence: { ...getCurrentSettings().intelligence, aiProvider: provider }
+      }))
+      .catch((error) => setSaveError(errMsg(error)))
   }
 
   // Group features: everything except AI assistant comes first, then the AI section.
@@ -96,6 +91,8 @@ export function Intelligence() {
       <PageHeader title="Intelligence" subtitle="Turn individual features on or off. Everything runs on your computer.">
         <Brain size={20} className="text-accent" />
       </PageHeader>
+
+      {saveError && <p role="alert" className="text-sm text-neg">{saveError}</p>}
 
       <div className="space-y-5">
         {/* ---- Feature toggles ---- */}

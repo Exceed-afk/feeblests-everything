@@ -263,7 +263,7 @@ All maths lives in the pure module `src/shared/insights.ts` (tested in `tests/in
 
 **Honesty rules**: a comparison only appears when each side has ≥ `MIN_DAYS` (4) days; the window must span ≥ `MIN_WEEKS` (4) weeks; correlations need ≥ `MIN_MOODS` (4) joint days and non-zero variance; a difference under `SAME` (0.25) is reported as "about the same". Wording is descriptive ("was higher on", "might be a pattern") and never causal. Under every card sits the detail line: sample sizes and the raw averages (or n and r). When data is short, the page says exactly what is missing instead of guessing.
 
-**Dismissals**: the ✕ on a card remembers the id in `intelligence.dismissedInsights`, so it stays gone. The Dashboard card and the Review page's "Top insights" block (three strongest cards) honour the same list and the same toggle.
+**Dismissals**: the ✕ on a card remembers the id in the main-owned `insightDismissals` setting, so it stays gone. The Dashboard card and the Review page's "Top insights" block (three strongest cards) honour the same list and the same toggle.
 
 ### How to add a new insight
 1. In `src/shared/insights.ts`, extend `InsightDay` if you need a new per-day number, and fill it in `buildInsightDays`.
@@ -280,6 +280,7 @@ Automations are small, predictable helpers — **not** a general rule builder. E
 - **Stale overdue tasks**: a task overdue for more than N days is surfaced in the Daily briefing.
 - **Transparency**: the Intelligence page's **Automation activity** list shows every action with its time, rule and — when one was made — a link straight to the entry. Rows can be deleted one by one or cleared; deleting a row never touches the entry it may have created.
 - **Safety**: rules can only create or show. The DB layer runs every action through `guardAction`, which drops anything else; there is no UPDATE or DELETE path an automation can reach. Loop prevention is three layers: rules never emit events; entries an automation made do not re-trigger `journal-entry-saved`; and `automation_events` has a unique `(rule, event_key)` row per trigger, so the same event can never fire a rule twice.
+- Intelligence feature toggles, automation rules, and insight dismissals are stored under separate settings keys and are written by the main process, so changing one cannot overwrite another.
 - Automation failures are logged and skipped; they cannot turn a successfully saved entry, trade, savings, task, or habit change into an apparent save failure.
 - **Where things live**: the engine and all four rules are pure functions in `src/shared/automations.ts` (covered by `tests/automations.ts`; `tests/automations-safe.ts` verifies save isolation when automation fails). `src/main/automations.ts` receives events, dedups them in the `automation_events` table (migration 8) and carries out actions. Tools emit events in one line each (see `updateTrade` in `src/main/trades.ts`, `addTransaction` in `savings.ts`, `setCheckin` in `habits.ts`, `setTaskStatus` in `tasks.ts`, `createEntry` in `logbook.ts`). The Daily briefing shows the automation trail under "From your automations".
 

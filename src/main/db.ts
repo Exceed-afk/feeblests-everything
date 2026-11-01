@@ -22,6 +22,7 @@ export async function initDatabase(): Promise<void> {
   db.pragma('foreign_keys = ON')
   try {
     applyMigrations(db)
+    migrateSettingsKeys(db)
   } catch (e) {
     console.error('Migration failed, starting with fresh schema:', e)
     // If migrations fail, we still need a valid database.
@@ -29,6 +30,35 @@ export async function initDatabase(): Promise<void> {
     // newer features may not be available until migrations are fixed.
   }
   await dailyBackup(dir)
+}
+
+export function migrateSettingsKeys(handle: Database.Database): void {
+  const row = handle.prepare("SELECT value FROM settings WHERE key = 'intelligence'").get() as { value: string } | undefined
+  if (!row) return
+
+  const parsed: unknown = JSON.parse(row.value)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('The saved intelligence settings are not an object.')
+  }
+  const intelligence = parsed as Record<string, unknown>
+  const hasAutomations = Object.prototype.hasOwnProperty.call(intelligence, 'automations')
+  const hasDismissals = Object.prototype.hasOwnProperty.call(intelligence, 'dismissedInsights')
+  if (!hasAutomations && !hasDismissals) return
+
+  const automationsExist = Boolean(handle.prepare("SELECT 1 FROM settings WHERE key = 'automations'").get())
+  const dismissalsExist = Boolean(handle.prepare("SELECT 1 FROM settings WHERE key = 'insightDismissals'").get())
+  const save = handle.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  )
+
+  handle.transaction(() => {
+    if (hasAutomations && !automationsExist) save.run('automations', JSON.stringify(intelligence.automations))
+    if (hasDismissals && !dismissalsExist) save.run('insightDismissals', JSON.stringify(intelligence.dismissedInsights))
+    const next = { ...intelligence }
+    delete next.automations
+    delete next.dismissedInsights
+    save.run('intelligence', JSON.stringify(next))
+  })()
 }
 
 // One backup copy per day, keeping the newest 14, in data/backups.

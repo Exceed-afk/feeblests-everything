@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Automation failures are logged and skipped so they cannot make an already-saved Logbook entry, trade, savings, task, or habit change appear to fail
+- Intelligence feature changes now merge in the main process; automation settings and insight dismissals move to independent settings keys without losing their saved values
 - Fixed floating-point rounding in fmtPnl using round8
 - Fixed fmtAmount to strip sign for consistent locale formatting
 - Fixed rate30 null display showing '0% scheduled' when due===0

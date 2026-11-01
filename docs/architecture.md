@@ -521,6 +521,7 @@ sequenceDiagram
 
 **Cross-boundary call-outs (as-is in the code):**
 - `src/main/automations.ts` catches and logs failures from automation settings, rules, or activity writes. Each event emitter can therefore fail independently without turning a completed Logbook, trade, savings, task, or habit save into an apparent failure.
+- `settings:set` accepts only `DEFAULT_SETTINGS` keys and rejects main-owned settings; `settings:getAll` excludes the encrypted assistant key. Intelligence features, automations, and insight dismissals are stored separately and written by the main process.
 - `src/main/insights.ts` stores insight dismissals *inside* the core `settings.intelligence` value — the settings table is shared real estate; a second writer could clobber it (merges are done read-modify-write, safe today, fragile at scale).
 - `src/main/reminders.ts` imports `src/main/habits.ts` functions — a main-process module reaching into another module is fine by design (both own their tables), but the habit rule it depends on (`getDayStatus`) is deliberately in `src/shared/habits.ts` so both windows of rendering agree.
 - `src/main/dashboard.ts` imports almost every module file. It is the one intentional "top" of the dependency graph; nothing else should import *it*.
@@ -565,9 +566,8 @@ Honest list from reading the code (ranked by severity):
 3. **Duplicate computation risk on `habits:list`.** `listHabits` reads *all* check-in rows and recomputes up to 10 years of day-by-day stats for *every* habit on every request (walks in `src/shared/habits.ts`). It's fine for hundreds of habits, but the Tab complete/Search/calendar calls also hit it (Calendar/Capture/palette call `habits:list`). Small fix if it ever grows: compute stats lazily per habit requested, or cache `completionsOf` per db handle.
 4. **Settings debounce can lose a change in a crash window.** `settingsStore.ts` `persist()` waits 200 ms before `settings:set`; app closed within that window keeps the old value on disk (screen shows the new one). Small fix: flush pending settings on `beforeunload`/capture window close.
 5. **Some `window.api.*` calls have no `.catch`.** Most pages wrap their fetches in try/catch (for example `src/renderer/src/modules/Calendar.tsx` lines 62–64), but a few load paths can produce unhandled rejections — e.g. `src/renderer/src/modules/GoalDetail.tsx` line ~35 (`window.api.savings.listTransactions(...).then(setTxs)` with no rejection handler). Small fix: one tiny `safe(fn, onError)` wrapper in `src/renderer/src/lib/` and use it everywhere.
-6. **`settings.intelligence` is written from several modules** (index.ts, automations.ts, insights.ts) with read-modify-write merges. Safe today because writes are serialisable through the single process, but a future second process or a missed merge silently drops a toggle. Small fix: route every `intelligence` write through one function (there already is one pattern: `setAutomationSettings`) and have everyone else use it.
-7. **Insights `dismissedInsights` list grows without bound** in the settings JSON. Harmless for years; cap at ~50 with oldest-drop if you care.
-8. **Window bounds are not persisted** (see Not built yet) — deliberate absence, but users usually expect it on desktop apps.
+6. **Insights `dismissedInsights` list grows without bound** in the settings JSON. Harmless for years; cap at ~50 with oldest-drop if you care.
+7. **Window bounds are not persisted** (see Not built yet) — deliberate absence, but users usually expect it on desktop apps.
 
 ---
 

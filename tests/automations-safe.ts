@@ -41,8 +41,8 @@ test('a Logbook entry saves when the automation activity table is missing', () =
 
 test('closing a trade saves when automation activity cannot be recorded', () => {
   const db = freshDb()
-  db.prepare("INSERT INTO settings (key, value) VALUES ('intelligence', ?)").run(
-    JSON.stringify({ automations: { lossReflection: true, lossThreshold: 50 } })
+  db.prepare("INSERT INTO settings (key, value) VALUES ('automations', ?)").run(
+    JSON.stringify({ lossReflection: true, lossThreshold: 50 })
   )
   const open = createTrade(db, {
     date: '2026-10-25', asset: 'XAUUSD', direction: 'long',
