@@ -12,6 +12,7 @@
 //  - Local mode may only point at loopback; cloud mode must be https (loopback exempt).
 import { round8 } from './math'
 import { signedAmount } from './savings'
+import { isAutomationEntry } from './automations'
 import { MOOD_SCORE } from './types'
 import { addDays, weekdayOf } from './habits'
 import type { Habit, LogEntry, Mood, SavingsTx, Task, Trade } from './types'
@@ -175,7 +176,7 @@ export interface AssistantFunctionDef {
 const inRange = (date: string, r: DateRange): boolean => date >= r.from && date <= r.to
 
 const moodScores = (entries: LogEntry[], r: DateRange): number[] =>
-    entries.filter((e) => e.mood !== null && e.mood in MOOD_SCORE && inRange(e.date, r))
+    entries.filter((e) => !isAutomationEntry(e) && e.mood !== null && e.mood in MOOD_SCORE && inRange(e.date, r))
         .map((e) => MOOD_SCORE[e.mood as Mood])
 
 // Habit scheduled days in the range: iterate the RANGE's days (not just the check-ins),
@@ -241,7 +242,7 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
     {
         name: 'journal_entries',
         description: 'How many journal entries were written in a date range.',
-        run: (rows, r) => rows.entries.filter((e) => inRange(e.date, r)).length
+        run: (rows, r) => rows.entries.filter((e) => !isAutomationEntry(e) && inRange(e.date, r)).length
     }
 ]
 

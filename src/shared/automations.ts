@@ -101,6 +101,10 @@ export interface AutomationRule {
 
 // The LABEL every automation-made entry carries, so the user can see and search it.
 export const AUTOMATION_TAG = 'automation'
+export const AUTOMATION_TAG_CLEAN = AUTOMATION_TAG.trim().toLowerCase().replace(/^#+/, '')
+
+export const isAutomationEntry = (entry: { tags: string[] }): boolean =>
+  entry.tags.includes(AUTOMATION_TAG_CLEAN)
 
 export function lossReflectionRule(): AutomationRule {
   return {

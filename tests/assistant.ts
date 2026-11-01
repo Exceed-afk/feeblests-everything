@@ -101,9 +101,19 @@ test('mood_average averages the 1-5 scores in range, 0 when none', () => {
   assert.equal(f.run(rows({ entries: [entry('2026-10-20', 'good'), entry('2026-10-21', 'great')] }), LAST_30), 4.5)
   assert.equal(f.run(rows(), LAST_30), 0)
 })
+test('mood_average ignores automation drafts', () => {
+  const f = functionByName('mood_average')!
+  const draft = { ...entry('2026-10-20', 'rough'), tags: ['automation'] }
+  assert.equal(f.run(rows({ entries: [draft, entry('2026-10-20', 'good')] }), LAST_30), 4)
+})
 test('journal_entries counts entries in range', () => {
   const f = functionByName('journal_entries')!
   assert.equal(f.run(rows({ entries: [entry('2026-10-20', null), entry('2026-10-21', null), entry('2026-09-01', null)] }), LAST_30), 2)
+})
+test('journal_entries ignores automation drafts', () => {
+  const f = functionByName('journal_entries')!
+  const draft = { ...entry('2026-10-20', null), tags: ['automation'] }
+  assert.equal(f.run(rows({ entries: [draft, entry('2026-10-20', null)] }), LAST_30), 1)
 })
 test('every function is read-only by shape: rows in, number out', () => {
   for (const f of ASSISTANT_FUNCTIONS) {

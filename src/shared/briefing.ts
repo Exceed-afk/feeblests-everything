@@ -4,6 +4,7 @@
 // Date parsing other than through the UTC helpers below, so time zones cannot shift a day.
 // Nothing here is stored, and nothing touches the network.
 import { round8 } from './math'
+import { isAutomationEntry } from './automations'
 import { computeHabitStats, isScheduled, scheduleLabel } from './habits'
 import { progressPercent } from './savings'
 import { prevDay } from './dashboard'
@@ -157,14 +158,15 @@ export function tradesToday(trades: Trade[], today: string): BriefingTrades | nu
 
 export function journalToday(entries: LogEntry[], today: string): BriefingJournal | null {
   const yesterday = prevDay(today)
-  const yesterdayEntries = entries.filter((e) => e.date === yesterday && e.mood !== null && e.mood in MOOD_SCORE)
+  const written = entries.filter((e) => !isAutomationEntry(e))
+  const yesterdayEntries = written.filter((e) => e.date === yesterday && e.mood !== null && e.mood in MOOD_SCORE)
   let yesterdayMood: BriefingJournal['yesterdayMood'] = null
   if (yesterdayEntries.length > 0) {
     const average = yesterdayEntries.reduce((sum, e) => sum + MOOD_SCORE[e.mood as Mood], 0) / yesterdayEntries.length
     yesterdayMood = { mood: moodNear(round8(average)), average: round8(average), date: yesterday }
   }
-  const written = entries.filter((e) => e.date <= today).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
-  const last = written[0]
+  const latest = written.filter((e) => e.date <= today).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+  const last = latest[0]
   const lastEntry = last ? { id: last.id, title: last.title, date: last.date, mood: last.mood } : null
   if (yesterdayMood === null && lastEntry === null) return null
   return { yesterdayMood, lastEntry }

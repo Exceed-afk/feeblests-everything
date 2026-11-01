@@ -3,6 +3,7 @@
 // Weeks run Monday to Sunday, like the Habits page and the Review. Dates are "YYYY-MM-DD" text and all the arithmetic
 // is on the calendar date itself, so time zones and daylight saving cannot move a day.
 import { addDays, isScheduled, weekdayOf, WEEKDAY_NAMES } from './habits'
+import { isAutomationEntry } from './automations'
 import { round8 } from './math'
 import { MOOD_SCORE } from './review'
 import { signedAmount } from './savings'
@@ -114,7 +115,8 @@ export function buildCalendar(i: CalendarInput): CalendarData {
   const days: CalendarDay[] = []
   for (let date = grid.start; date <= grid.end; date = addDays(date, 1)) {
     const entries = (entriesBy.get(date) ?? []).sort((a, b) => b.id - a.id)
-    const scores = entries.filter((e) => e.mood !== null && e.mood in MOOD_SCORE).map((e) => MOOD_SCORE[e.mood as Mood])
+    const writtenEntries = entries.filter((e) => !isAutomationEntry(e))
+    const scores = writtenEntries.filter((e) => e.mood !== null && e.mood in MOOD_SCORE).map((e) => MOOD_SCORE[e.mood as Mood])
     const moodAverage = scores.length ? mean(scores) : null
     const trades = (tradesBy.get(date) ?? []).sort((a, b) => a.id - b.id)
     const closed = trades.filter((t) => t.pnl !== null)
@@ -145,11 +147,11 @@ function summarize(days: CalendarDay[]): CalendarSummary {
   const scores: number[] = []
   for (const d of days) {
     done += d.habits.done; missed += d.habits.missed
-    for (const e of d.entries) if (e.mood !== null && e.mood in MOOD_SCORE) scores.push(MOOD_SCORE[e.mood])
+    for (const e of d.entries) if (!isAutomationEntry(e) && e.mood !== null && e.mood in MOOD_SCORE) scores.push(MOOD_SCORE[e.mood])
   }
   return {
-    entries: days.reduce((a, d) => a + d.entries.length, 0),
-    daysWritten: days.filter((d) => d.entries.length > 0).length,
+    entries: days.reduce((a, d) => a + d.entries.filter((e) => !isAutomationEntry(e)).length, 0),
+    daysWritten: days.filter((d) => d.entries.some((e) => !isAutomationEntry(e))).length,
     closed: days.reduce((a, d) => a + d.closed, 0),
     open: days.reduce((a, d) => a + d.open, 0),
     pnl: round8(days.reduce((a, d) => a + d.pnl, 0)),

@@ -7,6 +7,7 @@
 import { addDays, isScheduled, weekdayOf, WEEKDAY_NAMES } from './habits'
 import { shortDate } from './design'
 import { round8 } from './math'
+import { isAutomationEntry } from './automations'
 import { signedAmount } from './savings'
 import { computeStats } from './trades'
 import { taskReview } from './tasks'
@@ -224,7 +225,7 @@ const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length
 
 function moodSection(entries: LogEntry[], range: PeriodRange, prev: PeriodRange, days: string[]): ReviewMood {
   const withMood = (from: string, to: string) =>
-    entries.filter((e) => e.mood !== null && e.mood in MOOD_SCORE && inRange(e.date, from, to))
+    entries.filter((e) => !isAutomationEntry(e) && e.mood !== null && e.mood in MOOD_SCORE && inRange(e.date, from, to))
   const mine = withMood(range.start, range.end)
   const before = withMood(prev.start, prev.end)
   const counts = Object.fromEntries(MOODS.map((m) => [m, 0])) as Record<Mood, number>
@@ -261,7 +262,7 @@ const isReflection = (e: LogEntry): boolean => e.tags.includes(REVIEW_TAG)
 
 function journalSection(entries: LogEntry[], range: PeriodRange, title: string): ReviewJournal {
   const mine = entries
-    .filter((e) => !isReflection(e) && inRange(e.date, range.start, range.end))
+    .filter((e) => !isAutomationEntry(e) && !isReflection(e) && inRange(e.date, range.start, range.end))
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
   return {
     entries: mine,

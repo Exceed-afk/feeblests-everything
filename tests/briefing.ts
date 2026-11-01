@@ -332,6 +332,15 @@ test('last entry is the newest entry up to today', () => {
     { title: 'Wednesday', mood: 'rough', date: YESTERDAY })
 })
 
+test('automation drafts do not replace the last written journal entry or mood', () => {
+  reset()
+  const draft = { ...entry(TODAY, 'rough', 'Automation draft'), tags: ['automation'] }
+  const b = briefing({ entries: [entry(YESTERDAY, 'good', 'Written entry'), draft] })
+  assert.ok(b.journal !== null)
+  assert.equal(b.journal!.lastEntry!.title, 'Written entry')
+  assert.equal(b.journal!.yesterdayMood!.mood, 'good')
+})
+
 test('journal is null when there are no entries at all', () => {
   reset()
   assert.equal(briefing().journal, null)

@@ -522,6 +522,7 @@ sequenceDiagram
 **Cross-boundary call-outs (as-is in the code):**
 - `src/main/automations.ts` catches and logs failures from automation settings, rules, or activity writes. Each event emitter can therefore fail independently without turning a completed Logbook, trade, savings, task, or habit save into an apparent failure.
 - Automation activity uses a transactional claim-before-action flow; its unique event key remains durable when a row is hidden. Draft dates use the machine's local calendar date.
+- The normalized `automation` tag is the shared test for automation-made entries. Drafts remain visible in entry lists but are excluded from authored writing totals/streaks and journal mood statistics.
 - `settings:set` accepts only `DEFAULT_SETTINGS` keys and rejects main-owned settings; `settings:getAll` excludes the encrypted assistant key. Intelligence features, automations, and insight dismissals are stored separately and written by the main process.
 - `assistantKeyBlob` is deleted when the user removes a key. `assistant:keyStatus` reports whether a saved blob can be read on this computer without returning the key itself.
 - Assistant settings patches keep only known, length-limited values; a cloud URL change clears confirmation. Requests refuse redirects and limit questions to 500 characters. JSON backup restores reset the provider and cloud confirmation, retaining only a valid model name and local URL while dropping imported key blobs and legacy provider values.

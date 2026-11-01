@@ -12,6 +12,7 @@
 //
 // Dates are "YYYY-MM-DD" text; weekday arithmetic is UTC, like everywhere else.
 import { addDays, weekdayOf, WEEKDAY_NAMES } from './habits'
+import { isAutomationEntry } from './automations'
 import { round8 } from './math'
 import { MOOD_SCORE } from './types'
 import type { Habit, LogEntry, Mood, SavingsTx, Task, Trade } from './types'
@@ -71,7 +72,7 @@ export function buildInsightDays(i: InsightsInput): InsightDay[] {
     const byDate = <T extends { date: string }>(rows: T[]): T[] => rows.filter((r) => r.date === d)
     const closed = byDate(i.trades).filter((t) => t.pnl !== null)
     const entries = byDate(i.entries)
-    const moods = entries.filter((e) => e.mood !== null && e.mood in MOOD_SCORE).map((e) => MOOD_SCORE[e.mood as Mood])
+    const moods = entries.filter((e) => !isAutomationEntry(e) && e.mood !== null && e.mood in MOOD_SCORE).map((e) => MOOD_SCORE[e.mood as Mood])
     days.push({
       date: d,
       habitDue: 0,

@@ -280,6 +280,12 @@ test('mood is averaged on a 1 to 5 scale and counted per mood', () => {
   assert.deepEqual(r.mood.counts, { great: 1, good: 1, okay: 2, low: 0, rough: 0 })
   assert.deepEqual(MOOD_SCORE, { great: 5, good: 4, okay: 3, low: 2, rough: 1 })
 })
+test('automation drafts do not affect Review mood statistics', () => {
+  const draft = entry('2026-10-20', 'rough', { tags: ['automation'] })
+  const r = week({ entries: [draft, entry('2026-10-20', 'good')] })
+  assert.equal(r.mood.logged, 1)
+  assert.equal(r.mood.average, 4)
+})
 test('two entries on one day give that day one average', () => {
   const r = week({ entries: [entry('2026-10-20', 'great'), entry('2026-10-20', 'okay')] })
   assert.equal(r.mood.days[1].average, 4)
@@ -312,6 +318,13 @@ test('journal entries of the period are listed newest first, and reflections are
   assert.deepEqual(r.journal.entries.map((e) => e.title), ['Thursday', 'Tuesday'])
   assert.equal(r.journal.daysWritten, 2)
   assert.equal(r.journal.reflection?.title, title)
+})
+test('automation drafts do not appear in Review written-entry counts', () => {
+  const draft = entry('2026-10-21', null, { title: 'Automation draft', tags: ['automation'] })
+  const written = entry('2026-10-20', null, { title: 'Written entry' })
+  const r = week({ entries: [draft, written] })
+  assert.deepEqual(r.journal.entries.map((e) => e.title), ['Written entry'])
+  assert.equal(r.journal.daysWritten, 1)
 })
 test('a saved reflection is found by its title even when its date is outside the period', () => {
   const title = reviewTitle('week', WEEK_START, WEEK_END)

@@ -18,7 +18,7 @@ import {
 } from '../shared/automations'
 import { getSettings, setSetting } from './db'
 import { getDb } from './db'
-import { localDate } from './util'
+import { cleanTags, localDate } from './util'
 
 // Reads settings from ANY database handle (the app's global one, or a test's in-memory one),
 // so emitAutomation works before the app's global handle exists.
@@ -115,7 +115,7 @@ export function emitAutomation(...args: Parameters<typeof emitAutomationUnsafe>)
 // dedup row above stays, and the entry id recorded there goes stale, which is fine).
 function createAutomationEntry(db: Database.Database, action: Extract<AutomationAction, { type: 'create-draft-entry' }>, today: string): number {
   const now = new Date().toISOString()
-  const tags = JSON.stringify([...new Set([...action.tags, AUTOMATION_TAG])])
+  const tags = JSON.stringify(cleanTags([...action.tags, AUTOMATION_TAG]))
   const body = `Created by an automation — safe to delete.\n\n${action.body}`
   const info = db.prepare(
     `INSERT INTO logbook_entries (date, title, body, mood, tags, created_at, updated_at)

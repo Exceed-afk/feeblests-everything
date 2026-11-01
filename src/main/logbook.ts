@@ -3,6 +3,7 @@
 import type Database from 'better-sqlite3'
 import { cleanTags, escapeLike, isDate, searchWhere } from './util'
 import type { ParsedQuery } from '../shared/search'
+import { AUTOMATION_TAG_CLEAN } from '../shared/automations'
 import { logStreak } from '../shared/dashboard'
 import { MOODS } from '../shared/types'
 import type { LogEntry, LogEntryInput, LogFilter, LogSummary, Mood, SearchGroup, TagCount } from '../shared/types'
@@ -74,7 +75,7 @@ export function createEntry(db: Database.Database, input: LogEntryInput): LogEnt
   const entry = getEntry(db, Number(info.lastInsertRowid))
   // Journal entry saved (automation event). Fires only for USER-written entries:
   // automation drafts carry the #automation tag and skip their own trigger — loop prevention.
-  if (!e.tags.includes('automation')) {
+  if (!cleanTags(input.tags).includes(AUTOMATION_TAG_CLEAN)) {
     emitAutomation(db, 'journal-entry-saved', `entry:${entry.id}`, { entryId: entry.id })
     // Announce the new entry on the event bus (see events.ts), so other
     // modules - like habits - can react WITHOUT this file importing them.
@@ -113,11 +114,13 @@ export function recentEntries(db: Database.Database, limit: number): LogEntry[] 
 // Dashboard: entry counts and the writing streak. `today` is "YYYY-MM-DD".
 export function logbookSummary(db: Database.Database, today: string): LogSummary {
   const count = (sql: string, ...params: string[]) => (db.prepare(sql).get(...params) as { n: number }).n
-  const dates = (db.prepare('SELECT DISTINCT date FROM logbook_entries WHERE date <= ?').all(today) as { date: string }[])
+  const userWritten = 'NOT EXISTS (SELECT 1 FROM json_each(logbook_entries.tags) WHERE value = ?)'
+  const dates = (db.prepare(`SELECT DISTINCT date FROM logbook_entries WHERE date <= ? AND ${userWritten}`)
+    .all(today, AUTOMATION_TAG_CLEAN) as { date: string }[])
     .map((r) => r.date)
   return {
-    total: count('SELECT COUNT(*) AS n FROM logbook_entries'),
-    thisMonth: count('SELECT COUNT(*) AS n FROM logbook_entries WHERE substr(date, 1, 7) = ?', today.slice(0, 7)),
+    total: count(`SELECT COUNT(*) AS n FROM logbook_entries WHERE ${userWritten}`, AUTOMATION_TAG_CLEAN),
+    thisMonth: count(`SELECT COUNT(*) AS n FROM logbook_entries WHERE substr(date, 1, 7) = ? AND ${userWritten}`, today.slice(0, 7), AUTOMATION_TAG_CLEAN),
     streak: logStreak(dates, today)
   }
 }

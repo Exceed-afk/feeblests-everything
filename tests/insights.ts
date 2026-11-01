@@ -48,6 +48,12 @@ const daysBetween = (a: string, b: string): string[] => {
   return out
 }
 
+test('daily mood statistics ignore automation drafts', () => {
+  const draft = { ...entry(END, 'rough'), tags: ['automation'] }
+  const [day] = buildInsightDays(input({ start: END, end: END, entries: [draft, entry(END, 'good')] }))
+  assert.equal(day.mood, 4)
+})
+
 // ---------- tiny stats ----------
 test('mean of nothing is null, not NaN', () => {
   assert.equal(mean([]), null)

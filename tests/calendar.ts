@@ -109,6 +109,13 @@ test('the day mood is the average of its entries as the nearest word', () => {
   assert.equal(c.summary.moodAverage, (5 + 3 + 1) / 3)
   assert.deepEqual([5, 4, 3, 2, 1, 4.4, 3.5, 1.2].map(moodFromAverage), ['great', 'good', 'okay', 'low', 'rough', 'good', 'good', 'rough'])
 })
+test('automation drafts remain visible but are excluded from written totals and moods', () => {
+  const draft = { ...entry('2026-10-20', 'rough'), tags: ['automation'] }
+  const c = cal({ entries: [draft, entry('2026-10-20', 'good')] })
+  assert.equal(day(c, '2026-10-20').entries.length, 2)
+  assert.equal(day(c, '2026-10-20').moodAverage, 4)
+  assert.deepEqual([c.summary.entries, c.summary.daysWritten, c.summary.moodAverage], [1, 1, 4])
+})
 
 // ---- trades ----
 test('trades sit on their entry date; open ones are counted but kept out of P&L', () => {
