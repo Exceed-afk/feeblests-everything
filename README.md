@@ -12,6 +12,9 @@ Local-only logbook, trade tracker and savings tracker for Windows (Electron + Re
 - The assistant has a deterministic parser/eval harness in `tests/eval/assistant-eval.ts`; it validates the model-selected function, range kind and filters against the local contract without checking raw numbers.
 
 ## Run it
+- `npm run dev` — dev mode with hot reload (needs `ELECTRON_RUN_AS_NODE` NOT set; see below).
+- `npm run build` then `npm start` — production build and launch. `scripts/launch.cjs` strips a machine-level `ELECTRON_RUN_AS_NODE=1` if one is set, which would otherwise force the Electron exe to run as plain Node (the main process would then crash with "electron is a path string, not a module").
+- `node scripts/check-db.cjs` — read-only peek at the real database: schema version, trades columns, dismissals shape.
 1. Install Node.js 20+ and, if the install step complains about compiling, the "Desktop development with C++" tools from Visual Studio Build Tools.
 2. In this folder: `npm install` then `npm run dev`
 3. Build an installer: `npm run dist`
