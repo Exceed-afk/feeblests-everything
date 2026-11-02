@@ -6,7 +6,7 @@ const test = (name: string, fn: () => void) => { fn(); n++; console.log('ok  ', 
 
 test('the prompt explicitly allows a refusal instead of guessing', () => {
   assert.match(ASSISTANT_SYSTEM_PROMPT, /cannot_answer/)
-  assert.match(ASSISTANT_SYSTEM_PROMPT, /Do not guess/)
+  assert.match(ASSISTANT_SYSTEM_PROMPT, /If none of the functions below can answer the question/)
 })
 
 test('cannot_answer parses without model-written question or date data', () => {
@@ -22,7 +22,7 @@ test('an unknown function name is treated as an unsupported question', () => {
 test('the local refusal lists the supported capabilities', () => {
   assert.equal(
     CANNOT_ANSWER_MESSAGE,
-    "I can't compute that yet. I can answer: savings total, trade P&L, habit completion, tasks completed, mood average, journal entries, biggest losses, biggest wins, most-used tags, P&L by asset."
+    "I can't compute that yet. I can answer: net savings, trade P&L, habit completion, tasks completed, mood average, journal entries, biggest losses, biggest wins, most-used tags, P&L by asset."
   )
 })
 

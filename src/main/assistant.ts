@@ -12,8 +12,8 @@ import { safeStorage } from 'electron'
 import type Database from 'better-sqlite3'
 import {
   ASSISTANT_FUNCTIONS, ASSISTANT_SYSTEM_PROMPT, ASSISTANT_USER_PROMPT, assistantPreviousRequestText, DEFAULT_ASSISTANT,
-  assistantQuestionError, assistantReady, assistantSettingsPatchError, CANNOT_ANSWER_MESSAGE, checkEndpoint, clampRange, cleanModelText, comparisonChange, failureText,
-  functionByName, listEmptyMessage, matchFilters, normalizeAssistantFollowUp, normalizeAssistantPatch,
+  assistantQuestionError, assistantReady, assistantSettingsPatchError, CANNOT_ANSWER_MESSAGE, checkEndpoint, clampRange, cleanModelText, failureText,
+  formatAnswer, functionByName, assistantHttpStatusError, buildAssistantRequestBody, matchFilters, normalizeAssistantFollowUp, normalizeAssistantPatch,
   parseAssistantReply, previousRange, resolveRange,
   type AssistantExchange, type AssistantFunctionInfo, type AssistantKeyStatus, type AssistantProvider, type AssistantResult, type AssistantRows, type AssistantSettings,
   type AskOutcome
@@ -117,17 +117,9 @@ const loadRows = (db: Database.Database, today: string, range: { from: string; t
 
 // ---------- one question, one function call ----------
 
-type HttpResult = { ok: true; text: string } | { ok: false; kind: 'offline' | 'badkey' | 'timeout' | 'http' | 'model' }
+type HttpResult = { ok: true; text: string } | { ok: false; kind: 'offline' | 'badkey' | 'timeout' | 'http' | 'model'; status?: number }
 
-async function callProvider(url: string, key: string | null, model: string, userPrompt: string): Promise<HttpResult> {
-  const body = {
-    model,
-    messages: [
-      { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt }
-    ],
-    temperature: 0
-  }
+async function postChat(url: string, key: string | null, body: Record<string, unknown>): Promise<HttpResult> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
@@ -141,8 +133,8 @@ async function callProvider(url: string, key: string | null, model: string, user
       signal: controller.signal,
       redirect: 'error'
     })
-    if (res.status === 401 || res.status === 403) return { ok: false, kind: 'badkey' }
-    if (!res.ok) return { ok: false, kind: 'http' }
+    if (res.status === 401 || res.status === 403) return { ok: false, kind: 'badkey', status: res.status }
+    if (!res.ok) return { ok: false, kind: 'http', status: res.status }
     const data = await res.json() as { choices?: { message?: { content?: unknown } }[] }
     const content = data.choices?.[0]?.message?.content
     if (typeof content !== 'string' || !content.trim()) return { ok: false, kind: 'model' }
@@ -153,6 +145,23 @@ async function callProvider(url: string, key: string | null, model: string, user
   } finally {
     clearTimeout(timer)
   }
+}
+
+// One HTTP call with provider quirks handled by retrying a *smaller* request:
+// first with JSON mode on; if the provider rejects the body (HTTP 400), retry once
+// without `response_format`, then once more without `temperature`. The status code
+// is reported; the response body and the key never are.
+async function callProvider(url: string, key: string | null, model: string, userPrompt: string): Promise<HttpResult> {
+  const withJsonMode = buildAssistantRequestBody(ASSISTANT_SYSTEM_PROMPT, userPrompt, model, { jsonMode: true, temperature: 0 })
+  let result = await postChat(url, key, withJsonMode)
+  if (!(result.ok === false && result.kind === 'http' && result.status === 400)) return result
+
+  const withoutJsonMode = buildAssistantRequestBody(ASSISTANT_SYSTEM_PROMPT, userPrompt, model, { temperature: 0 })
+  result = await postChat(url, key, withoutJsonMode)
+  if (!(result.ok === false && result.kind === 'http' && result.status === 400)) return result
+
+  const bare = buildAssistantRequestBody(ASSISTANT_SYSTEM_PROMPT, userPrompt, model)
+  return postChat(url, key, bare)
 }
 
 export async function askAssistant(db: Database.Database, question: string, today: string, previousRequestInput?: unknown): Promise<AskOutcome> {
@@ -183,7 +192,9 @@ export async function askAssistant(db: Database.Database, question: string, toda
   }
 
   const http = await callProvider(endpoint, key, settings.model, userPrompt)
-  if (!http.ok) return { ok: false, error: failureText(http.kind) }
+  if (!http.ok) {
+    return { ok: false, error: http.kind === 'http' && http.status !== undefined ? assistantHttpStatusError(http.status) : failureText(http.kind) }
+  }
 
   const cleaned = cleanModelText(http.text)
   const parsed = parseAssistantReply(cleaned.ok ? cleaned.text : http.text)
@@ -241,20 +252,15 @@ export async function askAssistant(db: Database.Database, question: string, toda
   }
 
   const filterNote = filterMatch.warning ? ` ${filterMatch.warning}` : ''
-  const comparison = priorResult === null || result.type !== 'number' ? null : comparisonChange(result.value, priorResult)
-  const comparisonText = comparison && priorResult !== null
-    ? comparison.direction === 'unchanged'
-      ? ` (previous period: ${priorResult}; no change).`
-      : ` (previous period: ${priorResult}; ${comparison.direction} ${Math.abs(comparison.change)}${comparison.percent === null ? '' : `, ${Math.abs(comparison.percent)}%`}).`
-    : ''
-  const answer =
-    (result.type === 'list'
-      ? result.rows.length === 0
-        ? listEmptyMessage(fn.label)
-        : `${fn.label} for ${range.from} to ${range.to}: ${result.rows.length} results.`
-      : `${fn.name.replace(/_/g, ' ')} for ${range.from} to ${range.to}: ${result.value}`) +
+  const answer = formatAnswer({
+    fn,
+    result,
+    range: { spec: rangeSpec, resolved: range },
+    filters: filterMatch.disclosure.matched,
+    compare: prior && priorResult !== null ? { range: prior, result: priorResult } : null
+  }) +
     (parsed.call.question && parsed.call.question !== question.trim() ? ` (about: ${parsed.call.question})` : '') +
-    comparisonText + filterNote
+    filterNote
 
   const exchange: AssistantExchange = {
     question: question.trim(),
@@ -267,6 +273,7 @@ export async function askAssistant(db: Database.Database, question: string, toda
       userPromptChars: userPrompt.length,
       previousRequestSent: assistantPreviousRequestText(previousRequest),
       functionName: fn.name,
+      unit: fn.unit,
       rangeSpec,
       range,
       filters: filterMatch.disclosure,
@@ -282,8 +289,8 @@ export async function askAssistant(db: Database.Database, question: string, toda
 
 // The function list for the Intelligence page's plain-language table.
 export const assistantFunctionList = (): AssistantFunctionInfo[] =>
-  ASSISTANT_FUNCTIONS.map(({ name, description, examples, supports, resultType, supportsLimit }) => ({
-    name, description, examples, supports, resultType, supportsLimit: supportsLimit === true
+  ASSISTANT_FUNCTIONS.map(({ name, description, examples, supports, unit, resultType, supportsLimit }) => ({
+    name, description, examples, supports, unit, resultType, supportsLimit: supportsLimit === true
   }))
 
 export { DEFAULT_ASSISTANT }

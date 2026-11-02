@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Assistant prompt rewritten to version 2 (structured request shape, full range/filter/compare vocabulary, refusal rule and worked examples generated from the function table)
+- Provider requests add JSON mode, a 200-token cap, and one automatic retry each without JSON mode and without `temperature` when a provider rejects the request; HTTP failures now name the status code without ever exposing the response body or the key
+- Added the assistant evaluation harness under `tests/eval/assistant-eval.ts`; it runs the provider prompt against a fixed case set and checks function/range/filter selection without exposing raw numbers
+- Assistant answers now use clear function names, local date spans, and unit-aware money, percent, count and score values, including comparisons
 - Assistant follow-ups reuse only the previous function, date range and filters; disclosures show this context, and Clear history resets it
 - Assistant now shows locally computed tables for biggest trade losses/wins, most-used journal tags and P&L by asset; trade lists default to three and cap at ten
 - Assistant can compare a period with an equal-length previous period; both results are calculated locally, with percent change omitted when the previous value is zero

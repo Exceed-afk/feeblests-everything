@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import type Database from 'better-sqlite3'
 import { openDatabase } from './sqlite'
 import { MIGRATIONS, applyMigrations } from '../src/main/migrations'
-import { addTaskMonths, applyColumnOrder, filterTasks, groupTasksForBoard, localTaskDay, nextTaskDate, nextTaskDateAfter, pendingTaskReminders, sortTasks, subtaskProgress, taskInputForEdit, taskInputProblems, taskReview } from '../src/shared/tasks'
+import { addTaskMonths, addTaskDays, applyColumnOrder, filterTasks, groupTasksForBoard, localTaskDay, nextTaskDate, nextTaskDateAfter, pendingTaskReminders, sortTasks, subtaskProgress, taskInputForEdit, taskInputProblems, taskReview } from '../src/shared/tasks'
 import { normalizeSettings } from '../src/shared/appearance'
 import { clearTrash, createTask, deleteTaskForever, deleteTasks, listCompletedTasks, listDeletedTasks, listTasks, overdueTasks, promoteSubtask, reorderSubtasks, reorderTasks, rescheduleTasks, restoreTask, setSubtaskDone, setTaskStatus, setTasksStatus, skipTaskOccurrence, softDeleteTask, undoTaskStatus, updateTask } from '../src/main/tasks'
 import { resolveOccurrences } from '../src/shared/tasks'
@@ -10,6 +10,7 @@ import { collectBackup, restoreBackup } from '../src/main/backup'
 import { runSearch } from '../src/main/search'
 import { parseBackup } from '../src/shared/backup'
 import type { Task, TaskRecurrence } from '../src/shared/types'
+import { localDate } from '../src/main/util'
 
 let n = 0
 const test = (name: string, fn: () => void) => { fn(); n++; console.log('ok  ', name) }
@@ -219,17 +220,20 @@ test('completing a recurring task stays done until due, then opens the same occu
   const completed = setTaskStatus(db, created.id, 'done')
   assert.equal(completed.status, 'done')
   assert.ok(completed.completedAt)
-  // Completing stamps the NEXT due date (weekly rule, done on the 26th -> next 2026-11-02).
-  assert.equal(completed.recurrenceNext, '2026-11-02')
+  // Completing stamps the NEXT due date (weekly rule, done on the 26th -> the next Monday,
+  // or a later Monday if the real clock has already passed it — never in the past).
+  const expectedNext = nextTaskDateAfter('2026-10-26', recurrence('weekly'), '2026-10-26', localDate())!
+  assert.ok(expectedNext > '2026-10-26')
+  assert.equal(completed.recurrenceNext, expectedNext)
   // Until that date arrives the task stays done and is not surfaced as due.
-  const before = listTasks(db, '2026-10-27').find((t) => t.id === created.id)!
+  const before = listTasks(db, addTaskDays(expectedNext, -1)).find((t) => t.id === created.id)!
   assert.equal(before.status, 'done')
-  assert.equal(before.recurrenceNext, '2026-11-02')
+  assert.equal(before.recurrenceNext, expectedNext)
   // The read ON the next due date resolves the occurrence: done -> todo, checklist reset.
-  const afterRead = listTasks(db, '2026-11-02').find((t) => t.id === created.id)!
+  const afterRead = listTasks(db, expectedNext).find((t) => t.id === created.id)!
   assert.equal(afterRead.status, 'todo')
   assert.equal(afterRead.completedAt, null)
-  assert.equal(afterRead.recurrenceNext, '2026-11-02')
+  assert.equal(afterRead.recurrenceNext, expectedNext)
   assert.deepEqual(afterRead.subtasks.map((s) => s.done), [false])
   db.close()
 })
@@ -529,7 +533,7 @@ test('backup export/import round-trips the full migration-9 task schema', () => 
   assert.equal(restoredPlain.priority, 'high')
   const restoredRec = loaded.find((t) => t.id === rec.id)!
   assert.deepEqual(restoredRec.recurrenceRule, recurrence('weekly'))
-  assert.equal(restoredRec.recurrenceNext, '2026-11-02') // the stamped next occurrence survived
+  assert.equal(restoredRec.recurrenceNext, completedRec.recurrenceNext) // the stamped next occurrence survived
   assert.equal(restoredRec.status, 'done')
   assert.deepEqual(listCompletedTasks(target, localTaskDay(completedRec.completedAt)!).map((t) => t.title), ['Weekly'])
   assert.deepEqual(restoredRec.tags, ['plants'])
@@ -539,9 +543,9 @@ test('backup export/import round-trips the full migration-9 task schema', () => 
   assert.equal(listTasks(target).length, 2)
   // and the restored occurrence remains due until completed
   setTaskStatus(target, restoredRec.id, 'done')
-  const again = listTasks(target, '2026-11-02').find((t) => t.id === rec.id)!
+  const again = listTasks(target, completedRec.recurrenceNext!).find((t) => t.id === rec.id)!
   assert.equal(again.status, 'todo')
-  assert.equal(again.recurrenceNext, '2026-11-02')
+  assert.equal(again.recurrenceNext, completedRec.recurrenceNext)
 
   const legacyBackup = collectBackup(source) as unknown as Record<string, unknown>
   delete legacyBackup.taskCompletions
