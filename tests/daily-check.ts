@@ -95,7 +95,9 @@ test('a broken state row reads as never having run', () => {
 test('state round-trips through the settings table', () => {
   const db = openDb()
   writeDailyCheckState(db, { lastRun: '2026-10-31' })
-  assert.deepEqual(readDailyCheckState(db), { lastRun: '2026-10-31' })
+  assert.deepEqual(readDailyCheckState(db), { lastRun: '2026-10-31', lastSeenDate: null })
+  writeDailyCheckState(db, { lastRun: '2026-10-31', lastSeenDate: '2026-10-30' })
+  assert.deepEqual(readDailyCheckState(db), { lastRun: '2026-10-31', lastSeenDate: '2026-10-30' })
   db.close()
 })
 
