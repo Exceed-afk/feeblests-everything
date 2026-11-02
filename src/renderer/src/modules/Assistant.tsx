@@ -6,11 +6,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eraser, MessageCircleQuestion, SendHorizonal } from 'lucide-react'
 import type { AssistantExchange, AssistantFollowUp, AssistantFunctionInfo, AssistantKeyStatus, AssistantSettings } from '../../../shared/assistant'
-import { failureText, keyStateLabel, MAX_ASSISTANT_QUESTION_LENGTH } from '../../../shared/assistant'
+import { failureText, formatAssistantValue, keyStateLabel, MAX_ASSISTANT_QUESTION_LENGTH } from '../../../shared/assistant'
 void failureText
 import { today } from '../lib/dates'
 import { errMsg } from '../lib/errors'
-import { fmtAmount } from '../lib/format'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
 
@@ -118,104 +117,107 @@ export function Assistant() {
                     ))}
                   </div>
                 )}
-                {exchanges.map((x, i) => (
-                  <article key={i} className="card card-pad">
-                    <p className="text-sm font-medium">{x.question}</p>
-                    <p className="mt-2 text-sm leading-relaxed">{x.answer}</p>
-                    <details className="mt-3">
-                      <summary className="section-link cursor-pointer text-xs">What was sent, exactly</summary>
-                      <dl className="mt-2 flex flex-col gap-1.5 text-xs text-muted">
-                        <div>
-                          <dt className="meta">User turn (sent)</dt>
-                          <dd className="mt-0.5 break-all font-mono">{x.disclosure.question}</dd>
-                        </div>
-                        <div>
-                          <dt className="meta">Fixed instructions block</dt>
-                          <dd className="mt-0.5">{x.disclosure.systemPromptChars} characters — function names only, no data.</dd>
-                        </div>
-                        {x.disclosure.previousRequestSent && (
+                {exchanges.map((x, i) => {
+                  const disclosure = x.disclosure
+                  return (
+                    <article key={i} className="card card-pad">
+                      <p className="text-sm font-medium">{x.question}</p>
+                      <p className="mt-2 text-sm leading-relaxed">{x.answer}</p>
+                      <details className="mt-3">
+                        <summary className="section-link cursor-pointer text-xs">What was sent, exactly</summary>
+                        <dl className="mt-2 flex flex-col gap-1.5 text-xs text-muted">
                           <div>
-                            <dt className="meta">Previous request sent</dt>
-                            <dd className="mt-0.5 break-all font-mono">{x.disclosure.previousRequestSent}</dd>
+                            <dt className="meta">User turn (sent)</dt>
+                            <dd className="mt-0.5 break-all font-mono">{disclosure.question}</dd>
                           </div>
-                        )}
-                        {x.disclosure.kind === 'computed' ? (
-                          <>
+                          <div>
+                            <dt className="meta">Fixed instructions block</dt>
+                            <dd className="mt-0.5">{disclosure.systemPromptChars} characters — function names only, no data.</dd>
+                          </div>
+                          {disclosure.previousRequestSent && (
+                            <div>
+                              <dt className="meta">Previous request sent</dt>
+                              <dd className="mt-0.5 break-all font-mono">{disclosure.previousRequestSent}</dd>
+                            </div>
+                          )}
+                          {disclosure.kind === 'computed' ? (
+                            <>
+                              <div>
+                                <dt className="meta">Function chosen by the model</dt>
+                                <dd className="mt-0.5 num">{disclosure.functionName}</dd>
+                              </div>
+                              <div>
+                                <dt className="meta">Requested range spec</dt>
+                                <dd className="mt-0.5 font-mono">{JSON.stringify(disclosure.rangeSpec)}</dd>
+                              </div>
+                              <div>
+                                <dt className="meta">Resolved dates</dt>
+                                <dd className="mt-0.5 num">{disclosure.range.from} → {disclosure.range.to}</dd>
+                              </div>
+                              {Object.keys(disclosure.filters.sent).length > 0 && (
+                                <div>
+                                  <dt className="meta">Filters sent by the model</dt>
+                                  <dd className="mt-0.5 font-mono">{JSON.stringify(disclosure.filters.sent)}</dd>
+                                </div>
+                              )}
+                              {Object.keys(disclosure.filters.matched).length > 0 && (
+                                <div>
+                                  <dt className="meta">Matched locally</dt>
+                                  <dd className="mt-0.5 font-mono">{JSON.stringify(disclosure.filters.matched)}</dd>
+                                </div>
+                              )}
+                              {disclosure.filters.ignored.length > 0 && (
+                                <div>
+                                  <dt className="meta">Ignored unsupported filters</dt>
+                                  <dd className="mt-0.5">{disclosure.filters.ignored.join(', ')}</dd>
+                                </div>
+                              )}
+                              <div>
+                                <dt className="meta">Result computed on this computer</dt>
+                                {disclosure.result.type === 'number' ? (
+                                  <dd className="mt-0.5 num">{formatAssistantValue(disclosure.unit, disclosure.result.value)}</dd>
+                                ) : disclosure.result.rows.length === 0 ? (
+                                  <dd className="mt-0.5">No results for this date range.</dd>
+                                ) : (
+                                  <dd>
+                                    <table className="tbl mt-2">
+                                      <caption className="sr-only">Locally computed list answer</caption>
+                                      <thead><tr><th scope="col">Item</th><th scope="col">Value</th></tr></thead>
+                                      <tbody>
+                                        {disclosure.result.rows.map((row, rowIndex) => (
+                                          <tr key={`${row.label}-${rowIndex}`}>
+                                            <th scope="row">{row.label}</th><td className="num">{formatAssistantValue(disclosure.unit, row.value)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </dd>
+                                )}
+                              </div>
+                              {disclosure.previousRange && disclosure.previousResult !== null && (
+                                <div>
+                                  <dt className="meta">Previous period, computed on this computer</dt>
+                                  <dd className="mt-0.5 num">
+                                    {disclosure.previousRange.from} → {disclosure.previousRange.to}: {formatAssistantValue(disclosure.unit, disclosure.previousResult)}
+                                  </dd>
+                                </div>
+                              )}
+                            </>
+                          ) : (
                             <div>
                               <dt className="meta">Function chosen by the model</dt>
-                              <dd className="mt-0.5 num">{x.disclosure.functionName}</dd>
+                              <dd className="mt-0.5">None. This question is not supported, so no user data was read.</dd>
                             </div>
+                          )}
                             <div>
-                              <dt className="meta">Requested range spec</dt>
-                              <dd className="mt-0.5 font-mono">{JSON.stringify(x.disclosure.rangeSpec)}</dd>
-                            </div>
-                            <div>
-                              <dt className="meta">Resolved dates</dt>
-                              <dd className="mt-0.5 num">{x.disclosure.range.from} → {x.disclosure.range.to}</dd>
-                            </div>
-                            {Object.keys(x.disclosure.filters.sent).length > 0 && (
-                              <div>
-                                <dt className="meta">Filters sent by the model</dt>
-                                <dd className="mt-0.5 font-mono">{JSON.stringify(x.disclosure.filters.sent)}</dd>
-                              </div>
-                            )}
-                            {Object.keys(x.disclosure.filters.matched).length > 0 && (
-                              <div>
-                                <dt className="meta">Matched locally</dt>
-                                <dd className="mt-0.5 font-mono">{JSON.stringify(x.disclosure.filters.matched)}</dd>
-                              </div>
-                            )}
-                            {x.disclosure.filters.ignored.length > 0 && (
-                              <div>
-                                <dt className="meta">Ignored unsupported filters</dt>
-                                <dd className="mt-0.5">{x.disclosure.filters.ignored.join(', ')}</dd>
-                              </div>
-                            )}
-                            <div>
-                              <dt className="meta">Result computed on this computer</dt>
-                              {x.disclosure.result.type === 'number' ? (
-                                <dd className="mt-0.5 num">{fmtAmount(x.disclosure.result.value)}</dd>
-                              ) : x.disclosure.result.rows.length === 0 ? (
-                                <dd className="mt-0.5">No results for this date range.</dd>
-                              ) : (
-                                <dd>
-                                  <table className="tbl mt-2">
-                                    <caption className="sr-only">Locally computed list answer</caption>
-                                    <thead><tr><th scope="col">Item</th><th scope="col">Value</th></tr></thead>
-                                    <tbody>
-                                      {x.disclosure.result.rows.map((row, rowIndex) => (
-                                        <tr key={`${row.label}-${rowIndex}`}>
-                                          <th scope="row">{row.label}</th><td className="num">{row.value}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </dd>
-                              )}
-                            </div>
-                            {x.disclosure.previousRange && x.disclosure.previousResult !== null && (
-                              <div>
-                                <dt className="meta">Previous period, computed on this computer</dt>
-                                <dd className="mt-0.5 num">
-                                  {x.disclosure.previousRange.from} → {x.disclosure.previousRange.to}: {fmtAmount(x.disclosure.previousResult)}
-                                </dd>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div>
-                            <dt className="meta">Function chosen by the model</dt>
-                            <dd className="mt-0.5">None. This question is not supported, so no user data was read.</dd>
+                            <dt className="meta">Rows sent to the provider</dt>
+                            <dd className="mt-0.5">None. Only the user turn and previous request details shown above left this computer; computed results never go back to the provider.</dd>
                           </div>
-                        )}
-                        <div>
-                          <dt className="meta">Rows sent to the provider</dt>
-                          <dd className="mt-0.5">None. Only the user turn and previous request details shown above left this computer; computed results never go back to the provider.</dd>
-                        </div>
-                      </dl>
-                    </details>
-                  </article>
-                ))}
+                        </dl>
+                      </details>
+                    </article>
+                  )
+                })}
                 <div ref={bottom} />
               </div>
 
