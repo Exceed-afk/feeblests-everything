@@ -3,7 +3,7 @@
 // file only fetches and shows. The feature can be switched off on the Intelligence page, which
 // removes the page from the sidebar and the dashboard card from the home page.
 import { useCallback, useEffect, useState } from 'react'
-import { BookOpen, CalendarCheck, CheckSquare, CandlestickChart, ChevronRight, PiggyBank, Plus, Sunrise, Zap } from 'lucide-react'
+import { BookOpen, CalendarCheck, CheckSquare, CandlestickChart, ChevronRight, PiggyBank, Plus, Sunrise, Zap, Save } from 'lucide-react'
 import type { DailyBriefing } from '../../../shared/types'
 import { formatDate, today } from '../lib/dates'
 import { fmtAmount } from '../lib/format'
@@ -40,6 +40,7 @@ export function Briefing({ onNavigate, onOpen }: ModuleProps) {
 
       {data && (
         <div className="mt-5 flex flex-col gap-4" aria-live="polite">
+          <WeeklySection briefing={data} onSaved={load} />
           <AutomationsSection briefing={data} onNavigate={onNavigate} />
           {data.tasks && <TasksSection tasks={data.tasks} onNavigate={onNavigate} />}
           {data.habits && <HabitsSection briefing={data.habits} onNavigate={onNavigate} />}
@@ -74,6 +75,33 @@ function Section({ title, icon, onOpen, openLabel, children }: {
         <button className="section-link" onClick={onOpen}>{openLabel} <ChevronRight size={12} /></button>
       </div>
       <div className="mt-3">{children}</div>
+    </section>
+  )
+}
+
+// Last week's summary (P2). Computed on demand in shared/briefing.ts; the
+// "Save to Logbook" button creates an ordinary entry through the normal
+// editor flow — never an automation draft.
+function WeeklySection({ briefing, onSaved }: { briefing: DailyBriefing; onSaved: () => void }) {
+  const [writing, setWriting] = useState(false)
+  if (!briefing.weekly) return null
+  const week = briefing.weekly
+  const body = [
+    `Last week (${week.weekStart} to ${week.weekEnd}):`,
+    ...week.lines.map((l) => l.text)
+  ].join('\n')
+  return (
+    <section className="card card-pad" aria-label="Last week">
+      <div className="flex items-center justify-between">
+        <h2 className="section-title"><Sunrise size={15} /> Last week</h2>
+        <button className="section-link" onClick={() => setWriting(true)}><Save size={12} /> Save to Logbook</button>
+      </div>
+      <ul className="mt-3 flex flex-col gap-1">
+        {week.lines.map((line, i) => <li key={i} className="text-sm">{line.text}</li>)}
+      </ul>
+      {writing && <EntryEditor entry={null} knownTags={[]}
+        initialTitle={`Weekly summary: ${week.weekStart} to ${week.weekEnd}`}
+        initialBody={body} onClose={() => setWriting(false)} onSaved={() => { setWriting(false); onSaved() }} />}
     </section>
   )
 }

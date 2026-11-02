@@ -63,6 +63,7 @@ export interface DailyBriefing {
   journal: BriefingJournal | null
   automations: AutomationActivity[] // what the automations did recently, newest first (may be empty)
   staleOverdueTasks: { id: number; title: string; daysOverdue: number }[] // surfaced by the overdue rule
+  weekly: BriefingWeekly | null // last week's summary, computed on demand (P2); null when nothing was logged
 }
 
 // ---------- helpers ----------
@@ -207,7 +208,30 @@ export function briefingSummary(b: Pick<DailyBriefing, 'tasks' | 'habits' | 'sav
   return parts.join(' · ')
 }
 
-// ---------- the whole briefing ----------
+// ---------- the weekly summary (P2, computed on demand; nothing is stored) ----------
+
+import { buildWeeklySummary, weeklyLineText } from './weekly'
+import type { AssistantRows } from './assistant'
+
+export interface BriefingWeekly {
+  weekStart: string
+  weekEnd: string
+  lines: { text: string }[]
+  totalLogged: boolean
+}
+
+// The input is the same rows the briefing already gathered; the numbers come
+// from the assistant's function table, so they cannot disagree with it.
+export function weeklySummaryCard(rows: AssistantRows, today: string): BriefingWeekly | null {
+  const summary = buildWeeklySummary(rows, 'last_week', today)
+  if (!summary.totalLogged) return null
+  return {
+    weekStart: summary.weekStart,
+    weekEnd: summary.weekEnd,
+    totalLogged: summary.totalLogged,
+    lines: summary.lines.map((line) => ({ text: weeklyLineText(line) }))
+  }
+}
 
 export interface BriefingInput {
   today: string
@@ -230,6 +254,9 @@ export function buildBriefing(input: BriefingInput): DailyBriefing {
     trades: tradesToday(trades, today),
     journal: journalToday(entries, today)
   }
+  const weekly = weeklySummaryCard({
+    txs, goals, trades, habits, tasks: [], completions: [], entries
+  }, today)
   // The overdue rule surfaces stale tasks in the briefing when it is on and set.
   const overdueDays = input.overdueDays ?? 7
   const active = tasks.filter((t) => t.status !== 'done' && t.dueDate !== null && t.dueDate < today)
@@ -238,7 +265,7 @@ export function buildBriefing(input: BriefingInput): DailyBriefing {
     .filter((t) => t.daysOverdue > overdueDays)
     .sort((a, b) => b.daysOverdue - a.daysOverdue)
   return {
-    today, ...b, automations: input.automations ?? [], staleOverdueTasks,
+    today, ...b, automations: input.automations ?? [], staleOverdueTasks, weekly,
     summary: briefingSummary(b)
   }
 }

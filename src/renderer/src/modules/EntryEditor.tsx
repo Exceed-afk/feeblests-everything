@@ -10,12 +10,14 @@ interface Props {
   knownTags: string[] // existing tags, offered as suggestions
   onSaved: () => void
   onClose: () => void
+  initialTitle?: string // pre-filled title for a new entry (e.g. the weekly summary)
+  initialBody?: string // pre-filled body for a new entry
 }
 
-export function EntryEditor({ entry, knownTags, onSaved, onClose }: Props) {
+export function EntryEditor({ entry, knownTags, onSaved, onClose, initialTitle, initialBody }: Props) {
   const [date, setDate] = useState(entry?.date ?? today())
-  const [title, setTitle] = useState(entry?.title ?? '')
-  const [body, setBody] = useState(entry?.body ?? '')
+  const [title, setTitle] = useState(entry?.title ?? initialTitle ?? '')
+  const [body, setBody] = useState(entry?.body ?? initialBody ?? '')
   const [mood, setMood] = useState<Mood | null>(entry?.mood ?? null)
   const [tags, setTags] = useState<string[]>(entry?.tags ?? [])
   const [tagInput, setTagInput] = useState('')

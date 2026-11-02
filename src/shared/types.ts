@@ -601,7 +601,7 @@ export interface IntelligenceSettings {
 export type { AutomationSettings, AutomationActivity }
 
 export type { DailyBriefing, BriefingTasks, BriefingHabits, BriefingSavings, BriefingTrades, BriefingJournal,
-  BriefingTaskItem, BriefingHabitItem, BriefingGoal } from './briefing'
+  BriefingTaskItem, BriefingHabitItem, BriefingGoal, BriefingWeekly } from './briefing'
 
 // EverythingApi's briefing section (line 117) needs these types, so import them here too.
 import { round8 } from './math'

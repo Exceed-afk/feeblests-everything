@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Added a pure offline weekly summary (savings net, trade P&L, habit rate, tasks completed, mood average and journal entries for last week) computed with the assistant's own function rules, shown as a Briefing card with a "Save to Logbook" button that creates an ordinary entry; an empty week shows "Nothing logged"
 - Added the once-per-day daily check infrastructure: day-gated state in the `dailyCheckState` setting, run at startup and from the reminder loop so a day turning over while the app is open is still checked exactly once; each future check runs in its own try/catch, and the first run after an upgrade looks back only two days
 - Assistant prompt rewritten to version 2 (structured request shape, full range/filter/compare vocabulary, refusal rule and worked examples generated from the function table)
 - Provider requests add JSON mode, a 200-token cap, and one automatic retry each without JSON mode and without `temperature` when a provider rejects the request; HTTP failures now name the status code without ever exposing the response body or the key
