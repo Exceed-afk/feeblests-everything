@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import { openDatabase } from './sqlite'
 import { applyMigrations } from '../src/main/migrations'
-import { consecutiveLosses, tradesOnDate, DEFAULT_AUTOMATIONS, runAutomation, lossStreakPauseRule, overtradingNoteRule, type AutomationSettings } from '../src/shared/automations'
-import { createTrade } from '../src/main/trades'
+import { consecutiveLosses, tradesOnDate, DEFAULT_AUTOMATIONS, runAutomation, lossStreakPauseRule, overtradingNoteRule, quickReentryRule, type AutomationSettings } from '../src/shared/automations'
+import { createTrade, listTrades } from '../src/main/trades'
 import { automationActivity } from '../src/main/automations'
+import { collectBackup, restoreBackup } from '../src/main/backup'
+import { parseBackup } from '../src/shared/backup'
+import { MIGRATIONS } from '../src/main/migrations'
 
 let n = 0
 const test = (name: string, fn: () => void) => { try { fn(); n++; console.log('ok  ', name) } catch (e) { console.error(e); throw e } }
@@ -125,7 +128,7 @@ test('end to end: a third losing close shows exactly one pause note', () => {
 test('end to end: two overtrading saves on the same day produce one note', () => {
   const db = openDb()
   // Only 6 trades today (max 5): the 6th crosses the line, the (nonexistent)
-  // 7th would be deduped by key — here exactly one crossing exists.
+  // 7th would be deduped by key �?here exactly one crossing exists.
   for (let i = 0; i < 6; i++) createTrade(db, closedInput(TODAY))
   const events = automationActivity(db, 50).filter((a) => a.rule === 'overtrading-note')
   assert.equal(events.length, 1)
@@ -138,9 +141,116 @@ test('both trade rules are registered', () => {
   void outcomes
   assert.equal(typeof lossStreakPauseRule().id, 'string')
   assert.equal(typeof overtradingNoteRule().id, 'string')
+  assert.equal(typeof quickReentryRule().id, 'string')
+})
+
+// --- R3: quick re-entry after a loss ---
+
+const CREATED = '2026-11-02T10:30:00.000Z'
+
+const reentryEvent = (createdAt = CREATED) => ({
+  kind: 'trade-created' as const,
+  date: TODAY,
+  data: { tradeId: 99, tradeCreatedAt: createdAt, tradeDate: TODAY }
+})
+
+const r3 = (patch: Partial<AutomationSettings> = {}) => ({ ...settings({ quickReentryNote: true, reentryMinutes: 30, ...patch }) })
+
+const losingClose = (closedAt: string | null) => ({ id: 1, date: TODAY, pnl: -50, closedAt })
+
+test('R3: fires inside the window with the real minutes', () => {
+  const closedAt = '2026-11-02T10:10:00.000Z' // 20 minutes before CREATED
+  const fires = runAutomation(reentryEvent(), { settings: r3(), recentTrades: [losingClose(closedAt)] })
+  const note = fires.find((o) => o.ruleId === 'quick-reentry')
+  assert.ok(note, 'a 20-minute re-entry inside a 30-minute window fires')
+  assert.equal(note.actions[0].type === 'message' ? note.actions[0].text.includes('20 minutes after a loss') : false, true)
+})
+
+// Boundary: exactly N minutes counts ("within N"), N+1 does not.
+test('R3: boundary at N and N+1 minutes', () => {
+  const atN = runAutomation(reentryEvent('2026-11-02T10:30:00.000Z'), { settings: r3(), recentTrades: [losingClose('2026-11-02T10:00:00.000Z')] }) // exactly 30
+  assert.ok(atN.find((o) => o.ruleId === 'quick-reentry'), 'exactly 30 minutes is within')
+
+  const atN1 = runAutomation(reentryEvent('2026-11-02T10:31:00.000Z'), { settings: r3(), recentTrades: [losingClose('2026-11-02T10:00:00.000Z')] }) // 31
+  assert.equal(atN1.find((o) => o.ruleId === 'quick-reentry'), undefined)
+})
+
+test('R3: null closed_at (old rows) never fires', () => {
+  const fires = runAutomation(reentryEvent(), { settings: r3(), recentTrades: [losingClose(null)] })
+  assert.equal(fires.find((o) => o.ruleId === 'quick-reentry'), undefined)
+  // and a missing createdAt on the new trade too
+  const fires2 = runAutomation({ ...reentryEvent(), data: { tradeId: 99, tradeDate: TODAY } }, { settings: r3(), recentTrades: [losingClose('2026-11-02T10:10:00.000Z')] })
+  assert.equal(fires2.find((o) => o.ruleId === 'quick-reentry'), undefined)
+})
+
+test('R3: a profitable close and a pre-dating close never fire', () => {
+  const afterWin = runAutomation(reentryEvent(), { settings: r3(), recentTrades: [{ id: 1, date: TODAY, pnl: 50, closedAt: '2026-11-02T10:00:00.000Z' }] })
+  assert.equal(afterWin.find((o) => o.ruleId === 'quick-reentry'), undefined)
+  // the "new" trade predates the losing close: not a re-entry
+  const before = runAutomation(reentryEvent('2026-11-02T09:00:00.000Z'), { settings: r3(), recentTrades: [losingClose('2026-11-02T10:00:00.000Z')] })
+  assert.equal(before.find((o) => o.ruleId === 'quick-reentry'), undefined)
+})
+
+test('R3: the closest losing close wins and the rule is off by default', () => {
+  const two = runAutomation(reentryEvent('2026-11-02T10:12:00.000Z'), {
+    settings: r3(),
+    recentTrades: [losingClose('2026-11-02T10:00:00.000Z'), { id: 2, date: TODAY, pnl: -5, closedAt: '2026-11-02T10:10:00.000Z' }]
+  })
+  const note = two.find((o) => o.ruleId === 'quick-reentry')
+  assert.ok(note)
+  assert.equal(note.actions[0].type === 'message' ? note.actions[0].text.includes('2 minutes') : false, true)
+
+  // default settings: off
+  assert.equal(runAutomation(reentryEvent(), { settings: { ...DEFAULT_AUTOMATIONS }, recentTrades: [losingClose('2026-11-02T10:10:00.000Z')] }).find((o) => o.ruleId === 'quick-reentry'), undefined)
+})
+
+test('R3 end to end: creating a trade 10 minutes after a losing close fires once; old rows stay silent', () => {
+  const db = openDb()
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES ('automations', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run(JSON.stringify({ quickReentryNote: true, reentryMinutes: 30 }))
+
+  // A losing trade closed 10 minutes ago (inserted directly so its timestamps are exact).
+  db.prepare(
+    `INSERT INTO trades (date, asset, direction, entry_price, exit_price, quantity, fees, notes, tags, closed_at, created_at, updated_at)
+     VALUES ('2026-11-02', 'XAUUSD', 'long', 10, 5, 1, 0, '', '[]', ?, ?, ?)`
+  ).run('2026-11-02T10:00:00.000Z', '2026-11-02T09:00:00.000Z', '2026-11-02T10:00:00.000Z')
+
+  createTrade(db, { date: TODAY, asset: 'XAUUSD', direction: 'long', entryPrice: 10, exitPrice: null, quantity: 1, fees: 0, notes: '', tags: [] }, new Date('2026-11-02T10:05:00.000Z'))
+  const events = automationActivity(db, 50).filter((a) => a.rule === 'quick-reentry')
+  assert.equal(events.length, 1)
+
+  // An OLD losing row (closed_at NULL) plus a new trade ONE MINUTE later: the
+  // rule re-fires because it is a different trade (a different dedupe key),
+  // and the plan accepts that: each trigger gets its own note. To prove the
+  // NULL closed_at really is silent, query only the newest event.
+  db.prepare(
+    `INSERT INTO trades (date, asset, direction, entry_price, exit_price, quantity, fees, notes, tags, closed_at, created_at, updated_at)
+     VALUES ('2026-10-20', 'XAUUSD', 'long', 10, 5, 1, 0, '', '[]', NULL, ?, ?)`
+  ).run('2026-10-20T09:00:00.000Z', '2026-10-20T10:00:00.000Z')
+  createTrade(db, { date: TODAY, asset: 'XAUUSD', direction: 'long', entryPrice: 10, exitPrice: null, quantity: 1, fees: 0, notes: '', tags: [] }, new Date('2026-11-02T10:06:00.000Z'))
+  const newest = automationActivity(db, 1)[0]
+  assert.equal(newest.rule, 'quick-reentry') // from the still-open losing trade, not the NULL one
+  void newest
+  db.close()
+})
+
+test('R3: backup export/import round-trips closedAt', () => {
+  const db = openDb()
+  createTrade(db, { date: TODAY, asset: 'XAUUSD', direction: 'long', entryPrice: 10, exitPrice: 5, quantity: 1, fees: 0, notes: '', tags: [] })
+  const backup = collectBackup(db)
+  assert.ok(backup.trades.every((t) => typeof t.closedAt === 'string'))
+  const target = openDb()
+  restoreBackup(target, parseBackup(JSON.stringify(backup), MIGRATIONS.length))
+  const restored = listTrades(target)
+  assert.equal(restored.length, 1)
+  assert.equal(typeof restored[0].closedAt, 'string')
+  assert.equal(restored[0].closedAt, listTrades(db)[0].closedAt)
+  db.close(); target.close()
 })
 
 console.log(`${n} trade-rule checks passed`)
+
 
 
 

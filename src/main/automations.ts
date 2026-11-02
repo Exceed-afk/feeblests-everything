@@ -60,10 +60,11 @@ function emitAutomationUnsafe(
   event: AutomationEventKind,
   key: string, // "trade:12", "goal:3:first-reach": one event, once per rule, ever
   data: AutomationEventData,
-  extra: { overdueTasks?: { id: number; title: string; daysOverdue: number }[]; date?: string; recentTrades?: Pick<Trade, 'id' | 'date' | 'pnl'>[] } = {}
+  extra: { overdueTasks?: { id: number; title: string; daysOverdue: number }[]; date?: string; recentTrades?: (Pick<Trade, 'id' | 'date' | 'pnl'> & { closedAt?: string | null })[] } = {},
+  now: Date = new Date()
 ): EmitResult {
   const settings = automationSettings(db)
-  const today = extra.date ?? localDate()
+  const today = extra.date ?? localDate(now)
   const outcomes = runAutomation({ kind: event, date: today, data }, {
     settings,
     overdueTasks: extra.overdueTasks,
@@ -84,7 +85,7 @@ function emitAutomationUnsafe(
         if (!action) continue
         const label = outcome.labels[i]
         const dedupKey = i === 0 ? `${outcome.ruleId}:${key}` : `${outcome.ruleId}:${key}#${i}`
-        const claimResult = claim.run(outcome.ruleId, event, dedupKey, label, new Date().toISOString())
+        const claimResult = claim.run(outcome.ruleId, event, dedupKey, label, now.toISOString())
         if (claimResult.changes === 0) continue
 
         let entryId: number | null = null
@@ -99,11 +100,18 @@ function emitAutomationUnsafe(
   return { fired }
 }
 
-export function emitAutomation(...args: Parameters<typeof emitAutomationUnsafe>): EmitResult {
+export function emitAutomation(
+  db: Database.Database,
+  event: AutomationEventKind,
+  key: string,
+  data: AutomationEventData,
+  extra: { overdueTasks?: { id: number; title: string; daysOverdue: number }[]; date?: string; recentTrades?: (Pick<Trade, 'id' | 'date' | 'pnl'> & { closedAt?: string | null })[] } = {},
+  now: Date = new Date()
+): EmitResult {
   try {
-    return emitAutomationUnsafe(...args)
+    return emitAutomationUnsafe(db, event, key, data, extra, now)
   } catch (error) {
-    console.error('[automations] failed and was skipped:', args[1], args[2], error)
+    console.error('[automations] failed and was skipped:', event, key, error)
     return { fired: [] }
   }
 }

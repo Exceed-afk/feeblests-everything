@@ -212,6 +212,12 @@ export const MIGRATIONS: string[] = [
 
   // 15: hide automation activity without removing the durable dedupe claims.
   `ALTER TABLE automation_events ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`,
+
+  // 16: when a trade actually closed (an ISO timestamp), so the "quick
+  // re-entry after a loss" rule can measure real minutes. Old rows keep NULL:
+  // they were closed before this existed and the rule never fires for them.
+  // Set on the exit-price write from now on (src/main/trades.ts).
+  `ALTER TABLE trades ADD COLUMN closed_at TEXT;`,
 ]
 
 // Exposed for focused migration tests and used by the app's startup path.

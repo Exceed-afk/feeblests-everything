@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Added "Quick re-entry note" (off by default): migration 16 adds `trades.closed_at` (ISO timestamp stamped when the exit price appears; old rows stay NULL and never fire), the Trade type, JSON export/import and validation carry it, and a pure rule shows a note when a new trade opens within N minutes (default 30) of the most recent LOSING close
 - Added two off-by-default trade automations: "Loss-streak pause note" (a message after the last N closed trades all lost, threshold configurable, default 3) and "Overtrading note" (a message once per day when more than N trades are dated today, default 5); both are pure rules, fire only through the normal message path and dedupe like the others
 - Added "Since you last opened" on the Briefing: a capped list of trades closed, savings transactions, tasks completed, habits missed and journal entries dated after the stored `lastSeenDate` (kept in `dailyCheckState`, updated by the once-per-day check), computed by a pure rule and never listing automation drafts
 - Real streak-broken detection replaces the write-time approximation: a habit with a 7+ run that missed a due day in the last two days gets one "Broken streak notes" automation per miss, computed from the shared habit rules by the once-per-day check; skipped days, rest days and "today not done yet" never count as breaks

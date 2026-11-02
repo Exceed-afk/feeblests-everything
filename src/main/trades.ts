@@ -9,14 +9,14 @@ import { emitAutomation } from './automations'
 interface Row {
   id: number; date: string; asset: string; direction: Direction; entry_price: number
   exit_price: number | null; quantity: number; fees: number; notes: string
-  tags: string; created_at: string; updated_at: string
+  tags: string; closed_at: string | null; created_at: string; updated_at: string
 }
 
 const toTrade = (r: Row): Trade => {
   const base = {
     id: r.id, date: r.date, asset: r.asset, direction: r.direction, entryPrice: r.entry_price,
     exitPrice: r.exit_price, quantity: r.quantity, fees: r.fees, notes: r.notes,
-    tags: JSON.parse(r.tags) as string[], createdAt: r.created_at, updatedAt: r.updated_at
+    tags: JSON.parse(r.tags) as string[], closedAt: r.closed_at ?? null, createdAt: r.created_at, updatedAt: r.updated_at
   }
   return { ...base, pnl: calcPnl(base) }
 }
@@ -74,29 +74,40 @@ function getTrade(db: Database.Database, id: number): Trade {
   return toTrade(row)
 }
 
-export function createTrade(db: Database.Database, input: TradeInput): Trade {
+export function createTrade(db: Database.Database, input: TradeInput, now: Date = new Date()): Trade {
   const t = prepare(input)
-  const now = new Date().toISOString()
+  const nowIso = now.toISOString()
+  // closed_at: a trade logged already closed closes the moment it is created.
   const info = db.prepare(
-    `INSERT INTO trades (date, asset, direction, entry_price, exit_price, quantity, fees, notes, tags, created_at, updated_at)
-     VALUES (@date, @asset, @direction, @entry, @exit, @quantity, @fees, @notes, @tags, @now, @now)`
-  ).run({ ...t, now })
+    `INSERT INTO trades (date, asset, direction, entry_price, exit_price, quantity, fees, notes, tags, closed_at, created_at, updated_at)
+     VALUES (@date, @asset, @direction, @entry, @exit, @quantity, @fees, @notes, @tags, @closedAt, @now, @now)`
+  ).run({ ...t, closedAt: t.exit === null ? null : nowIso, now: nowIso })
   const trade = getTrade(db, Number(info.lastInsertRowid))
+  const recent = allTradesLight(db)
+  // R3 sees every NEW trade (open or closed) plus when it was created.
+  emitAutomation(db, 'trade-created', `trade:${trade.id}`, {
+    tradeId: trade.id, tradeCreatedAt: trade.createdAt, tradeDate: trade.date
+  }, { recentTrades: recent })
   if (trade.exitPrice !== null && trade.pnl !== null) {
     emitAutomation(db, 'trade-closed', `trade:${trade.id}`, {
       tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset, tradeDate: trade.date
-    }, { recentTrades: allTradesLight(db) })
+    }, { recentTrades: recent })
   }
   return trade
 }
 
 export function updateTrade(db: Database.Database, id: number, input: TradeInput): Trade {
   const t = prepare(input)
-  const before = db.prepare('SELECT exit_price FROM trades WHERE id = ?').get(id) as { exit_price: number | null } | undefined
+  const before = db.prepare('SELECT exit_price, closed_at FROM trades WHERE id = ?').get(id) as { exit_price: number | null; closed_at: string | null } | undefined
+  const now = new Date().toISOString()
+  // closed_at is stamped only on the transition open -> closed (migration 16).
+  // Editing an already-closed trade keeps its original stamp; re-opening clears it.
+  const wasOpen = !before || before.exit_price === null
+  const closedAt = t.exit === null ? null : (wasOpen ? now : before!.closed_at)
   db.prepare(
     `UPDATE trades SET date=@date, asset=@asset, direction=@direction, entry_price=@entry, exit_price=@exit,
-     quantity=@quantity, fees=@fees, notes=@notes, tags=@tags, updated_at=@now WHERE id=@id`
-  ).run({ ...t, id, now: new Date().toISOString() })
+     quantity=@quantity, fees=@fees, notes=@notes, tags=@tags, closed_at=@closedAt, updated_at=@now WHERE id=@id`
+  ).run({ ...t, id, now, closedAt })
   const trade = getTrade(db, id)
   // A trade CLOSING (was open, now has an exit) is an automation event.
   if (before && before.exit_price === null && trade.exitPrice !== null && trade.pnl !== null) {
@@ -108,13 +119,14 @@ export function updateTrade(db: Database.Database, id: number, input: TradeInput
 }
 
 // The light rows the trade rules need (date + pnl + id), for consecutiveLosses
-// and tradesOnDate. PnL computed via calcPnl; nothing else leaves the row shape.
-function allTradesLight(db: Database.Database): { id: number; date: string; pnl: number | null }[] {
-  const rows = db.prepare('SELECT id, date, direction, entry_price, exit_price, quantity, fees FROM trades').all() as Row[]
+// and tradesOnDate / the re-entry rule. PnL and closed_at included.
+function allTradesLight(db: Database.Database): { id: number; date: string; pnl: number | null; closedAt: string | null }[] {
+  const rows = db.prepare('SELECT id, date, direction, entry_price, exit_price, quantity, fees, closed_at FROM trades').all() as Row[]
   return rows.map((row) => ({
     id: row.id,
     date: row.date,
-    pnl: row.exit_price === null ? null : calcPnl({ direction: row.direction as TradeInput['direction'], entryPrice: row.entry_price, exitPrice: row.exit_price, quantity: row.quantity, fees: row.fees })
+    pnl: row.exit_price === null ? null : calcPnl({ direction: row.direction as TradeInput['direction'], entryPrice: row.entry_price, exitPrice: row.exit_price, quantity: row.quantity, fees: row.fees }),
+    closedAt: row.closed_at ?? null
   }))
 }
 

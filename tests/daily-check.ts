@@ -57,6 +57,7 @@ test('a throwing check does not stop the others, and lastRun is still written', 
     assert.deepEqual(result, { ran: true })
     assert.deepEqual(ran, ['fine'])
     assert.equal(readDailyCheckState(db).lastRun, TODAY)
+    assert.equal(readDailyCheckState(db).lastSeenDate, TODAY) // defaults to the day itself on a fresh db
     // and the same day still refuses to run again
     assert.deepEqual(runDailyChecksIfNeeded(db, TODAY), { ran: false })
   } finally { restore() }
@@ -112,10 +113,10 @@ test('the checks run even when every rule is off; the state is still marked', ()
   db.close()
 })
 
-test('the migration list is untouched by the daily check (no new migration needed)', () => {
-  // The plan's P1 stores state in the settings table, so no schema change:
-  // a migration would need the user's explicit OK (project rule).
-  assert.equal(MIGRATIONS.length, 15)
+test('the migration list grew by exactly the closed_at migration and nothing else', () => {
+  // R3 needed a migration (trades.closed_at, migration 16); the P1 daily check
+  // itself stores state in the settings table, so it added none.
+  assert.equal(MIGRATIONS.length, 16)
 })
 
 console.log(`${n} daily check checks passed`)

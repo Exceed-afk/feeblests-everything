@@ -29,7 +29,7 @@ export function collectBackup(db: Database.Database): BackupFile {
     })),
     trades: (db.prepare('SELECT * FROM trades ORDER BY id').all() as R[]).map((r) => ({
       id: r.id, date: r.date, asset: r.asset, direction: r.direction, entryPrice: r.entry_price, exitPrice: r.exit_price,
-      quantity: r.quantity, fees: r.fees, notes: r.notes, tags: JSON.parse(r.tags), createdAt: r.created_at, updatedAt: r.updated_at
+      quantity: r.quantity, fees: r.fees, notes: r.notes, tags: JSON.parse(r.tags), closedAt: r.closed_at ?? null, createdAt: r.created_at, updatedAt: r.updated_at
     })),
     savingsGoals: (db.prepare('SELECT * FROM savings_goals ORDER BY id').all() as R[]).map((r) => ({
       id: r.id, name: r.name, target: r.target, notes: r.notes, createdAt: r.created_at, updatedAt: r.updated_at
@@ -116,9 +116,9 @@ export function restoreBackup(db: Database.Database, b: BackupFile): BackupCount
       VALUES (@id, @date, @title, @body, @mood, @tags, @createdAt, @updatedAt)`)
     for (const e of b.logbook) entry.run({ ...e, tags: JSON.stringify(e.tags) })
 
-    const trade = db.prepare(`INSERT INTO trades (id, date, asset, direction, entry_price, exit_price, quantity, fees, notes, tags, created_at, updated_at)
-      VALUES (@id, @date, @asset, @direction, @entryPrice, @exitPrice, @quantity, @fees, @notes, @tags, @createdAt, @updatedAt)`)
-    for (const t of b.trades) trade.run({ ...t, tags: JSON.stringify(t.tags) })
+    const trade = db.prepare(`INSERT INTO trades (id, date, asset, direction, entry_price, exit_price, quantity, fees, notes, tags, closed_at, created_at, updated_at)
+      VALUES (@id, @date, @asset, @direction, @entryPrice, @exitPrice, @quantity, @fees, @notes, @tags, @closedAt, @createdAt, @updatedAt)`)
+    for (const t of b.trades) trade.run({ ...t, tags: JSON.stringify(t.tags), closedAt: t.closedAt ?? null })
 
     const goal = db.prepare(`INSERT INTO savings_goals (id, name, target, notes, created_at, updated_at)
       VALUES (@id, @name, @target, @notes, @createdAt, @updatedAt)`)

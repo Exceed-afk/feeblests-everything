@@ -19,6 +19,7 @@ import type { Trade } from './types'
 
 export type AutomationEventKind =
   | 'trade-closed'
+  | 'trade-created'
   | 'savings-deposit'
   | 'goal-reached'
   | 'habit-streak-broken'
@@ -30,6 +31,7 @@ export interface AutomationEventData {
   tradePnl?: number
   tradeAsset?: string
   tradeDate?: string
+  tradeCreatedAt?: string // ISO: when the trade row was created (the re-entry rule reads it)
   goalId?: number
   goalName?: string
   depositAmount?: number
@@ -67,6 +69,8 @@ export interface AutomationSettings {
   lossStreakLength: number // R1: how many losses in a row trigger the note
   overtradingNote: boolean // R2: note when a day's trade count exceeds N
   maxTradesPerDay: number // R2: the N
+  quickReentryNote: boolean // R3: note when a new trade opens within N minutes of a losing close
+  reentryMinutes: number // R3: the N
 }
 
 export const DEFAULT_AUTOMATIONS: AutomationSettings = {
@@ -75,7 +79,8 @@ export const DEFAULT_AUTOMATIONS: AutomationSettings = {
   streakReminder: false,
   overdueTaskNudge: false, overdueDays: 7,
   lossStreakPause: false, lossStreakLength: 3,
-  overtradingNote: false, maxTradesPerDay: 5
+  overtradingNote: false, maxTradesPerDay: 5,
+  quickReentryNote: false, reentryMinutes: 30
 }
 
 // ---------- the activity log row shape ----------
@@ -95,7 +100,7 @@ export interface AutomationActivity {
 
 // ---------- rules ----------
 
-export type AutomationRuleId = 'loss-reflection' | 'goal-celebration' | 'streak-reminder' | 'overdue-task-nudge' | 'loss-streak-pause' | 'overtrading-note'
+export type AutomationRuleId = 'loss-reflection' | 'goal-celebration' | 'streak-reminder' | 'overdue-task-nudge' | 'loss-streak-pause' | 'overtrading-note' | 'quick-reentry' | 'quick-reentry'
 
 export interface AutomationRule {
   id: AutomationRuleId
@@ -267,9 +272,57 @@ export function overtradingNoteRule(): AutomationRule {
   }
 }
 
+// R3: minutes between a losing close and a new trade, from real timestamps.
+// A losing trade needs closedAt (migration 16); a new trade needs createdAt.
+// Either missing -> never fires (old data stays silent). Pure, so tests can
+// drive the boundary exactly.
+export function minutesBetweenReentry(
+  losingCloseAt: string | null | undefined,
+  newTradeCreatedAt: string | null | undefined
+): number | null {
+  if (!losingCloseAt || !newTradeCreatedAt) return null
+  const close = Date.parse(losingCloseAt)
+  const open = Date.parse(newTradeCreatedAt)
+  if (Number.isNaN(close) || Number.isNaN(open)) return null
+  const ms = open - close
+  if (ms < 0) return null // the "new" trade predates the close: not a re-entry
+  return Math.round(ms / 60_000)
+}
+
+export function quickReentryRule(): AutomationRule {
+  return {
+    id: 'quick-reentry',
+    label: 'Quick re-entry note',
+    description: 'When a new trade opens within N minutes of a losing close, show a note.',
+    listensTo: ['trade-created'],
+    run: (event, settings, ctx) => {
+      if (!settings.quickReentryNote) return []
+      if (ctx.produced.has('quick-reentry')) return []
+      const createdAt = event.data.tradeCreatedAt
+      const trades = ctx.recentTrades ?? []
+      // The most recent losing CLOSE before this trade opened, by timestamp.
+      let closest: { minutes: number } | null = null
+      for (const trade of trades) {
+        if (trade.pnl === undefined || trade.pnl === null || trade.pnl >= 0) continue // only a LOSS counts
+        const minutes = minutesBetweenReentry((trade as { closedAt?: string | null }).closedAt, createdAt)
+        if (minutes === null) continue
+        if (closest === null || minutes < closest.minutes) closest = { minutes }
+      }
+      const max = Math.max(1, settings.reentryMinutes)
+      if (!closest || closest.minutes > max) return []
+      ctx.produced.add('quick-reentry')
+      return [{
+        type: 'message',
+        text: `You opened a trade ${closest.minutes} minute${closest.minutes === 1 ? '' : 's'} after a loss.`,
+        linkTool: 'trades'
+      }]
+    }
+  }
+}
+
 // The registry. Adding a rule = adding one entry here (+ its type above).
 export function defaultRules(): AutomationRule[] {
-  return [lossReflectionRule(), goalCelebrationRule(), streakReminderRule(), overdueTaskNudgeRule(), lossStreakPauseRule(), overtradingNoteRule()]
+  return [lossReflectionRule(), goalCelebrationRule(), streakReminderRule(), overdueTaskNudgeRule(), lossStreakPauseRule(), overtradingNoteRule(), quickReentryRule()]
 }
 
 // Nearest-friendly number for a title.
@@ -281,7 +334,8 @@ export const RULE_TOGGLE: Record<AutomationRuleId, keyof AutomationSettings> = {
   'streak-reminder': 'streakReminder',
   'overdue-task-nudge': 'overdueTaskNudge',
   'loss-streak-pause': 'lossStreakPause',
-  'overtrading-note': 'overtradingNote'
+  'overtrading-note': 'overtradingNote',
+  'quick-reentry': 'quickReentryNote'
 }
 
 // ---------- the engine run ----------
@@ -292,7 +346,7 @@ export interface AutomationRunContext {
   // Extra per-run data a caller can hand in; the overdue rule reads overdueTasks,
   // the trade rules read recentTrades (all trades, or a recent slice).
   overdueTasks?: { id: number; title: string; daysOverdue: number }[]
-  recentTrades?: Pick<Trade, 'id' | 'date' | 'pnl'>[]
+  recentTrades?: (Pick<Trade, 'id' | 'date' | 'pnl'> & { closedAt?: string | null })[]
   // Which rules already produced something in an enclosing run (loop prevention).
   alreadyProduced?: ReadonlySet<AutomationRuleId>
 }
@@ -357,6 +411,7 @@ export function actionLabel(ruleId: AutomationRuleId, action: AutomationAction, 
   if (ruleId === 'overdue-task-nudge') return `Surfaced stale overdue tasks in the daily briefing${tool}.`
   if (ruleId === 'loss-streak-pause') return 'Showed a pause note after a run of losses (open trades).'
   if (ruleId === 'overtrading-note') return 'Showed an overtrading note.'
+  if (ruleId === 'quick-reentry') return `Showed a quick re-entry note after a loss (${event.data.tradeCreatedAt ? '' : 'timestamp missing'}).`
   return `Showed a message${tool}.`
 }
 

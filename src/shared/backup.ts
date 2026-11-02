@@ -11,7 +11,7 @@ export const BACKUP_FORMAT = 1
 // Raw rows as stored in the database (camelCase). P&L and balances are NOT in
 // here because they are always calculated from these fields.
 export interface BackupEntry { id: number; date: string; title: string; body: string; mood: string | null; tags: string[]; createdAt: string; updatedAt: string }
-export interface BackupTrade { id: number; date: string; asset: string; direction: Direction; entryPrice: number; exitPrice: number | null; quantity: number; fees: number; notes: string; tags: string[]; createdAt: string; updatedAt: string }
+export interface BackupTrade { id: number; date: string; asset: string; direction: Direction; entryPrice: number; exitPrice: number | null; quantity: number; fees: number; notes: string; tags: string[]; closedAt?: string | null; createdAt: string; updatedAt: string }
 export interface BackupGoal { id: number; name: string; target: number | null; notes: string; createdAt: string; updatedAt: string }
 export interface BackupHabit {
   id: number; name: string; notes: string; days: number[]; archived: boolean; startDate: string; createdAt: string; updatedAt: string
@@ -126,7 +126,8 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
     if (!isObj(r) || !common(r) || !isDate(r.date) || !isStr(r.asset) || !r.asset.trim() ||
         (r.direction !== 'long' && r.direction !== 'short') || !isNum(r.entryPrice) || !(r.entryPrice > 0) ||
         !(r.exitPrice === null || (isNum(r.exitPrice) && r.exitPrice > 0)) || !isNum(r.quantity) || !(r.quantity > 0) ||
-        !isNum(r.fees) || r.fees < 0 || !isStr(r.notes) || !isStrArray(r.tags)) bad('Trade', i, isObj(r) ? r.id : '?')
+        !isNum(r.fees) || r.fees < 0 || !isStr(r.notes) || !isStrArray(r.tags) ||
+        !(r.closedAt === undefined || r.closedAt === null || (isStr(r.closedAt) && !Number.isNaN(Date.parse(r.closedAt))))) bad('Trade', i, isObj(r) ? r.id : '?')
   })
   const goals = data.savingsGoals as Record<string, unknown>[]
   goals.forEach((r, i) => {

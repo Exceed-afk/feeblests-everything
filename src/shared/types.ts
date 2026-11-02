@@ -251,10 +251,11 @@ export interface Trade {
   notes: string
   tags: string[]
   pnl: number | null // CALCULATED (never stored); null while open
+  closedAt?: string | null // ISO timestamp of the close (migration 16); null while open, missing on old data
   createdAt: string
   updatedAt: string
 }
-export type TradeInput = Omit<Trade, 'id' | 'pnl' | 'createdAt' | 'updatedAt'>
+export type TradeInput = Omit<Trade, 'id' | 'pnl' | 'closedAt' | 'createdAt' | 'updatedAt'>
 
 export interface TradeFilter {
   text?: string // matches asset or notes

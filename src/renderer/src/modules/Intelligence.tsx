@@ -184,6 +184,17 @@ export function Intelligence() {
                   aria-label="Show an overtrading note when a day has more than this many trades" />
               </label>
             )}
+            <FeatureCard name="Quick re-entry note" description="When a new trade opens within N minutes of a losing close, show a note. Only trades closed while this app was running carry a close time; old trades stay silent."
+              enabled={automations.quickReentryNote} onToggle={() => setAutomation({ quickReentryNote: !automations.quickReentryNote })} />
+            {automations.quickReentryNote && (
+              <label className="flex items-center gap-3 text-sm pl-9">
+                <span className="text-muted">Within</span>
+                <input type="number" min="1" step="1" className="field w-24" value={automations.reentryMinutes}
+                  onChange={(e) => setAutomation({ reentryMinutes: Math.max(1, Number(e.target.value) || 1) })}
+                  aria-label="Show a quick re-entry note when a trade opens within this many minutes of a losing close" />
+                <span className="text-muted">minutes of a loss</span>
+              </label>
+            )}
           </div>
         </section>
 
