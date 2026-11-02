@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Added the goal projection (Idea section of the plan, no deadline column so it stays a projection): a goal detail shows "At your recent average of X/week you will reach '<goal>' in about N weeks" computed from the last 8 weeks' net by a pure rule; it stays silent under 4 weeks of data, on a zero/negative average, when the goal is reached or has no target, or when the horizon would exceed five years
 - Insights can now be snoozed or hidden: each card offers "Snooze 4 weeks" (resurfaces the day after) and "Hide" (until restored); dismissals moved from plain ids to `{ id, until }` with the old format migrated automatically at startup; expired snoozes resurface the card, and a restore list can be driven through the same dismiss call
 - Added small plain-SVG charts to the Insights page (Sparkline under each weekday/mood table, currentColor plus theme token classes, role=img with the same numbers in the aria label); no new dependencies
 - Insights comparisons now use Cohen's d effect size instead of a fixed difference threshold: wording bands (about the same / small / moderate / large) replace SAME=0.25, the detail line shows both group spreads (+/-), and the minimum days per group rose from 4 to 5
