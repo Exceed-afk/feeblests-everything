@@ -164,6 +164,26 @@ export function Intelligence() {
                 <span className="text-muted">days</span>
               </label>
             )}
+            <FeatureCard name="Loss-streak pause note" description="When the last N closed trades all lost, show a note suggesting a pause."
+              enabled={automations.lossStreakPause} onToggle={() => setAutomation({ lossStreakPause: !automations.lossStreakPause })} />
+            {automations.lossStreakPause && (
+              <label className="flex items-center gap-3 text-sm pl-9">
+                <span className="text-muted">Losses in a row</span>
+                <input type="number" min="2" step="1" className="field w-24" value={automations.lossStreakLength}
+                  onChange={(e) => setAutomation({ lossStreakLength: Math.max(2, Number(e.target.value) || 2) })}
+                  aria-label="Show a pause note after this many losses in a row" />
+              </label>
+            )}
+            <FeatureCard name="Overtrading note" description="When more than N trades are dated today, show a note about your plan."
+              enabled={automations.overtradingNote} onToggle={() => setAutomation({ overtradingNote: !automations.overtradingNote })} />
+            {automations.overtradingNote && (
+              <label className="flex items-center gap-3 text-sm pl-9">
+                <span className="text-muted">Max trades per day</span>
+                <input type="number" min="1" step="1" className="field w-24" value={automations.maxTradesPerDay}
+                  onChange={(e) => setAutomation({ maxTradesPerDay: Math.max(1, Number(e.target.value) || 1) })}
+                  aria-label="Show an overtrading note when a day has more than this many trades" />
+              </label>
+            )}
           </div>
         </section>
 

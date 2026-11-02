@@ -18,6 +18,7 @@ import {
 } from '../shared/automations'
 import { getSettings, setSetting } from './db'
 import { cleanTags, localDate } from './util'
+import type { Trade } from '../shared/types'
 
 // Reads settings from ANY database handle (the app's global one, or a test's in-memory one),
 // so emitAutomation works before the app's global handle exists.
@@ -59,13 +60,14 @@ function emitAutomationUnsafe(
   event: AutomationEventKind,
   key: string, // "trade:12", "goal:3:first-reach": one event, once per rule, ever
   data: AutomationEventData,
-  extra: { overdueTasks?: { id: number; title: string; daysOverdue: number }[]; date?: string } = {}
+  extra: { overdueTasks?: { id: number; title: string; daysOverdue: number }[]; date?: string; recentTrades?: Pick<Trade, 'id' | 'date' | 'pnl'>[] } = {}
 ): EmitResult {
   const settings = automationSettings(db)
   const today = extra.date ?? localDate()
   const outcomes = runAutomation({ kind: event, date: today, data }, {
     settings,
-    overdueTasks: extra.overdueTasks
+    overdueTasks: extra.overdueTasks,
+    recentTrades: extra.recentTrades
   })
   if (outcomes.length === 0) return { fired: [] }
 

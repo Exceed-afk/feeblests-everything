@@ -11,6 +11,7 @@
 //
 // Dates are "YYYY-MM-DD" text, like everywhere else.
 import { addDays } from './habits'
+import type { Trade } from './types'
 
 // ---------- events ----------
 // To add a trigger: add one entry here. To add a rule: write it in RULES below,
@@ -62,13 +63,19 @@ export interface AutomationSettings {
   streakReminder: boolean
   overdueTaskNudge: boolean
   overdueDays: number // overdue for MORE than this many days surfaces in the briefing
+  lossStreakPause: boolean // R1: note after N losses in a row
+  lossStreakLength: number // R1: how many losses in a row trigger the note
+  overtradingNote: boolean // R2: note when a day's trade count exceeds N
+  maxTradesPerDay: number // R2: the N
 }
 
 export const DEFAULT_AUTOMATIONS: AutomationSettings = {
   lossReflection: false, lossThreshold: 50,
   goalCelebration: false,
   streakReminder: false,
-  overdueTaskNudge: false, overdueDays: 7
+  overdueTaskNudge: false, overdueDays: 7,
+  lossStreakPause: false, lossStreakLength: 3,
+  overtradingNote: false, maxTradesPerDay: 5
 }
 
 // ---------- the activity log row shape ----------
@@ -88,7 +95,7 @@ export interface AutomationActivity {
 
 // ---------- rules ----------
 
-export type AutomationRuleId = 'loss-reflection' | 'goal-celebration' | 'streak-reminder' | 'overdue-task-nudge'
+export type AutomationRuleId = 'loss-reflection' | 'goal-celebration' | 'streak-reminder' | 'overdue-task-nudge' | 'loss-streak-pause' | 'overtrading-note'
 
 export interface AutomationRule {
   id: AutomationRuleId
@@ -98,7 +105,7 @@ export interface AutomationRule {
   // Decides what, if anything, to do. Pure: same event + settings, same answer.
   // `produced` is the set of action types this run already emitted, used for
   // loop prevention: a rule never answers to an event of its own making.
-  run: (event: AutomationEvent, settings: AutomationSettings, ctx: { produced: Set<string>; overdueTasks?: { id: number; title: string; daysOverdue: number }[] }) => AutomationAction[]
+  run: (event: AutomationEvent, settings: AutomationSettings, ctx: { produced: Set<string>; overdueTasks?: { id: number; title: string; daysOverdue: number }[]; recentTrades?: Pick<Trade, 'id' | 'date' | 'pnl'>[] }) => AutomationAction[]
 }
 
 // The LABEL every automation-made entry carries, so the user can see and search it.
@@ -193,9 +200,76 @@ export function overdueTaskNudgeRule(): AutomationRule {
   }
 }
 
+// ---------- Phase 6 trade rules (pure helpers) ----------
+
+// How many losses in a row the LAST closed trades make, ordered by date then
+// id (the app's rule). Open trades (pnl null) are ignored entirely; a win or
+// a zero-P&L trade resets the count to 0.
+export function consecutiveLosses(trades: Pick<Trade, 'id' | 'date' | 'pnl'>[]): number {
+  const closed = trades.filter((t): t is Trade & { pnl: number } => t.pnl !== null)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id) // newest first
+  let streak = 0
+  for (const t of closed) {
+    if (t.pnl < 0) streak++
+    else break
+  }
+  return streak
+}
+
+// How many trades are dated on one local day (entry date, the only date trades store).
+export function tradesOnDate(trades: Pick<Trade, 'date'>[], date: string): number {
+  return trades.filter((t) => t.date === date).length
+}
+
+export function lossStreakPauseRule(): AutomationRule {
+  return {
+    id: 'loss-streak-pause',
+    label: 'Loss-streak pause note',
+    description: 'When the last N closed trades all lost, show a note suggesting a pause.',
+    listensTo: ['trade-closed'],
+    run: (event, settings, ctx) => {
+      if (!settings.lossStreakPause) return []
+      if (event.kind !== 'trade-closed') return []
+      if (ctx.produced.has('loss-streak-pause')) return []
+      const trades = ctx.recentTrades ?? []
+      const needed = Math.max(2, settings.lossStreakLength)
+      if (consecutiveLosses(trades) < needed) return []
+      ctx.produced.add('loss-streak-pause')
+      return [{
+        type: 'message',
+        text: `${needed} losses in a row. Consider a pause.`,
+        linkTool: 'trades'
+      }]
+    }
+  }
+}
+
+export function overtradingNoteRule(): AutomationRule {
+  return {
+    id: 'overtrading-note',
+    label: 'Overtrading note',
+    description: 'When more than N trades are dated today, show a note about your plan.',
+    listensTo: ['trade-closed'],
+    run: (event, settings, ctx) => {
+      if (!settings.overtradingNote) return []
+      if (ctx.produced.has('overtrading-note')) return [] // once per day, via the dedupe key
+      const trades = ctx.recentTrades ?? []
+      const todayCount = tradesOnDate(trades, event.date)
+      const max = Math.max(1, settings.maxTradesPerDay)
+      if (todayCount <= max) return []
+      ctx.produced.add('overtrading-note')
+      return [{
+        type: 'message',
+        text: `${todayCount} trades today. Your plan says...?`,
+        linkTool: 'trades'
+      }]
+    }
+  }
+}
+
 // The registry. Adding a rule = adding one entry here (+ its type above).
 export function defaultRules(): AutomationRule[] {
-  return [lossReflectionRule(), goalCelebrationRule(), streakReminderRule(), overdueTaskNudgeRule()]
+  return [lossReflectionRule(), goalCelebrationRule(), streakReminderRule(), overdueTaskNudgeRule(), lossStreakPauseRule(), overtradingNoteRule()]
 }
 
 // Nearest-friendly number for a title.
@@ -205,7 +279,9 @@ export const RULE_TOGGLE: Record<AutomationRuleId, keyof AutomationSettings> = {
   'loss-reflection': 'lossReflection',
   'goal-celebration': 'goalCelebration',
   'streak-reminder': 'streakReminder',
-  'overdue-task-nudge': 'overdueTaskNudge'
+  'overdue-task-nudge': 'overdueTaskNudge',
+  'loss-streak-pause': 'lossStreakPause',
+  'overtrading-note': 'overtradingNote'
 }
 
 // ---------- the engine run ----------
@@ -213,8 +289,10 @@ export const RULE_TOGGLE: Record<AutomationRuleId, keyof AutomationSettings> = {
 export interface AutomationRunContext {
   settings: AutomationSettings
   rules?: AutomationRule[]
-  // Extra per-run data a caller can hand in; the overdue rule reads overdueTasks.
+  // Extra per-run data a caller can hand in; the overdue rule reads overdueTasks,
+  // the trade rules read recentTrades (all trades, or a recent slice).
   overdueTasks?: { id: number; title: string; daysOverdue: number }[]
+  recentTrades?: Pick<Trade, 'id' | 'date' | 'pnl'>[]
   // Which rules already produced something in an enclosing run (loop prevention).
   alreadyProduced?: ReadonlySet<AutomationRuleId>
 }
@@ -239,7 +317,7 @@ export function runAutomation(event: AutomationEvent, ctx: AutomationRunContext)
     if (ctx.alreadyProduced?.has(rule.id)) continue // loop guard: already ran in this chain
     const toggle = RULE_TOGGLE[rule.id]
     if (!ctx.settings[toggle]) continue // the rule is switched off: nothing happens, nothing is logged
-    const actions = rule.run(event, ctx.settings, { produced, overdueTasks: ctx.overdueTasks })
+    const actions = rule.run(event, ctx.settings, { produced, overdueTasks: ctx.overdueTasks, recentTrades: ctx.recentTrades })
     if (actions.length === 0) continue
     out.push({ ruleId: rule.id, actions, labels: actions.map((a) => actionLabel(rule.id, a, event)) })
   }
@@ -277,6 +355,8 @@ export function actionLabel(ruleId: AutomationRuleId, action: AutomationAction, 
   if (ruleId === 'goal-celebration') return `Showed a celebration for reaching "${event.data.goalName ?? 'a goal'}"${tool}.`
   if (ruleId === 'streak-reminder') return `Showed a note about "${event.data.habitName ?? 'a habit'}"'s broken streak${tool}.`
   if (ruleId === 'overdue-task-nudge') return `Surfaced stale overdue tasks in the daily briefing${tool}.`
+  if (ruleId === 'loss-streak-pause') return 'Showed a pause note after a run of losses (open trades).'
+  if (ruleId === 'overtrading-note') return 'Showed an overtrading note.'
   return `Showed a message${tool}.`
 }
 

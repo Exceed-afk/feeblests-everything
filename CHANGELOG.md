@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Added two off-by-default trade automations: "Loss-streak pause note" (a message after the last N closed trades all lost, threshold configurable, default 3) and "Overtrading note" (a message once per day when more than N trades are dated today, default 5); both are pure rules, fire only through the normal message path and dedupe like the others
 - Added "Since you last opened" on the Briefing: a capped list of trades closed, savings transactions, tasks completed, habits missed and journal entries dated after the stored `lastSeenDate` (kept in `dailyCheckState`, updated by the once-per-day check), computed by a pure rule and never listing automation drafts
 - Real streak-broken detection replaces the write-time approximation: a habit with a 7+ run that missed a due day in the last two days gets one "Broken streak notes" automation per miss, computed from the shared habit rules by the once-per-day check; skipped days, rest days and "today not done yet" never count as breaks
 - Added a pure offline weekly summary (savings net, trade P&L, habit rate, tasks completed, mood average and journal entries for last week) computed with the assistant's own function rules, shown as a Briefing card with a "Save to Logbook" button that creates an ordinary entry; an empty week shows "Nothing logged"

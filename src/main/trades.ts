@@ -85,7 +85,7 @@ export function createTrade(db: Database.Database, input: TradeInput): Trade {
   if (trade.exitPrice !== null && trade.pnl !== null) {
     emitAutomation(db, 'trade-closed', `trade:${trade.id}`, {
       tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset, tradeDate: trade.date
-    })
+    }, { recentTrades: allTradesLight(db) })
   }
   return trade
 }
@@ -102,9 +102,20 @@ export function updateTrade(db: Database.Database, id: number, input: TradeInput
   if (before && before.exit_price === null && trade.exitPrice !== null && trade.pnl !== null) {
     emitAutomation(db, 'trade-closed', `trade:${trade.id}`, {
       tradeId: trade.id, tradePnl: trade.pnl, tradeAsset: trade.asset, tradeDate: trade.date
-    })
+    }, { recentTrades: allTradesLight(db) })
   }
   return trade
+}
+
+// The light rows the trade rules need (date + pnl + id), for consecutiveLosses
+// and tradesOnDate. PnL computed via calcPnl; nothing else leaves the row shape.
+function allTradesLight(db: Database.Database): { id: number; date: string; pnl: number | null }[] {
+  const rows = db.prepare('SELECT id, date, direction, entry_price, exit_price, quantity, fees FROM trades').all() as Row[]
+  return rows.map((row) => ({
+    id: row.id,
+    date: row.date,
+    pnl: row.exit_price === null ? null : calcPnl({ direction: row.direction as TradeInput['direction'], entryPrice: row.entry_price, exitPrice: row.exit_price, quantity: row.quantity, fees: row.fees })
+  }))
 }
 
 export function deleteTrade(db: Database.Database, id: number): void {
