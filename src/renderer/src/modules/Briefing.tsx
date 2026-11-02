@@ -40,6 +40,14 @@ export function Briefing({ onNavigate, onOpen }: ModuleProps) {
 
       {data && (
         <div className="mt-5 flex flex-col gap-4" aria-live="polite">
+          {data.changes.length > 0 && (
+            <section className="card card-pad" aria-label="Since you last opened">
+              <h2 className="section-title"><Zap size={15} /> Since you last opened</h2>
+              <ul className="mt-3 flex flex-col gap-1">
+                {data.changes.map((c, i) => <li key={i} className="text-sm">{c.text}</li>)}
+              </ul>
+            </section>
+          )}
           <WeeklySection briefing={data} onSaved={load} />
           <AutomationsSection briefing={data} onNavigate={onNavigate} />
           {data.tasks && <TasksSection tasks={data.tasks} onNavigate={onNavigate} />}

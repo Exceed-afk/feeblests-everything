@@ -64,6 +64,7 @@ export interface DailyBriefing {
   automations: AutomationActivity[] // what the automations did recently, newest first (may be empty)
   staleOverdueTasks: { id: number; title: string; daysOverdue: number }[] // surfaced by the overdue rule
   weekly: BriefingWeekly | null // last week's summary, computed on demand (P2); null when nothing was logged
+  changes: ChangeItem[] // what changed since the last open (P4), newest tool first, capped
 }
 
 // ---------- helpers ----------
@@ -212,6 +213,7 @@ export function briefingSummary(b: Pick<DailyBriefing, 'tasks' | 'habits' | 'sav
 
 import { buildWeeklySummary, weeklyLineText } from './weekly'
 import type { AssistantRows } from './assistant'
+import type { ChangeItem } from './changes'
 
 export interface BriefingWeekly {
   weekStart: string
@@ -243,7 +245,8 @@ export interface BriefingInput {
   entries: LogEntry[]
   automations?: AutomationActivity[]
   overdueDays?: number
-} 
+  changes?: ChangeItem[] // P4: what happened since the last open (pure rule in shared/changes.ts)
+}  
 
 export function buildBriefing(input: BriefingInput): DailyBriefing {
   const { today, tasks, habits, goals, txs, trades, entries } = input
@@ -266,6 +269,7 @@ export function buildBriefing(input: BriefingInput): DailyBriefing {
     .sort((a, b) => b.daysOverdue - a.daysOverdue)
   return {
     today, ...b, automations: input.automations ?? [], staleOverdueTasks, weekly,
+    changes: input.changes ?? [],
     summary: briefingSummary(b)
   }
 }

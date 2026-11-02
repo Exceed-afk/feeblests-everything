@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Added "Since you last opened" on the Briefing: a capped list of trades closed, savings transactions, tasks completed, habits missed and journal entries dated after the stored `lastSeenDate` (kept in `dailyCheckState`, updated by the once-per-day check), computed by a pure rule and never listing automation drafts
 - Real streak-broken detection replaces the write-time approximation: a habit with a 7+ run that missed a due day in the last two days gets one "Broken streak notes" automation per miss, computed from the shared habit rules by the once-per-day check; skipped days, rest days and "today not done yet" never count as breaks
 - Added a pure offline weekly summary (savings net, trade P&L, habit rate, tasks completed, mood average and journal entries for last week) computed with the assistant's own function rules, shown as a Briefing card with a "Save to Logbook" button that creates an ordinary entry; an empty week shows "Nothing logged"
 - Added the once-per-day daily check infrastructure: day-gated state in the `dailyCheckState` setting, run at startup and from the reminder loop so a day turning over while the app is open is still checked exactly once; each future check runs in its own try/catch, and the first run after an upgrade looks back only two days

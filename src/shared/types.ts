@@ -602,6 +602,7 @@ export type { AutomationSettings, AutomationActivity }
 
 export type { DailyBriefing, BriefingTasks, BriefingHabits, BriefingSavings, BriefingTrades, BriefingJournal,
   BriefingTaskItem, BriefingHabitItem, BriefingGoal, BriefingWeekly } from './briefing'
+export type { ChangeItem } from './changes'
 
 // EverythingApi's briefing section (line 117) needs these types, so import them here too.
 import { round8 } from './math'

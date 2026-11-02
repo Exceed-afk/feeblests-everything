@@ -15,7 +15,7 @@ import { habitCompletionsOf, listHabits } from './habits'
 import { effectiveStart, getDayStatus, streakBeforeMiss } from '../shared/habits'
 import { localDate } from './util'
 
-export interface DailyCheckState { lastRun: string | null }
+export interface DailyCheckState { lastRun: string | null; lastSeenDate?: string | null }
 
 export const readDailyCheckState = (db: Database.Database): DailyCheckState => {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'dailyCheckState'").get() as { value: string } | undefined
@@ -24,7 +24,10 @@ export const readDailyCheckState = (db: Database.Database): DailyCheckState => {
     const parsed: unknown = JSON.parse(row.value)
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const state = parsed as Record<string, unknown>
-      return { lastRun: typeof state.lastRun === 'string' ? state.lastRun : null }
+      return {
+        lastRun: typeof state.lastRun === 'string' ? state.lastRun : null,
+        lastSeenDate: typeof state.lastSeenDate === 'string' ? state.lastSeenDate : null
+      }
     }
   } catch { /* a broken row reads as "never ran" */ }
   return { lastRun: null }
@@ -47,6 +50,18 @@ const addDaysLocal = (iso: string, n: number): string => {
 
 export const lookbackStart = (lastRun: string | null, today: string): string =>
   addDaysLocal(today, -(FIRST_RUN_LOOKBACK_DAYS - 1))
+
+// The day the "what changed" briefing list should look back FROM. Written by
+// the daily check after it runs, so the briefing built at startup sees the
+// previous value; the main-window-close hook keeps it fresh otherwise.
+export const changesSinceDate = (db: Database.Database, today: string = localDate()): string => {
+  const state = readDailyCheckState(db)
+  const seen = state.lastSeenDate ?? state.lastRun ?? null
+  // Never further back than the no-flood window, and never into the future.
+  if (!seen || seen >= today) return addDaysLocal(today, -(FIRST_RUN_LOOKBACK_DAYS - 1))
+  const earliest = addDaysLocal(today, -(FIRST_RUN_LOOKBACK_DAYS - 1))
+  return seen < earliest ? earliest : seen
+}
 
 // One row per check, so a test can drive the same list the app runs.
 export type DailyCheck = (db: Database.Database, from: string, today: string) => void
@@ -115,7 +130,10 @@ export function runDailyChecksIfNeeded(db: Database.Database, today: string = lo
 
   // Written even when a check threw, and even when nothing was enabled: the
   // day is done either way, and retrying it tomorrow would double old notes.
-  writeDailyCheckState(db, { lastRun: today })
+  // P4: `lastSeenDate` advances ONLY here, after the "what changed" list was
+  // built from the PREVIOUS value, so a day away is reported once.
+  const previous = readDailyCheckState(db)
+  writeDailyCheckState(db, { lastRun: today, lastSeenDate: previous.lastSeenDate ?? previous.lastRun ?? today })
   return { ran: true }
 }
 

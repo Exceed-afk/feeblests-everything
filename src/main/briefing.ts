@@ -8,7 +8,9 @@ import { listEntries } from './logbook'
 import { listTrades } from './trades'
 import { listAllTransactions, listGoals } from './savings'
 import { listHabits } from './habits'
-import { listTasks } from './tasks'
+import { listTasks, listCompletions } from './tasks'
+import { changesSinceDate } from './dailyCheck'
+import { changesSince } from '../shared/changes'
 import { isDate } from './util'
 import type { DailyBriefing } from '../shared/types'
 
@@ -23,6 +25,19 @@ export function getBriefing(db: Database.Database, today: string): DailyBriefing
     trades: listTrades(db),
     entries: listEntries(db),
     automations: automationActivity(db, 5), // the Activity trail, newest few
-    overdueDays: automationSettings().overdueTaskNudge ? automationSettings().overdueDays : Number.MAX_SAFE_INTEGER
+    overdueDays: automationSettings().overdueTaskNudge ? automationSettings().overdueDays : Number.MAX_SAFE_INTEGER,
+    // P4: what changed since the last open, computed with the pure rule.
+    changes: (() => {
+      const since = changesSinceDate(db, today)
+      const { habits } = listHabits(db, today)
+      return changesSince({
+        trades: listTrades(db),
+        txs: listAllTransactions(db),
+        completions: listCompletions(db, { from: since, to: today }),
+        tasks: [],
+        habits,
+        entries: listEntries(db)
+      }, since, today)
+    })()
   })
 }
