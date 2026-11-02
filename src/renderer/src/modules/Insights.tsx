@@ -9,6 +9,7 @@ import { MOOD_STYLE } from '../lib/moods'
 import { fmtAmount, fmtPnl } from '../lib/format'
 import { errMsg } from '../lib/errors'
 import { PageHeader } from '../components/PageHeader'
+import { Sparkline } from '../components/InsightCharts'
 
 export function Insights() {
   const [data, setData] = useState<InsightsPayload | null>(null)
@@ -129,7 +130,11 @@ function WeekdayTables({ insights }: { insights: InsightsPayload }) {
     <section className="card card-pad" aria-label="The numbers behind the insights">
       <h2 className="section-title"><BarChart3 size={15} /> The numbers behind them</h2>
       {hb.length > 0 && (
-        <table className="tbl mt-3">
+        <>
+          {/* I2: the same rate series as the table, drawn as a plain SVG line. */}
+          <Sparkline ariaLabel={`Habit completion rate by weekday, from ${Math.round(Math.min(...hb.map((r) => r.rate ?? 0)))}% to ${Math.round(Math.max(...hb.map((r) => r.rate ?? 0)))}%.`}
+            values={hb.map((r) => r.rate ?? 0)} className="text-accent mt-3" />
+          <table className="tbl mt-3">
           <caption className="sr-only">Habit completion rate by weekday</caption>
           <thead><tr><th scope="col">Weekday</th><th scope="col">Scheduled</th><th scope="col">Done</th><th scope="col">Rate</th></tr></thead>
           <tbody>
@@ -141,9 +146,13 @@ function WeekdayTables({ insights }: { insights: InsightsPayload }) {
             ))}
           </tbody>
         </table>
+        </>
       )}
       {tb.length > 0 && (
-        <table className="tbl mt-4">
+        <>
+          <Sparkline ariaLabel={`Closed-trade P&L by weekday, from ${fmtPnl(Math.min(...tb.map((r) => r.pnl)))} to ${fmtPnl(Math.max(...tb.map((r) => r.pnl)))}.`}
+            values={tb.map((r) => r.pnl)} className={Math.max(...tb.map((r) => r.pnl)) >= 0 ? 'text-pos mt-4' : 'text-neg mt-4'} />
+          <table className="tbl mt-3">
           <caption className="sr-only">Closed-trade P&L by weekday</caption>
           <thead><tr><th scope="col">Weekday</th><th scope="col">Closed</th><th scope="col">P&L</th></tr></thead>
           <tbody>
@@ -152,9 +161,13 @@ function WeekdayTables({ insights }: { insights: InsightsPayload }) {
             ))}
           </tbody>
         </table>
+        </>
       )}
       {mb.length > 0 && (
-        <table className="tbl mt-4">
+        <>
+          <Sparkline ariaLabel={`Closed-trade average P&L by the day's mood, from ${fmtPnl(Math.min(...mb.map((m) => m.avgPnl ?? 0)))} to ${fmtPnl(Math.max(...mb.map((m) => m.avgPnl ?? 0)))}.`}
+            values={mb.map((m) => m.avgPnl ?? 0)} className="text-accent mt-4" />
+          <table className="tbl mt-3">
           <caption className="sr-only">Closed-trade P&L by the day's mood</caption>
           <thead><tr><th scope="col">Mood</th><th scope="col">Days</th><th scope="col">Average P&L</th></tr></thead>
           <tbody>
@@ -167,6 +180,7 @@ function WeekdayTables({ insights }: { insights: InsightsPayload }) {
             ))}
           </tbody>
         </table>
+        </>
       )}
       <p className="meta mt-3">Weekdays are Monday to Sunday. Only scheduled days count for habit rates; only closed trades count for P&L.</p>
     </section>
