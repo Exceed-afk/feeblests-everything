@@ -11,6 +11,8 @@
 // a check throws, so one broken rule cannot repeat or block the others.
 import type Database from 'better-sqlite3'
 import { automationSettings, emitAutomation } from './automations'
+import { habitCompletionsOf, listHabits } from './habits'
+import { effectiveStart, getDayStatus, streakBeforeMiss } from '../shared/habits'
 import { localDate } from './util'
 
 export interface DailyCheckState { lastRun: string | null }
@@ -49,9 +51,49 @@ export const lookbackStart = (lastRun: string | null, today: string): string =>
 // One row per check, so a test can drive the same list the app runs.
 export type DailyCheck = (db: Database.Database, from: string, today: string) => void
 
-// The checks themselves. P1 ships with an empty list; P3's streak-broken
-// detection registers itself here, and later phases can add more.
-export const CHECKS: { id: string; run: DailyCheck }[] = []
+// The checks themselves.
+export const CHECKS: { id: string; run: DailyCheck }[] = [
+  // P3: a genuinely missed due day after a streak of 7 or more. Today is never
+  // "missed" (the day is not over), and the event key includes the missed day,
+  // so it fires exactly once per miss.
+  { id: 'streak-broken', run: checkStreakBreaks }
+]
+
+// Finds the most recent due day M before `today` with no record, per active
+// habit, and emits `habit-streak-broken` when the streak that ended just
+// before M was 7 or more and M is within the last 2 days.
+function checkStreakBreaks(db: Database.Database, from: string, today: string): void {
+  const settings = automationSettings(db)
+  if (!settings.streakReminder) return
+  const { habits } = listHabits(db, today)
+  for (const habit of habits) {
+    if (habit.archived) continue
+    const completions = habitCompletionsOf(db, habit.id)
+    const start = effectiveStart(habit, completions)
+    // Walk back at most two days plus the lookback window: any further back is
+    // old news that an earlier run should already have handled.
+    let cursor = addDaysLocal(today, -1)
+    let guard = 0
+    while (cursor >= from && guard < 7) {
+      guard++
+      if (start && cursor < start) break // before the habit existed
+      const status = getDayStatus(habit, cursor, completions, today, start)
+      if (status !== 'missed') {
+        cursor = addDaysLocal(cursor, -1)
+        continue // done, skipped, rest or (never) pending: not a new miss
+      }
+      // M = cursor: the most recent unrecorded due day. The streak that ended
+      // on the due day before it:
+      const streak = streakBeforeMiss(habit, completions, cursor)
+      if (streak >= 7) {
+        emitAutomation(db, 'habit-streak-broken', `habit:${habit.id}:miss:${cursor}`, {
+          habitId: habit.id, habitName: habit.name, habitStreak: streak
+        }, { date: today })
+      }
+      break // only the MOST RECENT miss matters per check
+    }
+  }
+}
 
 // Runs every pending daily check, at most once per local day.
 export function runDailyChecksIfNeeded(db: Database.Database, today: string = localDate()): { ran: boolean } {

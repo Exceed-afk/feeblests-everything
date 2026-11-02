@@ -404,7 +404,42 @@ export function completionRateOrNull(
   if (due === 0) return null
   return calculateCompletionRate(habit, completions, days, today)
 }
-// ---------- Phase 2: week navigation and editing a day by hand ----------
+// ---------- P3: real streak-broken detection ----------
+
+// The streak a habit had reached just BEFORE a missed due day `missedDate`:
+// walk the days backwards from the day before the miss and count the run of
+// done due days. A rest day or a skipped day inside the run does not break it,
+// matching the Habits page's current-streak rules exactly.
+export function streakBeforeMiss(
+  habit: HabitRules,
+  completions: HabitCompletion[],
+  missedDate: string
+): number {
+  let streak = 0
+  const dayBefore = addDays(missedDate, -1)
+  // Walk backwards from the day before the miss; treat that day as "today"
+  // so pending/future rules cannot interfere, and stop at the effective start.
+  const start = effectiveStart(habit, completions) ?? '0000-01-01'
+  const floor = start
+  let cursor = dayBefore
+  let guard = 0
+  while (cursor >= floor && guard < 3660) {
+    guard++
+    if (!isHabitDue(habit, cursor, start)) { cursor = addDays(cursor, -1); continue } // rest day, never breaks
+    const status = getDayStatus(habit, cursor, completions, cursor, start)
+    if (status === 'done') {
+      streak++
+      cursor = addDays(cursor, -1)
+      continue
+    }
+    if (status === 'skipped') {
+      cursor = addDays(cursor, -1)
+      continue
+    }
+    break // missed (or anything unexpected) ends the run
+  }
+  return streak
+}
 
 // The Monday of the week that `date` falls in. Weeks always run Monday to
 // Sunday, like the app's calendar and the Review page.

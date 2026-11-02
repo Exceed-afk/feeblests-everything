@@ -184,16 +184,10 @@ export function deleteHabit(db: Database.Database, id: number): void {
   db.prepare('DELETE FROM habits WHERE id = ?').run(id)
 }
 
-function watchStreak(db: Database.Database, habitId: number, mutate: () => void): void {
-  const habit = getHabit(db, habitId)
-  const beforeStreak = habit.stats.current
-  mutate()
-  const after = getHabit(db, habitId)
-  if (beforeStreak >= 7 && after.stats.current < beforeStreak) {
-    emitAutomation(db, 'habit-streak-broken', `habit:${habitId}:break:${beforeStreak}:${after.stats.current}`,
-      { habitId, habitName: habit.name, habitStreak: beforeStreak })
-  }
-}
+// P3 removed the write-time streak emissions: a streak was being declared
+// "broken" when an edit LOWERED it (un-ticking today: 8 -> 7), while a
+// genuinely missed day never fired because nothing ran. The detection now
+// lives in the daily check (src/main/dailyCheck.ts, checkStreakBreaks).
 
 export function setCheckin(db: Database.Database, habitId: number, date: string, done: boolean): void {
   setDayStatus(db, habitId, date, done ? 'done' : null)
@@ -213,18 +207,16 @@ export function setDayStatus(
 ): void {
   if (!isDate(date)) throw new Error('Date must look like 2026-10-25')
   if (date > localDate()) throw new Error('That day has not happened yet.')
-  watchStreak(db, habitId, () => {
-    if (status === null) {
-      db.prepare('DELETE FROM habit_checkins WHERE habit_id = ? AND date = ?').run(habitId, date)
-    } else {
-      // The day is unique per habit, so this replaces whatever was there.
-      db.prepare(
-        `INSERT INTO habit_checkins (habit_id, date, created_at, status, value)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(habit_id, date) DO UPDATE SET status = excluded.status, value = excluded.value`
-      ).run(habitId, date, new Date().toISOString(), status, value ?? null)
-    }
-  })
+  if (status === null) {
+    db.prepare('DELETE FROM habit_checkins WHERE habit_id = ? AND date = ?').run(habitId, date)
+  } else {
+    // The day is unique per habit, so this replaces whatever was there.
+    db.prepare(
+      `INSERT INTO habit_checkins (habit_id, date, created_at, status, value)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(habit_id, date) DO UPDATE SET status = excluded.status, value = excluded.value`
+    ).run(habitId, date, new Date().toISOString(), status, value ?? null)
+  }
 }
 
 // Logs how much of a habit was done on a day, for 'count' and 'duration' habits.
@@ -244,13 +236,11 @@ export function logHabitValue(
 
   // The day is always recorded as 'done'; whether it really counts as done is
   // worked out from the value and the target (see reachedTarget).
-  watchStreak(db, habitId, () => {
-    db.prepare(
-      `INSERT INTO habit_checkins (habit_id, date, created_at, status, value)
-        VALUES (?, ?, ?, 'done', ?)
-       ON CONFLICT(habit_id, date) DO UPDATE SET value = excluded.value`
-    ).run(habitId, date, new Date().toISOString(), value)
-  })
+  db.prepare(
+    `INSERT INTO habit_checkins (habit_id, date, created_at, status, value)
+      VALUES (?, ?, ?, 'done', ?)
+     ON CONFLICT(habit_id, date) DO UPDATE SET value = excluded.value`
+  ).run(habitId, date, new Date().toISOString(), value)
 }
 
 // ---------- Phase 6: the Logbook link (auto-complete) ----------
