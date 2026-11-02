@@ -27,7 +27,7 @@ const entry = (date: string, mood: LogEntry['mood'], tags: string[] = []): LogEn
 const completion = (iso: string): TaskCompletion => ({ taskId: 1, completedAt: iso })
 const task = (): Task => ({
   id: 1, title: 'T', notes: '', status: 'done', priority: 'medium', dueDate: day(2), createdAt: '',
-  completedAt: new Date(`${day(2)}T12:00:00`), dueTime: null, deletedAt: null, project: null, tags: [],
+  completedAt: new Date(`${day(2)}T12:00:00`).toISOString(), dueTime: null, deletedAt: null, project: null, tags: [],
   position: 0, recurrenceRule: null, recurrenceNext: null, subtasks: []
 })
 
@@ -55,7 +55,7 @@ test('savings net deposits minus withdrawals, matching savings_total', () => {
 test('trade P&L counts closed trades only, on their entry date', () => {
   const rows = emptyRows()
   rows.trades = [trade(day(0), 40), trade(day(1), -15), trade(day(2), 0)]
-  rows.trades.push({ ...trade(MONDAY), exitPrice: null, pnl: null }) // open, not counted
+  rows.trades.push({ ...trade(day(2), 0), exitPrice: null, pnl: null }) // open, not counted
   const s = buildWeeklySummary(rows, 'last_week', TODAY)
   const pnl = s.lines.find((l) => l.function === 'trade_pnl')!
   assert.equal(pnl.value, 25)
