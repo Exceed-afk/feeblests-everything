@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Pencil, Trash2, X } from 'lucide-react'
 import type { SavingsGoal, SavingsTx, TxKind } from '../../../shared/types'
-import { progressPercent, withRunningBalance } from '../../../shared/savings'
+import { progressPercent, withRunningBalance, projectGoal, projectionText } from '../../../shared/savings'
 import { today, formatDate } from '../lib/dates'
 import { fmtAmount } from '../lib/format'
 import { errMsg } from '../lib/errors'
@@ -73,6 +73,9 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
 
   const pct = progressPercent(goal.balance, goal.target)
   const rows = withRunningBalance(txs)
+  // I4: a projection from the last 8 weeks' average, shown only when it means something.
+  const projection = projectGoal(txs, goal, today())
+  const projectionLine = projectionText(projection, goal.name)
 
   return (
     <div className="scrim fixed inset-0 z-10 flex justify-end" onMouseDown={onClose}>
@@ -101,6 +104,7 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
                   ? `Goal reached. Target was ${fmtAmount(goal.target)}.`
                   : `${Math.floor(pct)}% of ${fmtAmount(goal.target)}, ${fmtAmount(goal.target - goal.balance)} to go`}
               </div>
+              {projectionLine && <p className="meta mt-1">{projectionLine}</p>}
             </>
           ) : (
             <div className="mt-1 text-sm text-muted">No target set</div>
