@@ -6,6 +6,7 @@ import { BarChart3, Lightbulb, X } from 'lucide-react'
 import type { InsightsPayload } from '../../../shared/types'
 import { MIN_DAYS } from '../../../shared/insights'
 import { MOOD_STYLE } from '../lib/moods'
+import { today } from '../lib/dates'
 import { fmtAmount, fmtPnl } from '../lib/format'
 import { errMsg } from '../lib/errors'
 import { PageHeader } from '../components/PageHeader'
@@ -16,14 +17,12 @@ export function Insights() {
   const [error, setError] = useState('')
 
   const load = useCallback(() => {
-    const d = new Date()
-    const t = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    window.api.intelligence.insights.build(t).then(setData).catch((e) => setError(errMsg(e)))
+    window.api.intelligence.insights.build(today()).then(setData).catch((e) => setError(errMsg(e)))
   }, [])
   useEffect(() => { load() }, [load])
 
-  const dismiss = async (id: string, dismissed: boolean): Promise<void> => {
-    await window.api.intelligence.insights.dismiss(id, dismissed)
+  const dismiss = async (id: string, dismissed: boolean, mode: 'snooze' | 'hide' | 'restore' = 'hide'): Promise<void> => {
+    await window.api.intelligence.insights.dismiss(id, dismissed, mode, today())
     load()
   }
 
@@ -46,15 +45,16 @@ export function Insights() {
             </section>
           )}
 
-          {data.comparisons.filter((c) => c.ok && !data.dismissed.includes(c.id)).map((c) => (
-            <Card key={c.id} id={c.id} text={c.text} detail={c.detail} onDismiss={dismiss}
+          {data.comparisons.filter((c) => c.ok && !data.dismissed.some((d) => d.id === c.id)).map((c) => (
+            <Card key={c.id} id={c.id} text={c.text} detail={c.detail} onDismiss={dismiss} snoozeWeeks={data.snoozeWeeks}
               aLabel="Higher side" bLabel="Lower side" a={c.a} b={c.b} />
           ))}
-          {data.correlations.filter((c) => c.ok && !data.dismissed.includes(c.id)).map((c) => (
-            <Card key={c.id} id={c.id} text={c.text} detail={c.detail} onDismiss={dismiss} />
+          {data.correlations.filter((c) => c.ok && !data.dismissed.some((d) => d.id === c.id)).map((c) => (
+            <Card key={c.id} id={c.id} text={c.text} detail={c.detail} onDismiss={dismiss} snoozeWeeks={data.snoozeWeeks} />
           ))}
 
           <WeekdayTables insights={data} />
+          <HonestyFooter />
         </div>
       )}
     </div>
@@ -92,11 +92,12 @@ function GroupBars({ a, b, aLabel, bLabel, format }: {
   )
 }
 
-function Card({ id, text, detail, onDismiss, aLabel, bLabel, a, b }: {
+function Card({ id, text, detail, onDismiss, snoozeWeeks, aLabel, bLabel, a, b }: {
   id: string
   text: string
   detail: string
-  onDismiss: (id: string, dismissed: boolean) => Promise<void>
+  onDismiss: (id: string, dismissed: boolean, mode?: 'snooze' | 'hide' | 'restore') => Promise<void>
+  snoozeWeeks: number
   aLabel?: string
   bLabel?: string
   a?: { n: number; average: number | null }
@@ -108,15 +109,32 @@ function Card({ id, text, detail, onDismiss, aLabel, bLabel, a, b }: {
     <section className="card card-pad" aria-label={text}>
       <div className="flex items-start justify-between gap-3">
         <h2 className="section-title"><Lightbulb size={15} /> Insight</h2>
-        <button className="btn-icon hover:text-neg" aria-label="Dismiss this insight (remembered)"
-          onClick={() => { setGone(true); void onDismiss(id, true) }}>
-          <X size={15} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button className="btn btn-sm" title={`Bring it back in ${snoozeWeeks} weeks`}
+            onClick={() => { setGone(true); void onDismiss(id, true, 'snooze') }}>
+            Snooze {snoozeWeeks} weeks
+          </button>
+          <button className="btn-icon hover:text-neg" aria-label="Hide this insight until restored"
+            onClick={() => { setGone(true); void onDismiss(id, true, 'hide') }}>
+            <X size={15} />
+          </button>
+        </div>
       </div>
       <p className="mt-2 text-sm leading-relaxed">{text}</p>
       {a && b && aLabel && bLabel && <GroupBars a={a} b={b} aLabel={aLabel} bLabel={bLabel} format={fmtAmount} />}
       <p className="meta mt-2">{detail}</p>
     </section>
+  )
+}
+
+// I5: the honesty footer. Descriptive wording, never causal — the sentence
+// keeps the reader, not the app, in charge of the conclusion.
+function HonestyFooter(): React.ReactNode {
+  return (
+    <p className="meta mt-2">
+      Several comparisons are checked at once, so some patterns will be chance.
+      Treat these as questions to explore, not conclusions.
+    </p>
   )
 }
 

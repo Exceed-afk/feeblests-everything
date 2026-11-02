@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CHANGELOG file for version tracking
 
 ### Intelligence
+- Insights can now be snoozed or hidden: each card offers "Snooze 4 weeks" (resurfaces the day after) and "Hide" (until restored); dismissals moved from plain ids to `{ id, until }` with the old format migrated automatically at startup; expired snoozes resurface the card, and a restore list can be driven through the same dismiss call
 - Added small plain-SVG charts to the Insights page (Sparkline under each weekday/mood table, currentColor plus theme token classes, role=img with the same numbers in the aria label); no new dependencies
 - Insights comparisons now use Cohen's d effect size instead of a fixed difference threshold: wording bands (about the same / small / moderate / large) replace SAME=0.25, the detail line shows both group spreads (+/-), and the minimum days per group rose from 4 to 5
 - Added "Quick re-entry note" (off by default): migration 16 adds `trades.closed_at` (ISO timestamp stamped when the exit price appears; old rows stay NULL and never fire), the Trade type, JSON export/import and validation carry it, and a pure rule shows a note when a new trade opens within N minutes (default 30) of the most recent LOSING close

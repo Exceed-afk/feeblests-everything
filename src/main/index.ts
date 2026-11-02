@@ -213,7 +213,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('automations:activity:clear', () => clearAutomationActivity(getDb()))
   ipcMain.handle('automations:staleTasks', () => tasks.overdueTasks(getDb(), localDate()))
   ipcMain.handle('insights:build', (_e, today: string) => getInsights(getDb(), today))
-  ipcMain.handle('insights:dismiss', (_e, id: string, dismissed: boolean) => setInsightDismissed(getDb(), id, dismissed))
+  ipcMain.handle('insights:dismiss', (_e, id: string, dismissed: boolean, mode?: 'snooze' | 'hide' | 'restore', today?: string) =>
+    setInsightDismissed(getDb(), id, dismissed, mode, today))
   ipcMain.handle('capture:status', () => capture.status())
   ipcMain.handle('capture:configure', (_e, patch: Partial<CaptureSettings>) => capture.configure(patch && typeof patch === 'object' ? patch : {}))
   ipcMain.handle('capture:open', () => capture.show())

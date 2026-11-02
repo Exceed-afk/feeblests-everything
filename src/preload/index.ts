@@ -122,7 +122,7 @@ const api: EverythingApi = {
     },
     insights: {
       build: (today) => ipcRenderer.invoke('insights:build', today),
-      dismiss: (id, dismissed) => ipcRenderer.invoke('insights:dismiss', id, dismissed)
+      dismiss: (id, dismissed, mode, today) => ipcRenderer.invoke('insights:dismiss', id, dismissed, mode, today)
     },
     assistant: {
       get: () => ipcRenderer.invoke('assistant:get'),

@@ -139,7 +139,7 @@ export function Review({ onOpen, onNavigate }: ModuleProps) { // eslint-disable-
   })
 
   const top = topInsights && [...topInsights.comparisons, ...topInsights.correlations]
-    .filter((c) => c.ok && !topInsights.dismissed.includes(c.id)).slice(0, 3)
+    .filter((c) => c.ok && !topInsights.dismissed.some((d) => d.id === c.id)).slice(0, 3)
 
   return (
     <div className="page page-lg" aria-busy={stale}>

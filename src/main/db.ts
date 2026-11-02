@@ -23,6 +23,7 @@ export async function initDatabase(): Promise<boolean> {
   const ready = await runMigrationsWithBackup(db, dir, () => {
     applyMigrations(db)
     migrateSettingsKeys(db)
+    migrateInsightDismissalShape(db)
   }, (error) => {
     const message = error instanceof Error ? error.message : String(error)
     console.error('Database migration failed; startup is stopping:', error)
@@ -100,7 +101,15 @@ export function migrateSettingsKeys(handle: Database.Database): void {
 
   handle.transaction(() => {
     if (hasAutomations && !automationsExist) save.run('automations', JSON.stringify(intelligence.automations))
-    if (hasDismissals && !dismissalsExist) save.run('insightDismissals', JSON.stringify(intelligence.dismissedInsights))
+    if (hasDismissals && !dismissalsExist) {
+      // I3: old dismissals were plain ids (string[]); the new shape is { id, until }[]
+      // with until null (= hidden until restored). Same ids, same meaning.
+      const old = intelligence.dismissedInsights
+      const migrated = Array.isArray(old)
+        ? old.map((item: unknown) => typeof item === 'string' ? { id: item, until: null } : item)
+        : old
+      save.run('insightDismissals', JSON.stringify(migrated))
+    }
     if (migrateProvider) save.run('assistant', JSON.stringify({ ...assistantSettings, provider: previousProvider }))
     const next = { ...intelligence }
     delete next.automations
@@ -108,6 +117,22 @@ export function migrateSettingsKeys(handle: Database.Database): void {
     delete next.aiProvider
     save.run('intelligence', JSON.stringify(next))
   })()
+}
+
+// I3: upgrade a saved insightDismissals string[] to { id, until: null }[] in place.
+// Idempotent: a list already in the new shape is written back unchanged.
+export function migrateInsightDismissalShape(handle: Database.Database): void {
+  const row = handle.prepare("SELECT value FROM settings WHERE key = 'insightDismissals'").get() as { value: string } | undefined
+  if (!row) return
+  let parsed: unknown
+  try { parsed = JSON.parse(row.value) } catch { return }
+  if (!Array.isArray(parsed)) return
+  if (parsed.every((item) => item && typeof item === 'object' && !Array.isArray(item) && typeof (item as { id?: unknown }).id === 'string')) return
+  const migrated = parsed
+    .filter((item): item is string => typeof item === 'string')
+    .map((id) => ({ id, until: null }))
+  handle.prepare("UPDATE settings SET value = ? WHERE key = 'insightDismissals'")
+    .run(JSON.stringify(migrated))
 }
 
 // One backup copy per day, keeping the newest 14, in data/backups.

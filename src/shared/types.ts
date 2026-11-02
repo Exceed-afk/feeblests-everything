@@ -61,7 +61,7 @@ interface IntelligenceApiInner {
   }
   insights: {
     build(today: string): Promise<InsightsPayload>
-    dismiss(id: string, dismissed: boolean): Promise<string[]>
+    dismiss(id: string, dismissed: boolean, mode?: 'snooze' | 'hide' | 'restore', today?: string): Promise<InsightDismissal[]>
   }
   assistant: {
     get(): Promise<AssistantSettings>
@@ -196,7 +196,12 @@ export interface EverythingApi {
 }
 
 // ---------- Insights ----------
-export interface InsightsPayload extends InsightsResult { dismissed: string[] }
+export interface InsightDismissal { id: string; until: string | null } // null = hidden until restored
+
+export interface InsightsPayload extends InsightsResult {
+  dismissed: InsightDismissal[]
+  snoozeWeeks: number
+}
 
 // ---------- Quick capture ----------
 export interface ExportResult { path: string; counts: BackupCounts }
@@ -613,7 +618,12 @@ import type { AssistantSettings, AssistantExchange, AssistantFunctionInfo, Assis
 export type { InsightsResult } from './insights'
 
 // ---------- Insights ----------
-export interface InsightsPayload extends InsightsResult { dismissed: string[] }
+export interface InsightDismissal { id: string; until: string | null } // null = hidden until restored
+
+export interface InsightsPayload extends InsightsResult {
+  dismissed: InsightDismissal[]
+  snoozeWeeks: number
+}
 
 // ---------- Calendar ----------
 // Calculated from the other tools' data each time (nothing new is stored).
