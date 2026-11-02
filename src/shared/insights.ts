@@ -32,17 +32,45 @@ export function isInsightId(id: string): id is InsightId {
   return Object.values(INSIGHT_IDS).some((known) => known === id)
 }
 
-export const MIN_DAYS = 4        // each group of a comparison needs at least this many days
+export const MIN_DAYS = 5        // each group of a comparison needs at least this many days (raised by I1)
 export const MIN_WEEKS = 4       // the window must span at least this many distinct weeks
 export const MIN_MOODS = 4       // mood correlations need at least this many logged days
 export const MIN_TRADES = 5      // per weekday/mood group of the trade breakdowns
 export const MIN_TASK_DAYS = 4   // days in each task-count group
-export const SAME = 0.25         // differences smaller than this are reported as "about the same"
 
 // ---------- tiny stats ----------
 
 export const mean = (xs: number[]): number | null =>
   xs.length === 0 ? null : round8(xs.reduce((a, b) => a + b, 0) / xs.length)
+
+// Sample standard deviation (n-1). null with fewer than two values: one number
+// has no spread. I1's replacement for the fixed SAME threshold.
+export function sd(xs: number[]): number | null {
+  if (xs.length < 2) return null
+  const m = mean(xs) as number
+  return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / (xs.length - 1))
+}
+
+// Cohen's d between two groups (pooled sd). null when either side has no
+// spread AND the means differ (a difference with zero spread everywhere is
+// not measurable); 0 when both are identical.
+export function cohensD(a: number[], b: number[]): number | null {
+  const sa = sd(a), sb = sd(b)
+  if (sa === null || sb === null) return null
+  const pooled = Math.sqrt(((a.length - 1) * sa ** 2 + (b.length - 1) * sb ** 2) / (a.length + b.length - 2))
+  if (pooled === 0) return mean(a) === mean(b) ? 0 : null
+  return round8(((mean(a) as number) - (mean(b) as number)) / pooled)
+}
+
+// The wording band for |d|: about the same, small, moderate, large.
+export function effectSizeText(d: number | null): string | null {
+  if (d === null) return null
+  const abs = Math.abs(d)
+  if (abs < 0.2) return 'about the same'
+  if (abs < 0.5) return 'a small difference'
+  if (abs < 0.8) return 'a moderate difference'
+  return 'a large difference'
+}
 
 export function lastN<T>(arr: T[], n: number): T[] {
   return n <= 0 ? [] : arr.slice(-n)
@@ -138,9 +166,6 @@ export interface CompareInsight {
   detail: string // the numbers behind the sentence ("n days each, averages X and Y")
 }
 
-const same = (a: number | null, b: number | null): boolean =>
-  a !== null && b !== null && Math.abs(a - b) < SAME
-
 const oneDec = (n: number): string => (Math.round(n * 10) / 10).toFixed(1)
 
 function compare(id: string, a: number[], b: number[], text: (ga: number | null, gb: number | null) => string, need: string): CompareInsight {
@@ -152,14 +177,29 @@ function compare(id: string, a: number[], b: number[], text: (ga: number | null,
       detail: `${a.length} and ${b.length} days so far; need at least ${MIN_DAYS} on each side.`
     }
   }
+  // I1: effect size decides, not a fixed threshold that fits neither mood nor money.
+  const d = cohensD(a, b)
+  const band = effectSizeText(d)
   const na = ga === null ? '-' : oneDec(ga), nb = gb === null ? '-' : oneDec(gb)
-  const body = same(ga, gb)
+  const spreadA = sd(a), spreadB = sd(b)
+  const spread = spreadA === null || spreadB === null ? ''
+    : ` spread +/-${oneDec(spreadA)} and +/-${oneDec(spreadB)}.`
+  if (band === null) {
+    return {
+      id, ok: false,
+      needText: 'Both groups have identical values, so there is no variation to compare yet.',
+      text: '',
+      a: { n: a.length, average: ga }, b: { n: b.length, average: gb },
+      detail: `${a.length} days vs ${b.length} days; averages ${na} and ${nb}.`
+    }
+  }
+  const body = band === 'about the same'
     ? `Averages were about the same (${na} vs ${nb}).`
     : text(ga, gb)
   return {
     id, ok: true, text: body,
     a: { n: a.length, average: ga }, b: { n: b.length, average: gb },
-    detail: `${a.length} days vs ${b.length} days; averages ${na} and ${nb}.`
+    detail: `${a.length} days vs ${b.length} days; averages ${na} and ${nb}.${spread}`
   }
 }
 

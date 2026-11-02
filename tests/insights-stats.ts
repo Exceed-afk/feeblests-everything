@@ -89,18 +89,18 @@ test('all-zero task days are excluded as median ties', () => {
 })
 
 test('all perfect and lower-rate habit days are included in their groups', () => {
-  const dates = days('2026-10-01', 12)
+  const dates = days('2026-10-01', 15)
   const result = buildInsights(input({
-    today: '2026-10-13',
+    today: '2026-10-16',
     start: dates[0],
     end: dates[dates.length - 1],
-    habits: [habit(dates.slice(0, 8), dates[0])],
+    habits: [habit(dates.slice(0, 10), dates[0])],
     txs: dates.map((date) => tx(date, 'deposit', 10))
   }))
   const insight = result.comparisons.find((item) => item.id === INSIGHT_IDS.savingsByHabits)
   assert.ok(insight?.ok)
-  assert.equal(insight.a.n, 8)
-  assert.equal(insight.b.n, 4)
+  assert.equal(insight.a.n, 10)
+  assert.equal(insight.b.n, 5)
 })
 
 test('insight IDs used by the engine are in the shared dismissal allowlist', () => {
@@ -121,4 +121,52 @@ test('savings totals use the shared signed amount helper semantics', () => {
     txs: [tx('2026-10-01', 'withdrawal', 12)]
   }))
   assert.equal(day.savingsNet, -12)
+})
+
+// ---------- I1: effect size instead of a fixed threshold ----------
+
+import { sd, cohensD, effectSizeText, MIN_DAYS } from '../src/shared/insights'
+
+test('I1: sd of a known set matches the textbook sample value', () => {
+  // [2, 4, 4, 4, 5, 5, 7, 9]: population sd = 2; sample sd (n-1) = 2.138...
+  assert.equal(sd([2, 4, 4, 4, 5, 5, 7, 9]), 2.138089935299395)
+  assert.equal(sd([5]), null) // one number has no spread
+  assert.equal(sd([]), null)
+})
+
+test('I1: cohensD is 0 for equal groups and null for zero spread with different means', () => {
+  assert.equal(cohensD([1, 2, 3, 4, 5], [1, 2, 3, 4, 5]), 0)
+  // Both groups constant but different means: a difference with no measurable spread.
+  assert.equal(cohensD([3, 3, 3, 3, 3], [5, 5, 5, 5, 5]), null)
+  // Textbook-style: two groups of the SAME shape shifted by one pooled sd -> d = 1.
+  const a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  const spread = sd(a) as number
+  const b = a.map((x) => x + spread) // same shape shifted by exactly one pooled sd
+  assert.equal(Math.abs(cohensD(a, b) as number), 1)
+})
+
+test('I1: the wording bands follow |d|', () => {
+  assert.equal(effectSizeText(0), 'about the same')
+  assert.equal(effectSizeText(0.19), 'about the same')
+  assert.equal(effectSizeText(0.2), 'a small difference')
+  assert.equal(effectSizeText(0.49), 'a small difference')
+  assert.equal(effectSizeText(0.5), 'a moderate difference')
+  assert.equal(effectSizeText(0.79), 'a moderate difference')
+  assert.equal(effectSizeText(0.8), 'a large difference')
+  assert.equal(effectSizeText(-0.9), 'a large difference') // sign does not matter
+  assert.equal(effectSizeText(null), null)
+})
+
+test('I1: MIN_DAYS is raised to 5', () => {
+  assert.equal(MIN_DAYS, 5)
+})
+
+test('I1: a money comparison is judged by effect size, not raw size', () => {
+  // Two savings groups with the SAME shape but a small shift relative to their
+  // wide spread: d lands in "about the same" even though the raw gap (3.5/day)
+  // is big money. The fixed SAME=0.25 rule could not do this for money.
+  const high = [0, 20, 30, 40, 90] // mean 36, sd ~35
+  const low2 = high.map((x) => x + 3.5)
+  const d = cohensD(high, low2)
+  assert.equal(effectSizeText(d), 'about the same')
 })
