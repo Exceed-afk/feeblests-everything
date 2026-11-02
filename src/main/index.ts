@@ -3,6 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electro
 import { basename, join } from 'path'
 import { readFileSync, writeFileSync } from 'fs'
 import { initDatabase, getSettings, setSetting, dataDir, getDb, safetyCopy } from './db'
+import { runDailyChecksIfNeeded } from './dailyCheck'
 import { collectBackup, currentCounts, restoreBackup } from './backup'
 import { countsOf, parseBackup, tradesToCsv, type BackupFile } from '../shared/backup'
 import { normalizeSettings, resolveTokens } from '../shared/appearance'
@@ -121,6 +122,9 @@ app.on('will-quit', () => capture?.dispose())
 app.whenReady().then(async () => {
   if (!gotLock) return // a second copy: the first one was asked to come forward and this one is closing
   if (!await initDatabase()) return
+  // The once-per-local-day checks (first thing after startup, then again from
+  // the reminder loop if the app stays open past midnight).
+  runDailyChecksIfNeeded(getDb())
   // Habit reminders: a check every minute while the app runs. It needs the
   // database once it exists, and clicking a notification focuses the app.
   startReminders(getDb, showMainWindow)

@@ -12,6 +12,7 @@
 import { Notification } from 'electron'
 import type Database from 'better-sqlite3'
 import { getDayStatus, isReminderDue } from '../shared/habits'
+import { runDailyChecksIfNeeded } from './dailyCheck'
 import type { HabitCompletion } from '../shared/types'
 import { habitCompletionsOf, listHabits } from './habits'
 import { listTasks } from './tasks'
@@ -48,6 +49,13 @@ export function localTime(d: Date = new Date()): string {
 }
 
 function checkReminders(db: Database.Database, onFocusApp: () => void): void {
+  // A day turning over is what makes the daily checks due; run them here too,
+  // so leaving the app open past midnight still runs the day's checks once.
+  try {
+    runDailyChecksIfNeeded(db)
+  } catch (error) {
+    console.error('Daily check failed:', error)
+  }
   if (!Notification.isSupported()) return // the OS cannot show notifications
   const today = localDate()
   // A new day clears the "already reminded" list, so tomorrow fires again.
