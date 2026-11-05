@@ -8,6 +8,8 @@ import { errMsg } from '../lib/errors'
 import { useRefreshOnCapture } from '../lib/dataChanged'
 import { ProgressBar } from '../components/ProgressBar'
 import { EmptyState } from '../components/EmptyState'
+import { LinkedItems } from '../components/LinkedItems'
+import { noteUndoableDelete } from '../lib/undo'
 
 interface Props {
   goal: SavingsGoal
@@ -64,7 +66,8 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
 
   const remove = async (t: SavingsTx) => {
     try {
-      await window.api.savings.removeTransaction(t.id)
+      const batchId = await window.api.savings.removeTransaction(t.id)
+      if (batchId) noteUndoableDelete({ label: `${t.kind} on ${formatDate(t.date)}`, batchId })
       if (editing?.id === t.id) resetForm()
       setConfirmId(null)
       await reload()
@@ -141,6 +144,8 @@ export function GoalDetail({ goal, blocked, onChanged, onEditGoal, onClose }: Pr
             {editing && <button className="btn" onClick={resetForm}>Cancel</button>}
           </div>
         </section>
+
+        <LinkedItems type="goal" id={goal.id} />
 
         <section>
           <h3 className="text-sm font-medium">History</h3>

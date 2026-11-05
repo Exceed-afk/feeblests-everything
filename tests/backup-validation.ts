@@ -159,3 +159,60 @@ test('an old-format backup maps sortOrder/recurrence onto the new task fields', 
 })
 
 console.log(`ALL ${n} PASSED`)
+
+
+// ---- Calculator backup validation ----
+const withCalc = () => ({
+  ...base(),
+  calculator: {
+    history: [{
+      id: 1, createdAt: '2026-11-04T00:00:00Z', mode: 'standard', input: '2+2', result: '4',
+      resultFormat: 'decimal' as const, rateSnapshot: null, pinned: false
+    }],
+    variables: [{ name: 'x', value: '42', updatedAt: '2026-11-04T00:00:00Z' }],
+    programs: [{ id: 1, name: 'P', source: 'return 1', createdAt: '2026-11-04T00:00:00Z', updatedAt: '2026-11-04T00:00:00Z' }],
+    rateSets: [{ id: 'custom', name: 'Custom Rates', baseCurrency: 'USD', isActive: true, updatedAt: '2026-11-04T00:00:00Z' }],
+    rates: [{ id: 1, rateSetId: 'custom', currencyCode: 'EUR', name: 'Euro', rateToBase: '0.92', note: 'test', updatedAt: '2026-11-04T00:00:00Z' }],
+    rateOverrides: [{ id: 1, rateSetId: 'custom', fromCode: 'GBP', toCode: 'EUR', rate: '1.18', updatedAt: '2026-11-04T00:00:00Z' }],
+    settings: [{ key: 'precision', value: '14' }]
+  }
+})
+
+test('a backup with valid calculator section is accepted', () => {
+  parse(withCalc())
+})
+
+test('calculator section that is not an object is rejected', () => {
+  const b = base(); (b as Record<string, unknown>).calculator = 'bad'; rejects(b, /calculator backup section is not an object/)
+})
+
+test('calculator section missing a list is rejected', () => {
+  const b = withCalc(); delete (b.calculator as Record<string, unknown>).history; rejects(b, /missing its "history" list/)
+})
+
+test('calculator history with invalid resultFormat is rejected', () => {
+  const b = withCalc(); (b.calculator.history[0] as Record<string, unknown>).resultFormat = 'bad_format'; rejects(b, /Calculator history item #1/)
+})
+
+test('calculator variable with duplicate name is rejected', () => {
+  const b = withCalc(); b.calculator.variables.push({ name: 'X', value: '10', updatedAt: '2026-11-04T00:00:00Z' })
+  rejects(b, /contain the name "x" twice/)
+})
+
+test('calculator rate referencing non-existent rate set is rejected', () => {
+  const b = withCalc(); b.calculator.rates[0].rateSetId = 'ghost'; rejects(b, /references rate set "ghost", which is not in the file/)
+})
+
+test('calculator rate override referencing non-existent rate set is rejected', () => {
+  const b = withCalc(); b.calculator.rateOverrides[0].rateSetId = 'ghost'; rejects(b, /references rate set "ghost", which is not in the file/)
+})
+
+test('calculator rates with duplicate currency in same set is rejected', () => {
+  const b = withCalc(); b.calculator.rates.push({ ...b.calculator.rates[0], id: 2 })
+  rejects(b, /contain the currency "EUR" twice/)
+})
+
+test('calculator settings with duplicate key is rejected', () => {
+  const b = withCalc(); b.calculator.settings.push({ key: 'precision', value: '12' })
+  rejects(b, /contain the key "precision" twice/)
+})

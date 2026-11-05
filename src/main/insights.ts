@@ -7,6 +7,10 @@ import type { InsightsResult } from '../shared/insights'
 import { listEntries } from './logbook'
 import { listTrades } from './trades'
 import { listAllTransactions } from './savings'
+import { listExpenseTransactions } from '../modules/expenses/service/transactions'
+import { listNotes } from './notes'
+import { listSessions } from './focus'
+import { listPublishedBetween } from './content'
 import { listHabits } from './habits'
 import { listCompletions, listTasks } from './tasks'
 import { getSettings, setSetting } from './db'
@@ -76,7 +80,11 @@ export function getInsights(db: Database.Database, today: string): InsightsResul
     completions: listCompletions(db, { from: start, to: today }),
     trades: listTrades(db),
     txs: listAllTransactions(db),
-    entries: listEntries(db, { from: start, to: today })
+    entries: listEntries(db, { from: start, to: today }),
+    expenses: listExpenseTransactions(db, { startDate: start, endDate: today }),
+    notes: listNotes(db).map((n) => ({ id: n.id, createdAt: n.createdAt })),
+    focusSessions: listSessions(db, { from: start, to: today }).map((s) => ({ startedAt: s.startedAt, endedAt: s.endedAt, type: s.type })),
+    contentPublished: listPublishedBetween(db, start, today).map((c) => ({ id: c.id, publishedDate: c.publishedDate! }))
   })
   // Only ACTIVE dismissals reach the page; expired snoozes resurface the card.
   const dismissed = readDismissalsFrom(db).filter((d) => isDismissedOn(d, today))

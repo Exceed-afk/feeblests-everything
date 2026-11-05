@@ -16,6 +16,7 @@ import { isAutomationEntry } from './automations'
 import { localTaskDay } from './tasks'
 import { round8 } from './math'
 import { signedAmount } from './savings'
+import { splitSessionByDay } from './focus'
 import { MOOD_SCORE } from './types'
 import type { Habit, LogEntry, Mood, SavingsTx, Task, TaskCompletion, Trade } from './types'
 
@@ -23,7 +24,10 @@ export const INSIGHT_IDS = {
   savingsByHabits: 'savings-by-habits',
   tradesByHabits: 'trades-by-habits',
   moodByTasks: 'mood-by-tasks',
-  moodVsTasks: 'mood-vs-tasks'
+  moodVsTasks: 'mood-vs-tasks',
+  spendVsMood: 'spend-vs-mood',
+  focusVsMood: 'focus-vs-mood',
+  outputVsFocus: 'output-vs-focus'
 } as const
 
 export type InsightId = typeof INSIGHT_IDS[keyof typeof INSIGHT_IDS]
@@ -111,6 +115,9 @@ export interface InsightDay {
   tradeClosed: number
   savingsNet: number // deposits minus withdrawals that day
   tasksDone: number
+  spending: number // total expense amount (in units) on this day
+  focusSeconds: number
+  publishedCount: number
 }
 
 export interface InsightsInput {
@@ -123,6 +130,10 @@ export interface InsightsInput {
   trades: Trade[]
   txs: SavingsTx[]
   entries: LogEntry[]
+  expenses?: { date: string; amount: number; type: string }[]
+  notes?: { id: number; createdAt: string }[]
+  focusSessions?: { startedAt: string; endedAt: string; type: string }[]
+  contentPublished?: { id: number; publishedDate: string }[]
 }
 
 export function buildInsightDays(i: InsightsInput): InsightDay[] {
@@ -140,7 +151,16 @@ export function buildInsightDays(i: InsightsInput): InsightDay[] {
       tradePnl: round8(closed.reduce((a, t) => a + (t.pnl as number), 0)),
       tradeClosed: closed.length,
       savingsNet: round8(byDate(i.txs).reduce((a, t) => a + signedAmount(t.kind, t.amount), 0)),
-      tasksDone: i.completions.filter((completion) => localTaskDay(completion.completedAt) === d).length
+      tasksDone: i.completions.filter((completion) => localTaskDay(completion.completedAt) === d).length,
+      spending: round8((i.expenses ?? []).filter((e) => e.date === d && e.type === 'expense').reduce((sum, e) => sum + e.amount / 100, 0)),
+      focusSeconds: (i.focusSessions ?? [])
+        .filter((s) => s.type === 'focus' || s.type === 'count-up')
+        .reduce((sum, s) => {
+          const slices = splitSessionByDay(s.startedAt, s.endedAt)
+          const slice = slices.find((sl) => sl.date === d)
+          return sum + (slice ? slice.seconds : 0)
+        }, 0),
+      publishedCount: (i.contentPublished ?? []).filter((c) => c.publishedDate === d).length
     })
   }
   for (const day of days) {
@@ -214,7 +234,7 @@ export interface CorrelationInsight {
   detail: string
 }
 
-function correlationInsight(id: string, xs: number[], ys: number[], need: string, label: (r: number) => string): CorrelationInsight {
+function correlationInsight(id: string, xs: number[], ys: number[], need: string, formatText: (direction: string, strength: string, r: number) => string): CorrelationInsight {
   const usable = xs.map((x, i2) => ({ x, y: ys[i2] })).filter((p) => p.y !== null)
   const ux = usable.map((p) => p.x), uy = usable.map((p) => p.y)
   if (usable.length < MIN_MOODS) {
@@ -225,8 +245,8 @@ function correlationInsight(id: string, xs: number[], ys: number[], need: string
     return { id, ok: false, needText: 'One of the two sides does not vary yet (all days the same), so a correlation cannot be computed.', text: '', r: null, n: usable.length, detail: `${usable.length} days.` }
   }
   const strength = Math.abs(r) < 0.3 ? 'no clear link' : Math.abs(r) < 0.6 ? 'a weak link' : 'a fairly strong link'
-  const direction = Math.abs(r) < 0.3 ? 'did not clearly move' : label(r)
-  return { id, ok: true, text: `Mood ${direction} on days with more completed tasks (${strength}, r = ${oneDec(r)}).`, r, n: usable.length, detail: `n = ${usable.length} days, r = ${oneDec(r)}.` }
+  const direction = Math.abs(r) < 0.3 ? 'did not clearly move' : r > 0 ? 'tended to be higher' : 'tended to be lower'
+  return { id, ok: true, text: formatText(direction, strength, r), r, n: usable.length, detail: `n = ${usable.length} days, r = ${oneDec(r)}.` }
 }
 
 // The weekday-average of habit completion per habit-scheduled day, as 7 groups.
@@ -283,6 +303,7 @@ export interface InsightsResult {
   habitByWeekday: { weekday: string; scheduled: number; done: number; rate: number | null }[]
   tradeByWeekday: { weekday: string; closed: number; pnl: number }[]
   tradeByMood: { mood: Mood; days: number; avgPnl: number | null }[]
+  notesPerWeek?: { week: string; count: number }[]
 }
 
 export function buildInsights(i: InsightsInput): InsightsResult {
@@ -311,6 +332,11 @@ export function buildInsights(i: InsightsInput): InsightsResult {
   const moodXs = days.filter((d) => d.mood !== null).map((d) => d.tasksDone)
   const moodYs = days.filter((d) => d.mood !== null).map((d) => d.mood as number)
 
+  // Mood vs spending correlation (Phase 1 / 6: spend vs mood)
+  const spendDays = days.filter((d) => d.mood !== null && d.spending > 0)
+  const spendMoodXs = spendDays.map((d) => d.spending)
+  const spendMoodYs = spendDays.map((d) => d.mood as number)
+
   const comparisons: CompareInsight[] = [
     compare(INSIGHT_IDS.savingsByHabits, savHigh, savLow,
       (a, b) => a === null || b === null ? '' : `Net savings was ${oneDec(a)} per day on your best habit days and ${oneDec(b)} on your weakest — might be a pattern.`,
@@ -323,11 +349,48 @@ export function buildInsights(i: InsightsInput): InsightsResult {
       `Not enough mood-and-task days yet: ${moreTasks.length + fewerTasks.length} so far. Log a mood on days with tasks completed.`)
   ]
 
+  // Mood vs focus correlation (Phase 4 / 6: focus vs mood)
+  const focusDays = days.filter((d) => d.mood !== null && d.focusSeconds > 0)
+  const focusMoodXs = focusDays.map((d) => d.focusSeconds / 3600)
+  const focusMoodYs = focusDays.map((d) => d.mood as number)
+
+  // Output vs focus (Phase 3 / 6: published content vs focus hours)
+  const outputDays = days.filter((d) => d.focusSeconds > 0)
+  const outputXs = outputDays.map((d) => d.focusSeconds / 3600)
+  const outputYs = outputDays.map((d) => d.publishedCount)
+
   const correlations: CorrelationInsight[] = [
     correlationInsight(INSIGHT_IDS.moodVsTasks, moodXs, moodYs,
       `Not enough days with both a mood and tasks completed yet.`,
-      (r) => r > 0 ? 'tended to be higher' : 'tended to be lower')
+      (direction, strength, r) => `Mood ${direction} on days with more completed tasks (${strength}, r = ${oneDec(r)}).`),
+    correlationInsight(INSIGHT_IDS.spendVsMood, spendMoodXs, spendMoodYs,
+      `Not enough days with both spending and a mood logged yet.`,
+      (direction, strength, r) => `Mood ${direction} on days with higher spending (${strength}, r = ${oneDec(r)}).`),
+    correlationInsight(INSIGHT_IDS.focusVsMood, focusMoodXs, focusMoodYs,
+      `Not enough days with both focus time and a mood logged yet.`,
+      (direction, strength, r) => `Mood ${direction} on days with more focus time (${strength}, r = ${oneDec(r)}).`),
+    correlationInsight(INSIGHT_IDS.outputVsFocus, outputXs, outputYs,
+      `Not enough days with logged focus time and published content yet.`,
+      (direction, strength, r) => `Content output ${direction} on days with higher focus time (${strength}, r = ${oneDec(r)}).`)
   ]
+
+  // Notes per week aggregation (Phase 2 / 6)
+  let notesPerWeek: { week: string; count: number }[] | undefined = undefined
+  if (i.notes) {
+    const byWeek = new Map<string, number>()
+    for (const n of i.notes) {
+      const day = n.createdAt.slice(0, 10)
+      if (day >= i.start && day <= i.end) {
+        // week bucket (Monday start)
+        const d = new Date(day)
+        const dayOfWeek = (d.getUTCDay() + 6) % 7
+        d.setUTCDate(d.getUTCDate() - dayOfWeek)
+        const weekKey = d.toISOString().slice(0, 10)
+        byWeek.set(weekKey, (byWeek.get(weekKey) ?? 0) + 1)
+      }
+    }
+    notesPerWeek = [...byWeek.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([week, count]) => ({ week, count }))
+  }
 
   const enoughData = weeks >= MIN_WEEKS && habitDays.length >= MIN_DAYS
   return {
@@ -338,6 +401,7 @@ export function buildInsights(i: InsightsInput): InsightsResult {
     comparisons, correlations,
     habitByWeekday: habitConsistencyByWeekday(i),
     tradeByWeekday: tradePnlByWeekday(i),
-    tradeByMood: tradePnlByMood(i)
+    tradeByMood: tradePnlByMood(i),
+    notesPerWeek
   }
 }

@@ -7,6 +7,10 @@ import { listTrades } from './trades'
 import { listTransactionsBetween } from './savings'
 import { listHabits } from './habits'
 import { isDate } from './util'
+import { listPublishedBetween, listPlannedBetween } from './content'
+import { listDueBillsBetween } from '../modules/expenses/service/recurring'
+import { listSessions } from './focus'
+import { splitSessionByDay } from '../shared/focus'
 import type { CalendarData } from '../shared/types'
 
 export function getCalendar(db: Database.Database, month: string, today: string): CalendarData {
@@ -18,6 +22,14 @@ export function getCalendar(db: Database.Database, month: string, today: string)
     entries: listEntries(db, { from: start, to: end }),
     trades: listTrades(db, { from: start, to: end }),
     txs: listTransactionsBetween(db, start, end),
-    habits: listHabits(db, today).habits
+    habits: listHabits(db, today).habits,
+    published: listPublishedBetween(db, start, end).map((c) => ({ id: c.id, title: c.title, platform: c.platform, date: c.publishedDate! })),
+    planned: listPlannedBetween(db, start, end).map((c) => ({ id: c.id, title: c.title, platform: c.platform, date: c.targetPublishDate! })),
+    bills: listDueBillsBetween(db, start, end).map((b) => ({ id: b.bill.id, name: b.bill.name, amount: b.amount, currency: b.bill.currency, date: b.dueDate })),
+    focusSessions: listSessions(db, { from: start, to: end }).flatMap((s) =>
+      splitSessionByDay(s.startedAt, s.endedAt).map((slice) => ({
+        id: s.id, projectName: s.projectName, seconds: slice.seconds, type: s.type, date: slice.date
+      }))
+    )
   })
 }

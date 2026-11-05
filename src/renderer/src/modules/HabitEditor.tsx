@@ -15,6 +15,7 @@ import {
   WEEKDAY_NAMES
 } from '../../../shared/habits'
 import { errMsg } from '../lib/errors'
+import { noteUndoableDelete } from '../lib/undo'
 import { HabitHeatmap, habitCompletions } from '../components/HabitViews'
 
 interface Props {
@@ -111,7 +112,8 @@ export function HabitEditor({ habit, today, onToggleDay, onSaved, onClose }: Pro
 
   const remove = async () => {
     if (!habit) return
-    await window.api.habits.remove(habit.id)
+    const batchId = await window.api.habits.remove(habit.id)
+    if (batchId) noteUndoableDelete({ label: `habit "${habit.name}"`, batchId })
     onSaved()
   }
 

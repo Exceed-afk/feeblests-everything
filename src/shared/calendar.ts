@@ -99,6 +99,13 @@ export interface CalendarInput {
   trades: Trade[]
   txs: SavingsTxHit[]
   habits: Habit[] // with every check-in
+  // Phase 3: content items. Each lists its published day or its planned day.
+  published?: { id: number; title: string; platform: string; date: string }[]
+  planned?: { id: number; title: string; platform: string; date: string }[]
+  // Phase 1 / 6: bills due.
+  bills?: { id: number; name: string; amount: number; currency: string; date: string }[]
+  // Phase 4 / 6: focus sessions.
+  focusSessions?: { id: number; projectName: string; seconds: number; type: string; date: string }[]
 }
 
 export function buildCalendar(i: CalendarInput): CalendarData {
@@ -111,6 +118,7 @@ export function buildCalendar(i: CalendarInput): CalendarData {
     return m
   }
   const entriesBy = group(i.entries), tradesBy = group(i.trades), txsBy = group(i.txs)
+  const publishedBy = group(i.published ?? []), plannedBy = group(i.planned ?? []), billsBy = group(i.bills ?? []), focusBy = group(i.focusSessions ?? [])
 
   const days: CalendarDay[] = []
   for (let date = grid.start; date <= grid.end; date = addDays(date, 1)) {
@@ -125,7 +133,12 @@ export function buildCalendar(i: CalendarInput): CalendarData {
     const count = (s: CalendarHabitItem['status']): number => items.filter((x) => x.status === s).length
     days.push({
       date, inMonth: date >= first && date <= last, isToday: date === i.today, isFuture: date > i.today,
-      entries, mood: moodAverage === null ? null : moodFromAverage(moodAverage), moodAverage,
+      entries,
+      published: (publishedBy.get(date) ?? []).map(({ id, title, platform }) => ({ id, title, platform })),
+      planned: (plannedBy.get(date) ?? []).map(({ id, title, platform }) => ({ id, title, platform })),
+      bills: (billsBy.get(date) ?? []).map(({ id, name, amount, currency }) => ({ id, name, amount, currency })),
+      focusSessions: (focusBy.get(date) ?? []).map(({ id, projectName, seconds, type }) => ({ id, projectName, seconds, type })),
+      mood: moodAverage === null ? null : moodFromAverage(moodAverage), moodAverage,
       trades, closed: closed.length, open: trades.length - closed.length,
       pnl: round8(closed.reduce((a, t) => a + (t.pnl as number), 0)),
       txs, savingsNet: round8(txs.reduce((a, t) => a + signedAmount(t.kind, t.amount), 0)),

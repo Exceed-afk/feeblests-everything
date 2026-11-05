@@ -3,18 +3,21 @@ import type { ImportPreview } from '../../../shared/types'
 import { today } from '../lib/dates'
 import { errMsg } from '../lib/errors'
 import { TAG_PALETTE, setTagColors, useTagColors } from '../lib/tagColors'
+import { useSettings, updateSettings } from '../lib/settingsStore'
 import { TagChip } from '../components/TagChip'
 import { AppearanceSettings } from '../components/AppearanceSettings'
 import { CaptureSettings } from '../components/CaptureSettings'
+import { TemplatesSettings } from '../components/TemplatesSettings'
 import { PageHeader } from '../components/PageHeader'
 import { TOOLS } from '../tools' // circular with the registry, but only read while rendering, never at load time
 
-type Tab = 'appearance' | 'capture' | 'tags' | 'data' | 'shortcuts'
+type Tab = 'appearance' | 'modules' | 'templates' | 'capture' | 'tags' | 'data' | 'shortcuts'
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'appearance', label: 'Appearance' }, { id: 'capture', label: 'Quick capture' }, { id: 'tags', label: 'Tags' }, { id: 'data', label: 'Data' }, { id: 'shortcuts', label: 'Shortcuts' }
+  { id: 'appearance', label: 'Appearance' }, { id: 'modules', label: 'Modules' }, { id: 'templates', label: 'Templates' }, { id: 'capture', label: 'Quick capture' }, { id: 'tags', label: 'Tags' }, { id: 'data', label: 'Data' }, { id: 'shortcuts', label: 'Shortcuts' }
 ]
 
 export function SettingsPage() {
+  const settings = useSettings()
   const [tab, setTab] = useState<Tab>('appearance')
   const [path, setPath] = useState('')
   const [preview, setPreview] = useState<ImportPreview | null>(null)
@@ -69,13 +72,63 @@ export function SettingsPage() {
 
   return (
     <div className="page page-sm">
-      <PageHeader title="Settings" subtitle="Look, quick capture, tags, your data and shortcuts. Everything saves as you go." />
+      <PageHeader title="Settings" subtitle="Look, modules, templates, quick capture, tags, your data and shortcuts. Everything saves as you go." />
 
       <div className="seg mb-5" role="group" aria-label="Settings sections">
         {TABS.map((t) => <button key={t.id} aria-pressed={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</button>)}
       </div>
 
       {tab === 'appearance' && <div className="space-y-4"><AppearanceSettings /></div>}
+
+      {tab === 'modules' && (
+        <section className="card card-pad-lg">
+          <h2 className="section-title">Modules</h2>
+          <p className="mt-2 text-sm text-muted">
+            Toggle modules on or off to keep your sidebar focused on the tools you use. Disabled modules are hidden from navigation and the command palette.
+          </p>
+          <ul className="mt-4 flex flex-col divide-y divide-line/60">
+            {TOOLS.filter((t) => !t.footer && t.id !== 'dashboard').map((t) => {
+              const Icon = t.icon
+              const isOff = (settings.disabledModules ?? []).includes(t.id)
+              return (
+                <li key={t.id} className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface text-muted">
+                      <Icon size={18} />
+                    </span>
+                    <div>
+                      <div className="text-sm font-medium">{t.name}</div>
+                      <div className="text-xs capitalize text-muted">{t.category}</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!isOff}
+                    aria-label={`Toggle ${t.name}`}
+                    onClick={() => {
+                      const cur = settings.disabledModules ?? []
+                      const next = isOff ? cur.filter((id) => id !== t.id) : [...cur, t.id]
+                      updateSettings({ disabledModules: next })
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      !isOff ? 'bg-accent' : 'bg-line'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        !isOff ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
+      {tab === 'templates' && <TemplatesSettings />}
 
       {tab === 'capture' && <div className="space-y-4"><CaptureSettings /></div>}
 
@@ -122,6 +175,28 @@ export function SettingsPage() {
 
       {tab === 'data' && (<>
       <section className="card card-pad-lg">
+        <h2 className="section-title">Trash retention</h2>
+        <p className="mt-2 text-sm text-muted">Items moved to Trash are permanently purged automatically after this number of days.</p>
+        <div className="mt-3 flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-muted">
+            Auto-purge after
+            <input
+              type="number"
+              min="1"
+              max="365"
+              className="field w-20 py-1"
+              value={settings.trash?.purgeDays ?? 30}
+              onChange={(e) => {
+                const days = Math.max(1, Math.min(365, parseInt(e.target.value, 10) || 30))
+                updateSettings({ trash: { purgeDays: days } })
+              }}
+            />
+            days
+          </label>
+        </div>
+      </section>
+
+      <section className="mt-4 card card-pad-lg">
         <h2 className="section-title">Your data</h2>
         <p className="mt-2 break-all text-sm text-muted">{path}</p>
         <p className="mt-1 text-sm text-muted">A dated backup is saved here automatically each day, but it sits next to your data. Export a copy to somewhere else (USB drive, cloud folder) to be safe from a dead disk or a reinstall.</p>

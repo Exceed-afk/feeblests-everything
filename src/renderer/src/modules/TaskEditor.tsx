@@ -4,6 +4,7 @@ import type { Task, TaskInput, TaskPriority, TaskRecurrence, TaskStatus } from '
 import { taskInputProblems, TASK_FIELD_ORDER, type TaskField } from '../../../shared/tasks'
 import { errMsg } from '../lib/errors'
 import { TagInput, addTag } from '../components/TagInput'
+import { LinkedItems } from '../components/LinkedItems'
 
 interface Props { task: Task | null; onClose: () => void; onSaved: () => void }
 
@@ -242,6 +243,10 @@ export function TaskEditor({ task, onClose, onSaved }: Props) {
                 (clamped to the month's end), custom = every N days.
               </p>
             </div>
+          )}
+
+          {task && (
+            <LinkedItems type="task" id={task.id} />
           )}
 
           {(saveError || Object.values(fieldErrors).some(Boolean)) && (

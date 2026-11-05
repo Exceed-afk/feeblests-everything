@@ -15,7 +15,7 @@ assert.equal((db.prepare("SELECT title FROM logbook_entries").get() as { title: 
 assert.equal((db.prepare("SELECT value FROM settings WHERE key = 'kept'").get() as { value: string }).value, 'yes')
 assert.deepEqual((db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((column) => column.name), [
   'id', 'title', 'notes', 'status', 'priority', 'due_date', 'created_at', 'completed_at', 'project', 'tags',
-  'due_time', 'deleted_at', 'position', 'recurrence_rule', 'recurrence_next'
+  'due_time', 'deleted_at', 'position', 'recurrence_rule', 'recurrence_next', 'updated_at', 'delete_batch_id'
 ])
 db.prepare("INSERT INTO tasks (title, created_at) VALUES ('parent', 'now')").run()
 db.prepare("INSERT INTO task_subtasks (task_id, title) VALUES (1, 'child')").run()
@@ -72,5 +72,33 @@ assert.deepEqual(
   [{ rule: 'loss-reflection', event_key: 'loss-reflection:trade:1', hidden: 0 }]
 )
 db14.close()
+
+// Migration 9 (the recurrence-column rework) on a FRESH version-8 database: the
+// new columns exist, a stored legacy `recurrence` rule is copied into
+// `recurrence_rule` before the old column is dropped, every task gets a position,
+// and running the migration again changes nothing (rerun-safe).
+const db8 = openDatabase()
+for (let i = 0; i < 8; i++) db8.exec(MIGRATIONS[i])
+db8.pragma('user_version = 8')
+db8.exec("INSERT INTO tasks (title, status, created_at, tags, recurrence) VALUES ('legacy', 'todo', 'now', '[]', '{\"frequency\":\"weekly\",\"intervalDays\":1}')")
+db8.exec("INSERT INTO tasks (title, status, created_at, tags, recurrence) VALUES ('plain', 'todo', 'now', '[]', NULL)")
+db8.exec(MIGRATIONS[8])
+db8.pragma('user_version = 9')
+const columns = (db8.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((c) => c.name)
+for (const col of ['due_time', 'deleted_at', 'position', 'recurrence_rule', 'recurrence_next'])
+  assert.equal(columns.includes(col), true, `missing column ${col}`)
+assert.equal(columns.includes('recurrence'), false, 'the old recurrence column must be gone')
+assert.equal(columns.includes('parent_task_id'), false, 'the old parent column must be gone')
+const rows = db8.prepare('SELECT title, recurrence_rule, position FROM tasks ORDER BY id').all() as { title: string; recurrence_rule: string | null; position: number }[]
+assert.deepEqual(rows[0], { title: 'legacy', recurrence_rule: '{"frequency":"weekly","intervalDays":1}', position: 1 })
+assert.deepEqual(rows[1], { title: 'plain', recurrence_rule: null, position: 2 })
+// Idempotent: applying it (or the whole set) again leaves the same rows.
+applyMigrations(db8)
+assert.equal(db8.pragma('user_version', { simple: true }), MIGRATIONS.length)
+assert.deepEqual(
+  db8.prepare('SELECT title, recurrence_rule, position FROM tasks ORDER BY id').all(),
+  rows
+)
+db8.close()
 
 console.log('schema migration checks passed')

@@ -7,6 +7,12 @@ import { listTrades } from './trades'
 import { listAllTransactions, listGoals } from './savings'
 import { listHabits } from './habits'
 import { listTasks } from './tasks'
+import { listExpenseTransactions } from '../modules/expenses/service/transactions'
+import { listCategories as listExpenseCategories } from '../modules/expenses/service/categories'
+import { listNotesCreatedBetween } from './notes'
+import { listSessions } from './focus'
+import { listPublishedBetween } from './content'
+import { splitSessionByDay } from '../shared/focus'
 import { isDate } from './util'
 import type { LogEntry, ReviewData, ReviewKind } from '../shared/types'
 
@@ -28,6 +34,13 @@ export function getReview(db: Database.Database, kind: ReviewKind, anchor: strin
     txs: listAllTransactions(db),
     habits: listHabits(db, today).habits,
     tasks: listTasks(db, today),
-    entries: [...byId.values()]
+    entries: [...byId.values()],
+    expenses: listExpenseTransactions(db, { startDate: prev.start, endDate: range.end }),
+    categories: listExpenseCategories(db, true),
+    notesCreated: listNotesCreatedBetween(db, range.start, range.end).length,
+    focusSeconds: listSessions(db, { from: range.start, to: range.end }).flatMap((s) =>
+      splitSessionByDay(s.startedAt, s.endedAt).filter((sl) => sl.date >= range.start && sl.date <= range.end)
+    ).reduce((sum, sl) => sum + sl.seconds, 0),
+    contentPublished: listPublishedBetween(db, range.start, range.end).length
   })
 }

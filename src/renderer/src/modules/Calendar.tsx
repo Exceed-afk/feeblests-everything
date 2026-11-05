@@ -3,7 +3,7 @@
 // Everything shown is worked out by src/shared/calendar.ts from the other tools' data; nothing new is stored.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
-import { BookOpen, CalendarCheck, CandlestickChart, Check, ChevronLeft, ChevronRight, PiggyBank } from 'lucide-react'
+import { BookOpen, CalendarCheck, CandlestickChart, Check, ChevronLeft, ChevronRight, Clapperboard, PiggyBank, Receipt, Timer } from 'lucide-react'
 import type { CalendarDay, CalendarData, CalendarHabitItem } from '../../../shared/types'
 import { describeDay, monthLabel, monthOf, monthRange, shiftMonth } from '../../../shared/calendar'
 import { buildNote } from '../../../shared/capture'
@@ -17,12 +17,12 @@ import type { ModuleProps } from '../lib/navigation'
 import { PageHeader } from '../components/PageHeader'
 import { Pnl } from '../components/Pnl'
 
-type Layer = 'journal' | 'trades' | 'savings' | 'habits'
+type Layer = 'journal' | 'trades' | 'savings' | 'habits' | 'bills' | 'focus'
 const LAYERS: { id: Layer; label: string }[] = [
-  { id: 'journal', label: 'Journal' }, { id: 'trades', label: 'Trades' }, { id: 'savings', label: 'Savings' }, { id: 'habits', label: 'Habits' }
+  { id: 'journal', label: 'Journal' }, { id: 'trades', label: 'Trades' }, { id: 'savings', label: 'Savings' }, { id: 'habits', label: 'Habits' }, { id: 'bills', label: 'Bills' }, { id: 'focus', label: 'Focus' }
 ]
 const LAYER_KEY = 'calendar-layers'
-const ALL_ON: Record<Layer, boolean> = { journal: true, trades: true, savings: true, habits: true }
+const ALL_ON: Record<Layer, boolean> = { journal: true, trades: true, savings: true, habits: true, bills: true, focus: true }
 
 // Which layers are shown is remembered, but it is only a convenience: if storage is unavailable nothing breaks.
 function readLayers(): Record<Layer, boolean> {
@@ -45,7 +45,7 @@ function sameDayIn(month: string, date: string): string {
   return `${month}-${pad(Math.min(Number(date.slice(8)), last))}`
 }
 
-export function Calendar({ onOpen }: ModuleProps) {
+export function Calendar({ onOpen, onNavigate }: ModuleProps) {
   const [month, setMonth] = useState(() => monthOf(today()))
   const [selected, setSelected] = useState(() => today())
   const [data, setData] = useState<CalendarData | null>(null)
@@ -149,7 +149,7 @@ export function Calendar({ onOpen }: ModuleProps) {
             </div>
 
             {day && (
-              <DayPanel key={day.date} day={day} onOpen={onOpen} onChanged={load} note={notes[day.date] ?? ''}
+              <DayPanel key={day.date} day={day} onOpen={onOpen} onNavigate={onNavigate} onChanged={load} note={notes[day.date] ?? ''}
                 onNote={(text) => setNotes((all) => { const next = { ...all }; if (text) next[day.date] = text; else delete next[day.date]; return next })} />
             )}
           </div>
@@ -200,6 +200,21 @@ function Cell({ day, selected, layers, onSelect }: { day: CalendarDay; selected:
               <CalendarCheck size={11} />{habitTotal > 0 ? `${h.done}/${habitTotal}` : `+${h.bonus}`}
             </span>
           )}
+          {/* Phase 3: content published (solid) and planned (muted) that day. */}
+          {day.published.length > 0 && <span className="flex items-center gap-0.5 text-pos"><Clapperboard size={11} />{day.published.length}</span>}
+          {day.published.length === 0 && day.planned.length > 0 && <span className="flex items-center gap-0.5 text-muted"><Clapperboard size={11} />{day.planned.length}</span>}
+          {/* Phase 1 / 6: bills due that day */}
+          {layers.bills && day.bills && day.bills.length > 0 && (
+            <span className="flex items-center gap-0.5 text-warn" title={`${day.bills.length} bill(s) due`}>
+              <Receipt size={11} />{day.bills.length}
+            </span>
+          )}
+          {/* Phase 4 / 6: focus sessions */}
+          {layers.focus && day.focusSessions && day.focusSessions.length > 0 && (
+            <span className="flex items-center gap-0.5 text-accent-fg" title={`${day.focusSessions.length} focus session(s)`}>
+              <Timer size={11} />{Math.round(day.focusSessions.reduce((sum, s) => sum + s.seconds, 0) / 60)}m
+            </span>
+          )}
         </span>
       </button>
     </div>
@@ -208,14 +223,15 @@ function Cell({ day, selected, layers, onSelect }: { day: CalendarDay; selected:
 
 const STATUS_TEXT: Record<CalendarHabitItem['status'], string> = { done: 'Done', missed: 'Missed', pending: 'Not yet', bonus: 'Bonus (rest day)' }
 
-function DayPanel({ day, onOpen, onChanged, note, onNote }: {
-  day: CalendarDay; onOpen: ModuleProps['onOpen']; onChanged: () => Promise<void>; note: string; onNote: (text: string) => void
+function DayPanel({ day, onOpen, onNavigate, onChanged, note, onNote }: {
+  day: CalendarDay; onOpen: ModuleProps['onOpen']; onNavigate: ModuleProps['onNavigate']; onChanged: () => Promise<void>; note: string; onNote: (text: string) => void
 }) {
   const [busyHabit, setBusyHabit] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const empty = day.entries.length === 0 && day.trades.length === 0 && day.txs.length === 0 && day.habits.items.length === 0
+    && day.published.length === 0 && day.planned.length === 0
 
   const toggleHabit = async (h: CalendarHabitItem): Promise<void> => {
     if (busyHabit !== null) return
@@ -276,6 +292,47 @@ function DayPanel({ day, onOpen, onChanged, note, onNote }: {
                 </span>
                 <span className="shrink-0 text-sm">{t.pnl === null ? <span className="text-muted">open</span> : <Pnl value={t.pnl} />}</span>
               </button>
+            </li>
+          ))}
+        </Block>
+      )}
+
+      {(day.published.length > 0 || day.planned.length > 0) && (
+        <Block icon={<Clapperboard size={13} />} title="Content">
+          {day.published.map((c) => (
+            <li key={`pub-${c.id}`} className="flex items-center justify-between gap-2">
+              <span className="truncate">{c.title}</span>
+              <span className="badge badge-pos shrink-0">Published</span>
+            </li>
+          ))}
+          {day.planned.map((c) => (
+            <li key={`plan-${c.id}`} className="flex items-center justify-between gap-2">
+              <span className="truncate">{c.title}</span>
+              <span className="badge shrink-0">Planned{c.platform ? ` · ${c.platform}` : ''}</span>
+            </li>
+          ))}
+        </Block>
+      )}
+
+      {day.bills && day.bills.length > 0 && (
+        <Block icon={<Receipt size={13} />} title="Bills due">
+          {day.bills.map((b) => (
+            <li key={b.id}>
+              <button className="row-link" onClick={() => onNavigate('expenses')}>
+                <span className="truncate text-sm">{b.name}</span>
+                <span className="shrink-0 text-sm font-medium text-warn">{fmtAmount(b.amount / 100)} {b.currency}</span>
+              </button>
+            </li>
+          ))}
+        </Block>
+      )}
+
+      {day.focusSessions && day.focusSessions.length > 0 && (
+        <Block icon={<Timer size={13} />} title="Focus sessions">
+          {day.focusSessions.map((fs) => (
+            <li key={fs.id} className="flex items-center justify-between text-sm py-1">
+              <span className="truncate font-medium">{fs.projectName || 'Focus'}</span>
+              <span className="shrink-0 text-xs text-muted">{Math.round(fs.seconds / 60)} min ({fs.type})</span>
             </li>
           ))}
         </Block>

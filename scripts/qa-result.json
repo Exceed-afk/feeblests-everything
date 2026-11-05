@@ -1,0 +1,68 @@
+{
+  "htmlScrollH": 1037,
+  "htmlClientH": 742,
+  "htmlOverflowY": "hidden",
+  "bodyOffsetH": 742,
+  "bodyScrollH": 742,
+  "innerHeight": 742,
+  "sbH": 742,
+  "mainH": 742,
+  "mainScrollH": 1305,
+  "mainRectBottom": 742,
+  "mainOverflowY": "auto",
+  "pageH": 1305,
+  "escapers": [],
+  "belowViewport": [
+    {
+      "tag": "DIV",
+      "id": "root",
+      "cls": "",
+      "pos": "static",
+      "rectBottom": 742,
+      "scrollH": 742
+    }
+  ],
+  "tables": [
+    {
+      "caption": "Habit completion rate by weekday",
+      "lastRowBorders": [
+        "0px",
+        "0px",
+        "0px",
+        "0px"
+      ],
+      "headerBorders": [
+        "0.8px",
+        "0.8px",
+        "0.8px",
+        "0.8px"
+      ]
+    },
+    {
+      "caption": "Closed-trade P&L by weekday",
+      "lastRowBorders": [
+        "0px",
+        "0px",
+        "0px"
+      ],
+      "headerBorders": [
+        "0.8px",
+        "0.8px",
+        "0.8px"
+      ]
+    },
+    {
+      "caption": "Closed-trade P&L by the day's mood",
+      "lastRowBorders": [
+        "0px",
+        "0px",
+        "0px"
+      ],
+      "headerBorders": [
+        "0.8px",
+        "0.8px",
+        "0.8px"
+      ]
+    }
+  ]
+}

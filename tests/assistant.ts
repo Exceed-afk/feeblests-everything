@@ -45,8 +45,8 @@ const LAST_30 = lastNDays(TODAY, 30)
 // ---------- the fixed function table ----------
 test('the supported read-only functions are offered', () => {
   assert.deepEqual(ASSISTANT_FUNCTIONS.map((f) => f.name).sort(), [
-    'biggest_losses', 'biggest_wins', 'habit_completion_rate', 'journal_entries', 'mood_average',
-    'pnl_by_asset', 'savings_total', 'tasks_completed', 'top_tags', 'trade_pnl'
+    'biggest_losses', 'biggest_wins', 'content_pipeline', 'find_notes', 'habit_completion_rate', 'journal_entries', 'mood_average',
+    'pnl_by_asset', 'savings_total', 'spending_total', 'tasks_completed', 'time_spent', 'top_tags', 'trade_pnl'
   ].sort())
 })
 test('savings_total nets deposits and withdrawals in range only', () => {

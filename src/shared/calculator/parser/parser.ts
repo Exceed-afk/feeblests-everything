@@ -1,4 +1,5 @@
 import { tokenize, type Token, type TokenType } from './tokenizer'
+import { CALC_LIMITS, limitMessage } from '../limits'
 import {
   ParserError,
   type ASTNode,
@@ -24,6 +25,7 @@ const PRECEDENCE = {
 export class Parser {
   private tokens: Token[]
   private cursor = 0
+  private depth = 0
 
   constructor(input: string) {
     this.tokens = tokenize(input)
@@ -70,6 +72,18 @@ export class Parser {
   }
 
   private parseExpression(rbp: number): ASTNode {
+    this.depth++
+    try {
+      if (this.depth > CALC_LIMITS.nestingDepth) {
+        throw new ParserError(limitMessage('nestingDepth', '(the expression is nested too deeply)'), this.peek().pos)
+      }
+      return this.parseExpressionInner(rbp)
+    } finally {
+      this.depth--
+    }
+  }
+
+  private parseExpressionInner(rbp: number): ASTNode {
     let left = this.parsePrefix()
 
     // Handle implicit multiplication when followed immediately by '(' or an IDENTIFIER or NUMBER
@@ -213,5 +227,11 @@ export class Parser {
 }
 
 export function parse(input: string): ASTNode {
+  if (input.length > CALC_LIMITS.expressionLength) {
+    throw new ParserError(
+      `${limitMessage('expressionLength', 'characters')} (this one has ${input.length.toLocaleString('en-US')})`,
+      CALC_LIMITS.expressionLength
+    )
+  }
   return new Parser(input).parse()
 }

@@ -16,6 +16,7 @@ import { isAutomationEntry } from './automations'
 import { MOOD_SCORE } from './types'
 import { addDays, habitRateInRange, weekdayOf } from './habits'
 import { localTaskDay } from './tasks'
+import { splitSessionByDay, type Project, type TimeSession } from './focus'
 import type { Habit, LogEntry, Mood, SavingsGoal, SavingsTx, Task, TaskCompletion, Trade } from './types'
 
 // ---------- provider modes ----------
@@ -166,6 +167,11 @@ export interface AssistantRows {
     tasks: Task[]
     completions: TaskCompletion[]
     entries: LogEntry[]
+    timeSessions?: TimeSession[]
+    projects?: Project[]
+    expenses?: { id: number; amount: number; currency: string; date: string; categoryName?: string; type: string; payee: string }[]
+    notes?: { id: number; title: string; body: string; tags: string[]; createdAt: string }[]
+    contentItems?: { id: number; title: string; stage: string; platform: string; targetPublishDate: string | null; publishedDate: string | null }[]
 }
 
 export interface DateRange { from: string; to: string } // "YYYY-MM-DD", inclusive
@@ -226,7 +232,7 @@ export type AssistantResult =
 
 export type AssistantUnit = 'money' | 'percent' | 'count' | 'score'
 
-export type FilterName = 'asset' | 'direction' | 'tag' | 'goal' | 'project' | 'habit'
+export type FilterName = 'asset' | 'direction' | 'tag' | 'goal' | 'project' | 'habit' | 'category'
 export type AssistantFilters = Partial<Record<FilterName, string>>
 export type ResolvedAssistantFilters = Partial<Record<FilterName, string | number>>
 
@@ -299,10 +305,16 @@ export function matchFilters(
                 candidates = rows.goals.map((goal) => goal.name)
                 break
             case 'project':
-                candidates = [...new Set(rows.tasks.flatMap((task) => task.project ? [task.project] : []))]
+                candidates = [...new Set([
+                    ...rows.tasks.flatMap((task) => task.project ? [task.project] : []),
+                    ...(rows.projects?.map((p) => p.name) ?? [])
+                ])]
                 break
             case 'habit':
                 candidates = rows.habits.map((habit) => habit.name)
+                break
+            case 'category':
+                candidates = [...new Set(rows.expenses?.flatMap((e) => e.categoryName ? [e.categoryName] : []) ?? [])]
                 break
         }
         const found = matchLabel(value, candidates)
@@ -447,6 +459,93 @@ export const ASSISTANT_FUNCTIONS: AssistantFunctionDef[] = [
             (filters?.tag === undefined || e.tags.some((tag) =>
                 normalizedLabel(tag) === normalizedLabel(String(filters.tag)))))
             .length)
+    },
+    {
+        name: 'time_spent',
+        label: 'focus hours',
+        description: 'Total focus hours logged in a date range, optionally filtered by project.',
+        examples: ['How many hours did I spend on project X this week?', 'How much focus time did I log this month?'],
+        supports: ['project'],
+        unit: 'count',
+        resultType: 'number',
+        run: (rows, r, _today, filters) => {
+            const sessions = rows.timeSessions ?? []
+            let totalSeconds = 0
+            for (const s of sessions) {
+                if (s.type === 'focus' || s.type === 'count-up') {
+                    if (filters?.project !== undefined && normalizedLabel(s.projectName) !== normalizedLabel(String(filters.project))) {
+                        continue
+                    }
+                    const slices = splitSessionByDay(s.startedAt, s.endedAt)
+                    for (const slice of slices) {
+                        if (slice.date >= r.from && slice.date <= r.to) {
+                            totalSeconds += slice.seconds
+                        }
+                    }
+                }
+            }
+            return numberResult(round8(totalSeconds / 3600))
+        }
+    },
+    {
+        name: 'spending_total',
+        label: 'spending total',
+        description: 'Total expenses logged in a date range, optionally filtered by category.',
+        examples: ['How much did I spend this month?', 'How much did I spend on food last week?'],
+        supports: ['category'],
+        unit: 'money',
+        resultType: 'number',
+        run: (rows, r, _today, filters) => {
+            const expenses = rows.expenses ?? []
+            const totalCents = expenses
+                .filter((e) => e.type === 'expense' && inRange(e.date, r) &&
+                    (filters?.category === undefined || normalizedLabel(e.categoryName ?? '') === normalizedLabel(String(filters.category))))
+                .reduce((sum, e) => sum + e.amount, 0)
+            return numberResult(round8(totalCents / 100))
+        }
+    },
+    {
+        name: 'find_notes',
+        label: 'notes search',
+        description: 'Find notes matching a topic or tag, summarizing their titles and snippets.',
+        examples: ['Find my notes about project planning', 'What notes do I have tagged work?'],
+        supports: ['tag'],
+        unit: 'count',
+        resultType: 'list',
+        supportsLimit: true,
+        run: (rows, _r, _today, filters, limit) => {
+            const notes = rows.notes ?? []
+            const filtered = notes.filter((n) =>
+                filters?.tag === undefined || n.tags.some((t) => normalizedLabel(t) === normalizedLabel(String(filters.tag)))
+            )
+            return {
+                type: 'list',
+                rows: filtered.slice(0, clampLimit(limit)).map((n) => ({
+                    label: n.title || 'Untitled note',
+                    value: n.body.length
+                }))
+            }
+        }
+    },
+    {
+        name: 'content_pipeline',
+        label: 'content pipeline',
+        description: 'Status of content items across stages (idea, script, record, edit, publish, published).',
+        examples: ['What content do I have in the pipeline?', 'How many videos are in editing?'],
+        supports: [],
+        unit: 'count',
+        resultType: 'list',
+        supportsLimit: true,
+        run: (rows, _r, _today, _filters, limit) => {
+            const items = rows.contentItems ?? []
+            return {
+                type: 'list',
+                rows: items.slice(0, clampLimit(limit)).map((item) => ({
+                    label: `${item.title || 'Untitled'} (${item.stage})`,
+                    value: 1
+                }))
+            }
+        }
     },
     {
         name: 'biggest_losses',
@@ -823,7 +922,7 @@ export function formatAnswer(input: {
     const label = `${fn.label.charAt(0).toUpperCase()}${fn.label.slice(1)}`
     const period = `${assistantRangeName(range.spec)} (${assistantDateSpan(range.resolved)})`
     const filterNames: Record<FilterName, string> = {
-        asset: 'asset', direction: 'direction', tag: 'tag', goal: 'goal', project: 'project', habit: 'habit'
+        asset: 'asset', direction: 'direction', tag: 'tag', goal: 'goal', project: 'project', habit: 'habit', category: 'category'
     }
     const selectedFilters = Object.entries(filters)
         .filter((entry): entry is [FilterName, string] => typeof entry[1] === 'string')

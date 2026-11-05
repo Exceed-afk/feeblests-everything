@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import type { SavingsGoal } from '../../../shared/types'
 import { errMsg } from '../lib/errors'
+import { noteUndoableDelete } from '../lib/undo'
 
 interface Props {
   goal: SavingsGoal | null // null = creating a new goal
@@ -31,7 +32,8 @@ export function GoalEditor({ goal, onSaved, onClose }: Props) {
 
   const remove = async () => {
     if (!goal) return
-    await window.api.savings.removeGoal(goal.id)
+    const batchId = await window.api.savings.removeGoal(goal.id)
+    if (batchId) noteUndoableDelete({ label: `savings goal "${goal.name}"`, batchId })
     onSaved()
   }
 

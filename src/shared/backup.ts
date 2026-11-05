@@ -51,26 +51,119 @@ export interface BackupTask {
 export interface BackupTaskSubtask { id: number; taskId: number; title: string; done: boolean; sortOrder: number }
 export interface BackupTaskCompletion { taskId: number; completedAt: string }
 
+// ---------- Phase 0 additions (optional rows/columns; old files keep working) ----------
+
+// Trash state on any of the five user-facing tables (Phase 0). Optional so a
+// file made before soft delete existed still imports; missing = live as ever.
+export interface TrashMeta { deletedAt?: string | null; deleteBatchId?: string | null }
+
+export interface BackupLink { id: number; sourceType: string; sourceId: number; targetType: string; targetId: number; relation: string; createdAt: string; deletedAt?: string | null }
+export interface BackupTagging { id: number; tagId: number; entityType: string; entityId: number; createdAt: string; updatedAt: string }
+export interface BackupTemplate { id: number; kind: string; name: string; payload: unknown; isBuiltin: boolean; createdAt: string; updatedAt: string }
+
+// ---------- Calculator additions (calc_* tables) ----------
+export interface BackupCalcHistory {
+  id: number
+  createdAt: string
+  mode: string
+  input: string
+  result: string
+  resultFormat: 'decimal' | 'fraction' | 'scientific' | 'engineering'
+  rateSnapshot: string | null
+  pinned: boolean
+}
+export interface BackupCalcVariable {
+  name: string
+  value: string
+  updatedAt: string
+}
+export interface BackupCalcProgram {
+  id: number
+  name: string
+  source: string
+  createdAt: string
+  updatedAt: string
+}
+export interface BackupCalcRateSet {
+  id: string
+  name: string
+  baseCurrency: string
+  isActive: boolean
+  updatedAt: string
+}
+export interface BackupCalcRate {
+  id: number
+  rateSetId: string
+  currencyCode: string
+  name: string
+  rateToBase: string
+  note: string
+  updatedAt: string
+}
+export interface BackupCalcRateOverride {
+  id: number
+  rateSetId: string
+  fromCode: string
+  toCode: string
+  rate: string
+  updatedAt: string
+}
+export interface BackupCalcSetting {
+  key: string
+  value: string
+}
+
+export interface BackupCalculator {
+  history: BackupCalcHistory[]
+  variables: BackupCalcVariable[]
+  programs: BackupCalcProgram[]
+  rateSets: BackupCalcRateSet[]
+  rates: BackupCalcRate[]
+  rateOverrides: BackupCalcRateOverride[]
+  settings: BackupCalcSetting[]
+}
+
 export interface BackupFile {
   app: typeof BACKUP_APP
   format: number // layout of this file
   schemaVersion: number // database version it was made from
   exportedAt: string
   settings: Record<string, unknown>
-  logbook: BackupEntry[]
-  trades: BackupTrade[]
-  savingsGoals: BackupGoal[]
-  savingsTransactions: BackupTx[]
-  habits: BackupHabit[] // files made before habits existed have no list; it is read as empty
+  logbook: (BackupEntry & TrashMeta)[]
+  trades: (BackupTrade & TrashMeta)[]
+  savingsGoals: (BackupGoal & TrashMeta)[]
+  savingsTransactions: (BackupTx & TrashMeta)[]
+  habits: (BackupHabit & TrashMeta)[] // files made before habits existed have no list; it is read as empty
   habitCheckins: BackupCheckin[]
-  tasks: BackupTask[]
+  tasks: (BackupTask & { updatedAt?: string; deleteBatchId?: string | null })[]
   taskSubtasks: BackupTaskSubtask[]
   taskCompletions?: BackupTaskCompletion[]
+  // Phase 0 tables. Optional so older files keep importing; missing = empty.
+  links?: BackupLink[]
+  tags?: (BackupTag & TrashMeta)[]
+  taggings?: BackupTagging[]
+  templates?: BackupTemplate[]
+  // Calculator tables (Phase 12 / Migration 27). Optional for backward compatibility;
+  // older files have no calculator section.
+  calculator?: BackupCalculator
 }
+
+// One row of the tags table (distinct from per-tag colours in settings).
+export interface BackupTag { id: number; name: string; colour?: string | null; createdAt?: string; updatedAt?: string }
 
 export const countsOf = (b: Pick<BackupFile, 'logbook' | 'trades' | 'savingsGoals' | 'savingsTransactions' | 'habits' | 'habitCheckins' | 'tasks' | 'taskSubtasks'>): BackupCounts => ({
   entries: b.logbook.length, trades: b.trades.length, goals: b.savingsGoals.length, transactions: b.savingsTransactions.length,
   habits: b.habits.length, checkins: b.habitCheckins.length, tasks: b.tasks.length, subtasks: b.taskSubtasks.length
+})
+
+// The full counts, with the Phase 0 tables. The base counts keep their old
+// shape (the Data page and the tests read them); the extras ride along.
+export const countsFull = (b: BackupFile): BackupCounts & { links: number; tags: number; taggings: number; templates: number } => ({
+  ...countsOf(b),
+  links: b.links?.length ?? 0,
+  tags: b.tags?.length ?? 0,
+  taggings: b.taggings?.length ?? 0,
+  templates: b.templates?.length ?? 0
 })
 
 // ---------- Checking an imported file ----------
@@ -98,6 +191,7 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
   if (!isInt(data.schemaVersion) || data.schemaVersion > maxSchema)
     throw new Error('This backup comes from a newer version of the app. Update the app first, then import it.')
   for (const k of ['habits', 'habitCheckins', 'tasks', 'taskSubtasks', 'taskCompletions']) if (data[k] === undefined) data[k] = [] // older backups
+  for (const k of ['links', 'tags', 'taggings', 'templates']) if (data[k] === undefined) data[k] = [] // files from before Phase 0
   for (const k of ['logbook', 'trades', 'savingsGoals', 'savingsTransactions', 'habits', 'habitCheckins', 'tasks', 'taskSubtasks', 'taskCompletions'])
     if (!Array.isArray(data[k])) throw new Error(`The backup is missing its "${k}" list.`)
   if (!isObj(data.settings)) throw new Error('The backup is missing its settings.')
@@ -242,6 +336,148 @@ export function parseBackup(text: string, maxSchema: number): BackupFile {
   for (const g of goals as unknown as BackupGoal[]) {
     const balance = balances.get(g.id) ?? 0
     if (balance < 0) throw new Error(`Savings goal "${g.name}" would end with a negative balance (${balance}), which the app does not allow.`)
+  }
+
+  // Phase 0 tables: links, tags, taggings, templates. Every list is optional;
+  // the ids must be unique and every reference must point at a row in THIS file.
+  const links = (data.links ?? []) as Record<string, unknown>[]
+  const linkable = (v: unknown): boolean => ['logbook', 'trade', 'goal', 'task'].includes(String(v))
+  links.forEach((r, i) => {
+    if (!isObj(r) || !isInt(r.id) || !isStr(r.sourceType) || !isStr(r.targetType) || !isInt(r.sourceId) || !isInt(r.targetId) ||
+        !isStr(r.relation) || !isStr(r.createdAt) ||
+        !linkable(r.sourceType) || !linkable(r.targetType) ||
+        !(r.deletedAt === undefined || r.deletedAt === null || isStr(r.deletedAt))) bad('Link', i, isObj(r) ? r.id : '?')
+  })
+  const tags = (data.tags ?? []) as Record<string, unknown>[]
+  tags.forEach((r, i) => {
+    if (!isObj(r) || !isInt(r.id) || !isStr(r.name) || !r.name.trim() || r.name !== r.name.trim().toLowerCase())
+      bad('Tag', i, isObj(r) ? r.id : '?')
+    if (!(r.colour === undefined || r.colour === null || isStr(r.colour))) bad('Tag', i, isObj(r) ? r.id : '?')
+    if (!(r.deletedAt === undefined || r.deletedAt === null || isStr(r.deletedAt))) bad('Tag', i, isObj(r) ? r.id : '?')
+    if (!(r.createdAt === undefined || isStr(r.createdAt)) || !(r.updatedAt === undefined || isStr(r.updatedAt))) bad('Tag', i, isObj(r) ? r.id : '?')
+  })
+  const taggings = (data.taggings ?? []) as Record<string, unknown>[]
+  const tagIds = new Set((tags as unknown as { id: number }[]).map((t) => t.id))
+  const entityTables: Record<string, { id: number }[] | undefined> = {
+    logbook: logbook as unknown as { id: number }[], trade: trades as unknown as { id: number }[],
+    goal: goals as unknown as { id: number }[], task: tasks as unknown as { id: number }[]
+  }
+  seen(taggings as never, 'The tag sets')
+  taggings.forEach((r, i) => {
+    if (!isObj(r) || !isInt(r.id) || !isInt(r.tagId) || !isStr(r.entityType) || !isInt(r.entityId) ||
+        !isStr(r.createdAt) || !isStr(r.updatedAt)) bad('Tag set', i, isObj(r) ? r.id : '?')
+    if (!tagIds.has(r.tagId as number)) throw new Error(`Tag set ${String(r.id)} points at tag ${String(r.tagId)}, which is not in the file.`)
+    const rows = entityTables[String(r.entityType)]
+    if (!rows) throw new Error(`Tag set ${String(r.id)} points at unknown item kind "${String(r.entityType)}".`)
+    if (!rows.some((row) => row.id === r.entityId)) throw new Error(`Tag set ${String(r.id)} points at item ${String(r.entityId)} of kind "${String(r.entityType)}", which is not in the file.`)
+  })
+  const templates = (data.templates ?? []) as Record<string, unknown>[]
+  templates.forEach((r, i) => {
+    if (!isObj(r) || !isInt(r.id) || !isStr(r.kind) || !isStr(r.name) || !r.name.trim() ||
+        !isObj(r.payload) || typeof r.isBuiltin !== 'boolean' || !isStr(r.createdAt) || !isStr(r.updatedAt))
+      bad('Template', i, isObj(r) ? r.id : '?')
+  })
+
+  // Calculator tables (calc_*). Optional for backward compatibility.
+  // If present, all sections must be valid arrays and references must be consistent.
+  if (data.calculator !== undefined) {
+    if (!isObj(data.calculator)) throw new Error('The calculator backup section is not an object.')
+    const calc = data.calculator as Record<string, unknown>
+    const calcSections = ['history', 'variables', 'programs', 'rateSets', 'rates', 'rateOverrides', 'settings']
+    for (const sec of calcSections) {
+      if (!Array.isArray(calc[sec])) throw new Error(`The calculator backup section is missing its "${sec}" list.`)
+    }
+
+    const validFormats = ['decimal', 'fraction', 'scientific', 'engineering']
+
+    const history = calc.history as Record<string, unknown>[]
+    seen(history as never, 'Calculator history')
+    history.forEach((r, i) => {
+      if (!isObj(r) || !isInt(r.id) || !isStr(r.createdAt) || !isStr(r.mode) || !isStr(r.input) ||
+          !isStr(r.result) || !validFormats.includes(String(r.resultFormat)) ||
+          !(r.rateSnapshot === null || isStr(r.rateSnapshot)) || typeof r.pinned !== 'boolean') {
+        bad('Calculator history item', i, isObj(r) ? r.id : '?')
+      }
+    })
+
+    const variables = calc.variables as Record<string, unknown>[]
+    const varNames = new Set<string>()
+    variables.forEach((r, i) => {
+      if (!isObj(r) || !isStr(r.name) || !r.name.trim() || !isStr(r.value) || !isStr(r.updatedAt)) {
+        bad('Calculator variable', i, isObj(r) ? r.name : '?')
+      }
+      const norm = (r.name as string).trim().toLowerCase()
+      if (varNames.has(norm)) throw new Error(`Calculator variables contain the name "${norm}" twice.`)
+      varNames.add(norm)
+    })
+
+    const programs = calc.programs as Record<string, unknown>[]
+    seen(programs as never, 'Calculator programs')
+    programs.forEach((r, i) => {
+      if (!isObj(r) || !isInt(r.id) || !isStr(r.name) || !r.name.trim() || !isStr(r.source) ||
+          !isStr(r.createdAt) || !isStr(r.updatedAt)) {
+        bad('Calculator program', i, isObj(r) ? r.id : '?')
+      }
+    })
+
+    const rateSets = calc.rateSets as Record<string, unknown>[]
+    const rateSetIds = new Set<string>()
+    rateSets.forEach((r, i) => {
+      if (!isObj(r) || !isStr(r.id) || !r.id.trim() || !isStr(r.name) || !r.name.trim() ||
+          !isStr(r.baseCurrency) || !r.baseCurrency.trim() || typeof r.isActive !== 'boolean' || !isStr(r.updatedAt)) {
+        bad('Calculator rate set', i, isObj(r) ? r.id : '?')
+      }
+      const id = (r.id as string).trim()
+      if (rateSetIds.has(id)) throw new Error(`Calculator rate sets contain the id "${id}" twice.`)
+      rateSetIds.add(id)
+    })
+
+    const rates = calc.rates as Record<string, unknown>[]
+    seen(rates as never, 'Calculator rates')
+    const ratePairs = new Set<string>()
+    rates.forEach((r, i) => {
+      if (!isObj(r) || !isInt(r.id) || !isStr(r.rateSetId) || !isStr(r.currencyCode) || !r.currencyCode.trim() ||
+          !isStr(r.name) || !isStr(r.rateToBase) || !isStr(r.note) || !isStr(r.updatedAt)) {
+        bad('Calculator rate', i, isObj(r) ? r.id : '?')
+      }
+      if (!rateSetIds.has(r.rateSetId as string)) {
+        throw new Error(`Calculator rate #${i + 1} (id ${String(r.id)}) references rate set "${String(r.rateSetId)}", which is not in the file.`)
+      }
+      const pair = `${r.rateSetId}|${(r.currencyCode as string).toUpperCase()}`
+      if (ratePairs.has(pair)) {
+        throw new Error(`Calculator rates contain the currency "${String(r.currencyCode)}" twice for rate set "${String(r.rateSetId)}".`)
+      }
+      ratePairs.add(pair)
+    })
+
+    const overrides = calc.rateOverrides as Record<string, unknown>[]
+    seen(overrides as never, 'Calculator rate overrides')
+    const overridePairs = new Set<string>()
+    overrides.forEach((r, i) => {
+      if (!isObj(r) || !isInt(r.id) || !isStr(r.rateSetId) || !isStr(r.fromCode) || !r.fromCode.trim() ||
+          !isStr(r.toCode) || !r.toCode.trim() || !isStr(r.rate) || !isStr(r.updatedAt)) {
+        bad('Calculator rate override', i, isObj(r) ? r.id : '?')
+      }
+      if (!rateSetIds.has(r.rateSetId as string)) {
+        throw new Error(`Calculator rate override #${i + 1} (id ${String(r.id)}) references rate set "${String(r.rateSetId)}", which is not in the file.`)
+      }
+      const pair = `${r.rateSetId}|${(r.fromCode as string).toUpperCase()}|${(r.toCode as string).toUpperCase()}`
+      if (overridePairs.has(pair)) {
+        throw new Error(`Calculator rate overrides contain the pair "${String(r.fromCode)} -> ${String(r.toCode)}" twice for rate set "${String(r.rateSetId)}".`)
+      }
+      overridePairs.add(pair)
+    })
+
+    const settings = calc.settings as Record<string, unknown>[]
+    const settingKeys = new Set<string>()
+    settings.forEach((r, i) => {
+      if (!isObj(r) || !isStr(r.key) || !r.key.trim() || !isStr(r.value)) {
+        bad('Calculator setting', i, isObj(r) ? r.key : '?')
+      }
+      const k = (r.key as string).trim()
+      if (settingKeys.has(k)) throw new Error(`Calculator settings contain the key "${k}" twice.`)
+      settingKeys.add(k)
+    })
   }
 
   return data as unknown as BackupFile

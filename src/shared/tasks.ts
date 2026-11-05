@@ -97,6 +97,15 @@ export function resolveOccurrences(tasks: Task[], today: string): Task[] {
   })
 }
 
+// The one overdue rule, shared by the list rows and the board cards: a task is
+// overdue when its (active) due day has passed, or it is due today with a time
+// that has already gone. Done tasks are never overdue.
+export function taskIsOverdue(task: Task, today: string, nowTime: string): boolean {
+  if (task.status === 'done') return false
+  const due = task.recurrenceNext ?? task.dueDate
+  return due !== null && (due < today || (due === today && task.dueTime !== null && task.dueTime < nowTime))
+}
+
 // The board shows the same filtered tasks as the list, split into its three status columns.
 // Keeping the split here means both views are checked against one function, not two copies of the rules.
 export function groupTasksForBoard(tasks: Task[], filter: TaskFilter, today: string, nowTime = '00:00'): Record<TaskStatus, Task[]> {

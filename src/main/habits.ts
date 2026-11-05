@@ -4,6 +4,8 @@ import { computeHabitStatsFromCompletions, cleanTimeOfDay, cleanReminderTime, ef
 import { emitAutomation } from './automations'
 import { onLogbookEntryCreated } from './events'
 import { isDate, localDate } from './util'
+import { LIVE, newBatchId, trashByWhere } from './repo'
+import type { TrashEntry } from '../shared/trash'
 import type { AutoCompleteOn, Habit, HabitCompletion, HabitInput, HabitType, HabitsOverview, TimeOfDay } from '../shared/types'
 
 interface Row {
@@ -16,6 +18,7 @@ interface Row {
   // imported.
   sort_order: number | null; time_of_day: string | null
   reminder_time: string | null; auto_complete_on: string | null
+  deleted_at: string | null
 }
 
 interface CheckinRow {
@@ -78,10 +81,12 @@ export function habitCompletionsOf(db: Database.Database, habitId: number): Habi
 }
 
 // Every habit with its check-ins, plus today's date as the main process sees it.
-// Active habits come first, each list in the manual order (sort_order); ties
-// fall back to the old creation order, so nothing jumps unexpectedly.
+// ACTIVE (not trashed) habits come first, each list in the manual order
+// (sort_order); ties fall back to the old creation order, so nothing jumps
+// unexpectedly. A trashed habit is out of every streak, rate and dashboard
+// number until it is restored, because everything reads through this list.
 export function listHabits(db: Database.Database, today: string = localDate()): HabitsOverview {
-  const rows = db.prepare('SELECT * FROM habits ORDER BY archived, COALESCE(sort_order, id), id').all() as Row[]
+  const rows = db.prepare(`SELECT * FROM habits WHERE ${LIVE('habits')} ORDER BY archived, COALESCE(sort_order, id), id`).all() as Row[]
   const byHabit = completionsOf(db)
   return { today, habits: rows.map((r) => toHabit(r, byHabit.get(r.id) ?? [], today)) }
 }
@@ -179,9 +184,40 @@ export function reorderHabits(db: Database.Database, ids: number[]): void {
   db.transaction(() => unique.forEach((id, index) => update.run(index, id)))()
 }
 
-// Check-ins are removed too (ON DELETE CASCADE in the table definition).
-export function deleteHabit(db: Database.Database, id: number): void {
-  db.prepare('DELETE FROM habits WHERE id = ?').run(id)
+// Trashes the habit (Undo-able). The check-in history stays in the table
+// (it is child data owned by the row, like a savings goal's transactions),
+// so restoring brings the streaks back untouched; delete-forever then
+// removes the row and the history cascade goes with it.
+// Returns the delete batch id so the UI can undo the action.
+export function deleteHabit(db: Database.Database, id: number): string {
+  const batch = newBatchId()
+  const result = trashByWhere(db, 'habits', `id = ? AND ${LIVE('habits')}`, [id], batch)
+  if (result === 0 && !db.prepare('SELECT 1 FROM habits WHERE id = ?').get(id)) throw new Error('Habit not found')
+  // Already-trashed rows keep their batch (same rule as every other table).
+  const row = db.prepare('SELECT delete_batch_id AS b FROM habits WHERE id = ?').get(id) as { b: string | null }
+  return row.b ?? batch
+}
+
+// Deletes a trashed habit for good; its check-ins cascade.
+export function deleteHabitForever(db: Database.Database, id: number): void {
+  const result = db.prepare('DELETE FROM habits WHERE id = ? AND deleted_at IS NOT NULL').run(id)
+  if (result.changes === 0) throw new Error('Habit is not in Trash')
+}
+
+// Trash page + undo: one line per trashed habit (streaks still show).
+export function describeTrashed(db: Database.Database): TrashEntry[] {
+  const rows = db.prepare('SELECT id, delete_batch_id, deleted_at, name FROM habits WHERE deleted_at IS NOT NULL').all() as
+    { id: number; delete_batch_id: string | null; deleted_at: string; name: string }[]
+  return rows.map((r) => ({
+    type: 'habit' as const, id: r.id, batchId: r.delete_batch_id, trashedAt: r.deleted_at, label: r.name, sublabel: 'Habit'
+  }))
+}
+
+// Trash page: the trashed habits, newest trash first.
+export function listTrashedHabits(db: Database.Database): Habit[] {
+  const rows = db.prepare('SELECT * FROM habits WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id').all() as Row[]
+  const byHabit = completionsOf(db)
+  return rows.map((r) => toHabit(r, byHabit.get(r.id) ?? [], localDate()))
 }
 
 // P3 removed the write-time streak emissions: a streak was being declared
@@ -262,7 +298,7 @@ export function autoCompleteOnDay(db: Database.Database, date: string): void {
   if (date > today) return // a future entry cannot complete a future day
 
   const habits = db.prepare(
-    "SELECT id, days, start_date FROM habits WHERE auto_complete_on = 'logbook-entry' AND archived = 0"
+    `SELECT id, days, start_date FROM habits WHERE auto_complete_on = 'logbook-entry' AND archived = 0 AND ${LIVE('habits')}`
   ).all() as { id: number; days: string; start_date: string }[]
   for (const habit of habits) {
     // The effective start (habit's start date or its first record) decides

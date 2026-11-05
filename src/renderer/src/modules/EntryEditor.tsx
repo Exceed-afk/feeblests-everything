@@ -4,6 +4,9 @@ import { MOODS, type LogEntry, type Mood } from '../../../shared/types'
 import { MOOD_STYLE } from '../lib/moods'
 import { today } from '../lib/dates'
 import { TagInput, addTag } from '../components/TagInput'
+import { LinkedItems } from '../components/LinkedItems'
+import { noteUndoableDelete } from '../lib/undo'
+import { errMsg } from '../lib/errors'
 
 interface Props {
   entry: LogEntry | null // null = writing a new entry
@@ -21,6 +24,7 @@ export function EntryEditor({ entry, knownTags, onSaved, onClose, initialTitle, 
   const [mood, setMood] = useState<Mood | null>(entry?.mood ?? null)
   const [tags, setTags] = useState<string[]>(entry?.tags ?? [])
   const [tagInput, setTagInput] = useState('')
+  const [templateName, setTemplateName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState('')
 
@@ -35,9 +39,12 @@ export function EntryEditor({ entry, knownTags, onSaved, onClose, initialTitle, 
     }
   }
 
+  // Deleting is soft (Trash) and undoable: the delete returns the batch id
+  // the rows went to, and the Undo toast makes the restore one keystroke.
   const remove = async () => {
     if (!entry) return
-    await window.api.logbook.remove(entry.id)
+    const batchId = await window.api.logbook.remove(entry.id)
+    if (batchId) noteUndoableDelete({ label: `journal entry "${entry.title || 'Untitled'}"`, batchId })
     onSaved()
   }
 
@@ -88,6 +95,22 @@ export function EntryEditor({ entry, knownTags, onSaved, onClose, initialTitle, 
 
         <TagInput tags={tags} onTagsChange={setTags} input={tagInput} onInputChange={setTagInput} suggestions={knownTags} />
 
+        {entry && (
+          <LinkedItems type="logbook" id={entry.id} />
+        )}
+
+        {entry && <div className="flex items-center gap-2 text-xs text-muted">Template:
+          <input className="field w-40 py-1" placeholder="Name, then save" value={templateName}
+            onChange={(e) => setTemplateName(e.target.value)} />
+          <button className="btn btn-sm" disabled={!templateName.trim()}
+            onClick={async () => {
+              try {
+                await window.api.templates.save('logbook', templateName, { date: '{{date}}', title, body, mood, tags: addTag(tags, tagInput) })
+                setTemplateName('')
+              } catch { setError('The template needs a unique name of at most 80 characters.') }
+            }}>Save template</button>
+        </div>}
+
         <label className="flex min-h-[10rem] flex-1 flex-col text-xs text-muted">Entry
           <textarea className="field mt-1 flex-1 resize-none leading-relaxed" value={body}
             placeholder="Write freely..." onChange={(e) => setBody(e.target.value)} />
@@ -98,6 +121,16 @@ export function EntryEditor({ entry, knownTags, onSaved, onClose, initialTitle, 
         <div className="flex items-center gap-2">
           {entry && !confirmDelete && (
             <button className="btn text-neg" onClick={() => setConfirmDelete(true)}>Delete</button>
+          )}
+          {/* Phase 2: turn this dated entry into an undated note. The entry stays. */}
+          {entry && (
+            <button className="btn" title="Creates a note with this title, body and tags; this entry stays"
+              onClick={async () => {
+                try {
+                  await window.api.notes.promoteEntry(entry.id)
+                  onSaved()
+                } catch (err) { setError(errMsg(err)) }
+              }}>Convert to note</button>
           )}
           {entry && confirmDelete && (
             <>

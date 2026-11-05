@@ -9,7 +9,7 @@
   --bg: 244 245 244; --surface: 254 254 254; --sidebar: 254 254 254; --border: 218 220 220; --text: 47 49 48; --muted: 99 112 138;
   --panel: var(--sidebar); --card: var(--surface); --line: var(--border); --fg: var(--text);
   --card-border: 231 232 232; --selected: 238 231 253;
-  --accent: 139 92 246; --on-accent: 255 255 255; --accent-fg: 116 81 197;
+  --accent: 139 92 246; --accent-fill: 125 83 221; --on-accent: 255 255 255; --accent-fg: 116 81 197;
   --pos: 5 122 82; --neg: 197 27 69; --warn: 143 90 6; /* gains / losses / caution, 4.5:1+ on light surfaces */
   --mood: rgb(47 111 159); /* the neutral accent of the mood trend and goal progress (a full colour: charts set it as CSS text) */
   --rs: 1;   /* corner roundness multiplier (tailwind.config.js: borderRadius) */
@@ -25,7 +25,7 @@
   --bg: 17 23 21; --surface: 27 36 32; --sidebar: 22 29 26; --border: 48 59 53; --text: 207 211 208; --muted: 161 173 165;
   --panel: var(--sidebar); --card: var(--surface); --line: var(--border); --fg: var(--text);
   --card-border: 41 51 46; --selected: 49 47 75;
-  --accent: 139 92 246; --on-accent: 255 255 255; --accent-fg: 166 140 231;
+  --accent: 139 92 246; --accent-fill: 125 83 221; --on-accent: 255 255 255; --accent-fg: 166 140 231;
   --pos: 66 197 138; --neg: 245 132 154; --warn: 229 180 80;
   --mood: rgb(116 178 216);
   --shadow-card: 0 1px 2px rgb(var(--border) / 0.3), 0 1px 3px rgb(var(--border) / 0.24);
@@ -87,7 +87,7 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .btn:hover:not(:disabled):not([aria-busy='true']) { background: rgb(var(--fg) / .07); border-color: rgb(var(--fg) / .22); }
   .btn:active:not(:disabled):not([aria-busy='true']) { background: rgb(var(--fg) / .12); transform: translateY(1px) scale(.98); }
 
-  .btn-primary { --btn-fg: rgb(var(--on-accent)); background: rgb(var(--accent)); border-color: transparent; font-weight: 500; }
+  .btn-primary { --btn-fg: rgb(var(--on-accent)); background: rgb(var(--accent-fill, var(--accent))); border-color: transparent; font-weight: 500; }
   /* The loss colour, with the page colour as its text: readable in both modes and no fixed white. */
   .btn-danger { --btn-fg: rgb(var(--bg)); background: rgb(var(--neg)); border-color: transparent; font-weight: 500; }
   .btn-primary:hover:not(:disabled):not([aria-busy='true']), .btn-danger:hover:not(:disabled):not([aria-busy='true']) { filter: brightness(1.1); }
@@ -120,7 +120,7 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .seg > button:hover { color: rgb(var(--fg)); }
   .seg > button:active { transform: scale(.96); }
   .seg > button[aria-pressed='true'], .seg > button[aria-selected='true'] { background: rgb(var(--selected)); color: rgb(var(--accent-fg)); box-shadow: 0 1px 2px rgb(var(--border) / .35); }
-  .seg > button[aria-pressed='true']:hover, .seg > button[aria-selected='true']:hover { color: rgb(var(--fg)); }
+  .seg > button[aria-pressed='true']:hover, .seg > button[aria-selected='true']:hover { color: rgb(var(--accent-fg)); }
   [data-style='minimal'] .seg { background: transparent; }
   [data-style='minimal'] .seg > button[aria-pressed='true'], [data-style='minimal'] .seg > button[aria-selected='true'] { background: rgb(var(--selected)); color: rgb(var(--accent-fg)); box-shadow: none; }
   /* A segmented control used for filters may be wider than its content: the options share the width evenly. */
@@ -216,6 +216,151 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
     .page-title { font-size: 1.5rem; line-height: 1.875rem; }
   }
 
+  /* ================= Calculator module =================
+     Header is two rows (title + subtitle, then the toolbar). Nothing overlaps and nothing is
+     absolutely positioned: the toolbar is a wrapping flex row that scrolls its mode tabs when
+     the window is too narrow for every option. */
+  .calculator-module { box-sizing: border-box; overflow-x: clip; }
+  .calc-head { display: flex; flex-direction: column; gap: calc(.75rem * var(--d)); min-width: 0; margin-bottom: calc(1.5rem * var(--d)); }
+  .calc-head-title { min-width: 0; }
+  .calc-head-title .page-sub { max-width: 60ch; }
+  /* The toolbar has two parts: the mode strip and the tools. The tools sit on the right of the
+     strip when both fit on one row; otherwise the tools take the row below and stay right-aligned.
+     Nothing is positioned, so nothing can overlap. */
+  .calc-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; min-width: 0; }
+  .calc-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .375rem; min-width: 0; margin-left: auto; }
+  /* The strip is one evenly-wrapping group: every mode stays visible and the last row is never a
+     single orphaned tab, because the group takes the full width it is given. */
+  .calc-modes { flex: 1 1 26rem; max-width: 100%; min-width: 0; flex-wrap: wrap; justify-content: flex-start; }
+  .calc-modes > button { flex: 0 1 auto; white-space: nowrap; }
+  .calc-select { width: auto; max-width: 100%; padding: calc(.25rem * var(--d)) calc(.5rem * var(--d)); font-size: .8125rem; border-radius: calc(.5rem * var(--rs)); }
+  .calc-ico { width: 1rem; height: 1rem; flex: 0 0 auto; }
+  .calc-btn-label-short { display: none; }
+  @media (max-width: 759px) {
+    .calc-btn-label { display: none; }
+    .calc-btn-label-short { display: inline; }
+  }
+  /* Basic / Scientific: expression column plus the history column. History is open by default on
+     wide screens so the page never has a half-empty right side; the History button still toggles it. */
+  .calc-basic { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(1.5rem * var(--d)); align-items: start; }
+  .calc-basic:has(.calc-history) { grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr); }
+  @media (max-width: 899px) { .calc-basic:has(.calc-history) { grid-template-columns: minmax(0, 1fr); } }
+  .calc-main { min-width: 0; align-content: start; }
+  .calc-main > * { align-self: start; }
+  .calc-history { min-width: 0; max-height: 420px; }
+  /* Empty state: centred in the panel so it does not look like a broken list. */
+  .calc-history-empty { display: flex; flex-direction: column; justify-content: center; min-height: 9rem; padding: .5rem; text-align: center; }
+  .calc-kbd {
+    display: inline-block; padding: 0 .25rem; border: 1px solid rgb(var(--line)); border-radius: calc(.25rem * var(--rs));
+    background: rgb(var(--fg) / .05); color: rgb(var(--fg)); font-family: inherit; font-size: .6875rem; line-height: 1.3;
+  }
+  /* The keypad and the result row keep their natural size: only the expression input grows. */
+  .calc-keypad > .btn { min-height: 3rem; }
+  .calc-expr { height: auto; line-height: 1.5; padding-top: calc(.625rem * var(--d)); padding-bottom: calc(.625rem * var(--d)); }
+  .calc-keypad { min-width: 0; }
+  .calc-keypad > .btn { min-width: 0; padding-left: .5rem; padding-right: .5rem; }
+  /* The help modal's backdrop uses the page tint, like every other dialog in the app. */
+  .calc-help-overlay { background: rgb(var(--bg) / .72); backdrop-filter: blur(2px); }
+
+  /* ---- Calculator: offline currency (panels/CurrencyPanel.tsx) ----
+     Cards use the shared surface tokens, so they follow every theme and both styles. The state chips
+     (stale / override / ok / error) are colour PLUS an icon and a word, so meaning is never colour alone. */
+  .calc-cur { min-width: 0; }
+  .calc-cur-card {
+    display: flex; flex-direction: column; gap: calc(.75rem * var(--d)); min-width: 0;
+    padding: calc(1rem * var(--d)); border: 1px solid rgb(var(--card-border)); border-radius: calc(1rem * var(--rs));
+    background: rgb(var(--card)); box-shadow: var(--shadow-card);
+  }
+  [data-style='minimal'] .calc-cur-card { background: rgb(var(--bg)); border-color: rgb(var(--border)); box-shadow: none; }
+  .calc-cur-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+  .calc-cur-title { font-size: .9375rem; font-weight: 600; letter-spacing: -.01em; color: rgb(var(--fg)); }
+  .calc-cur-label { display: block; margin-bottom: .25rem; font-size: .75rem; color: rgb(var(--muted)); }
+  .calc-cur-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-width: 0; }
+  .calc-cur-row > .calc-cur-label { flex: none; width: 6.5rem; margin-bottom: 0; }
+  .calc-cur-grow { flex: 1 1 10rem; min-width: 0; }
+  .calc-cur-input { flex: 1 1 8rem; min-width: 0; width: auto; }
+  .calc-cur-num { width: 6rem; min-width: 0; }
+  .calc-cur-inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .375rem; min-width: 0; }
+  .calc-cur-field { display: flex; flex-direction: column; gap: .125rem; }
+  .calc-cur-field > .calc-cur-label { margin-bottom: 0; }
+  .calc-cur-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(.75rem * var(--d)); }
+  .calc-cur-grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: calc(.75rem * var(--d)); align-items: end; }
+  .calc-cur-grid4-action { display: flex; }
+  .calc-cur-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: calc(.75rem * var(--d)); align-items: end; }
+  .calc-cur-form-submit { align-self: end; }
+  @media (max-width: 767px) {
+    .calc-cur-grid3, .calc-cur-grid4 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .calc-cur-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .calc-cur-form-submit { grid-column: 1 / -1; }
+  }
+  .calc-cur-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+
+  .calc-cur-result {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-width: 0;
+    padding: calc(.75rem * var(--d)); border: 1px solid rgb(var(--line)); border-radius: calc(.75rem * var(--rs));
+    background: rgb(var(--fg) / .04);
+  }
+  .calc-cur-result-value { width: 100%; font-size: 1.0625rem; font-weight: 600; color: rgb(var(--fg)); overflow-wrap: anywhere; }
+  .calc-cur-result-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .75rem; color: rgb(var(--muted)); }
+  .calc-cur-result-error { border-color: rgb(var(--neg) / .55); background: rgb(var(--neg) / .08); color: rgb(var(--fg)); }
+  .calc-cur-result-missing { border-color: rgb(var(--warn) / .55); background: rgb(var(--warn) / .1); color: rgb(var(--fg)); }
+  .calc-cur-used { display: flex; flex-direction: column; gap: .125rem; width: 100%; margin: .25rem 0 0; padding: 0; list-style: none; }
+  .calc-cur-used > li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .75rem; color: rgb(var(--muted)); }
+
+  /* State chips: warning yellow for stale, the accent for an override, success and loss for the rest. */
+  .calc-cur-state {
+    display: inline-flex; align-items: center; gap: .25rem; padding: .0625rem .5rem;
+    border: 1px solid currentColor; border-radius: calc(.5rem * var(--rs)); font-size: .75rem; line-height: 1.25rem; font-weight: 500;
+  }
+  .calc-cur-state-stale { color: rgb(var(--warn)); background: rgb(var(--warn) / .12); }
+  .calc-cur-state-override { color: rgb(var(--accent-fg)); background: rgb(var(--accent) / .12); }
+  .calc-cur-state-ok { color: rgb(var(--pos)); background: rgb(var(--pos) / .12); }
+  .calc-cur-state-error { color: rgb(var(--neg)); background: rgb(var(--neg) / .12); }
+  /* Stale/override notices on the result read as a paragraph under the number. */
+  p.calc-cur-state { width: 100%; align-items: flex-start; padding: calc(.5rem * var(--d)); line-height: 1.35rem; }
+
+  .calc-cur-msg { margin: 0; font-size: .75rem; }
+  .calc-cur-msg-error { color: rgb(var(--neg)); }
+  .calc-cur-msg-ok { color: rgb(var(--pos)); }
+
+  .calc-cur-rates { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none;
+    border: 1px solid rgb(var(--line)); border-radius: calc(.75rem * var(--rs)); overflow: hidden; }
+  .calc-cur-rate + .calc-cur-rate { border-top: 1px solid rgb(var(--line)); }
+  .calc-cur-rate-main { display: flex; flex-wrap: wrap; align-items: center; gap: .375rem .75rem; padding: calc(.5rem * var(--d)) calc(.75rem * var(--d)); min-width: 0; }
+  .calc-cur-rate[data-editing='true'] .calc-cur-rate-main { flex-direction: column; align-items: stretch; }
+  .calc-cur-code { min-width: 3.5rem; font-weight: 600; color: rgb(var(--fg)); }
+  .calc-cur-rate-value {
+    display: inline-flex; align-items: center; gap: .375rem; padding: .0625rem .25rem; border-radius: calc(.375rem * var(--rs));
+    background: transparent; color: rgb(var(--fg)); font-size: .875rem; cursor: pointer;
+  }
+  .calc-cur-rate-value:hover { background: rgb(var(--fg) / .07); }
+  .calc-cur-rate-value .calc-ico { color: rgb(var(--muted)); }
+  .calc-cur-rate-value:hover .calc-ico { color: rgb(var(--fg)); }
+  .calc-cur-note { min-width: 0; font-size: .75rem; color: rgb(var(--muted)); overflow-wrap: anywhere; }
+  .calc-cur-date { margin-left: auto; font-size: .75rem; color: rgb(var(--muted)); white-space: nowrap; }
+  /* Narrow rows: the date stops pushing and wraps under the value instead of leaving Edit alone. */
+  @media (max-width: 639px) { .calc-cur-date { margin-left: 0; } }
+  .calc-cur-edit-btn { margin-left: auto; }
+  .calc-cur-edit { display: flex; flex-wrap: wrap; align-items: center; gap: .375rem; width: 100%; }
+  .calc-cur-overrides { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none;
+    border: 1px solid rgb(var(--line)); border-radius: calc(.75rem * var(--rs)); overflow: hidden; }
+  .calc-cur-override { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; padding: calc(.5rem * var(--d)) calc(.75rem * var(--d)); font-size: .875rem; }
+  .calc-cur-override + .calc-cur-override { border-top: 1px solid rgb(var(--line)); }
+  .calc-cur-override > .btn { margin-left: auto; }
+  .calc-cur-confirm { display: flex; flex-direction: column; gap: .5rem; padding: calc(.625rem * var(--d));
+    border: 1px solid rgb(var(--neg) / .55); border-radius: calc(.75rem * var(--rs)); background: rgb(var(--neg) / .07); }
+
+  .calc-cur-io { display: flex; flex-direction: column; gap: calc(.75rem * var(--d)); }
+  .calc-cur-textarea { min-height: 6rem; resize: vertical; }
+  .calc-cur-preview { display: flex; flex-direction: column; gap: calc(.625rem * var(--d)); padding: calc(.75rem * var(--d));
+    border: 1px dashed rgb(var(--line)); border-radius: calc(.75rem * var(--rs)); }
+  .calc-cur-table-wrap { max-width: 100%; overflow-x: auto; }
+  .calc-cur-table { width: 100%; border-collapse: collapse; font-size: .8125rem; }
+  .calc-cur-table th, .calc-cur-table td { padding: .375rem .5rem; border-bottom: 1px solid rgb(var(--line)); text-align: left; white-space: nowrap; }
+  .calc-cur-table th { font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: rgb(var(--muted)); }
+  .calc-cur-table td:nth-child(4), .calc-cur-table td:nth-child(5) { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+  .calc-cur-history-tags { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .25rem; }
+
   /* A drawer / dialog backdrop: the page colour at partial strength, so it frosts in light mode and dims in dark,
      instead of a fixed black that looks wrong on light themes. */
   .scrim { background: rgb(var(--bg) / .72); backdrop-filter: blur(2px); }
@@ -237,11 +382,41 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .meta { font-size: .75rem; color: rgb(var(--muted)); }
   .num { font-variant-numeric: tabular-nums; }
 
+  /* Rendered markdown (Notes). Only theme tokens, so every palette and both
+     interface styles work; the HTML is sanitised upstream (shared/markdown.ts). */
+  .md { font-size: .875rem; line-height: 1.65; color: rgb(var(--fg)); overflow-wrap: anywhere; }
+  .md > :first-child { margin-top: 0; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 1.25em 0 .5em; font-weight: 600; line-height: 1.3; letter-spacing: -.01em; }
+  .md h1 { font-size: 1.5rem; }
+  .md h2 { font-size: 1.25rem; }
+  .md h3 { font-size: 1.0625rem; }
+  .md h4, .md h5, .md h6 { font-size: .9375rem; }
+  .md p, .md ul, .md ol, .md blockquote, .md pre, .md table { margin: .75em 0; }
+  .md ul, .md ol { padding-left: 1.35em; }
+  .md ul { list-style: disc; }
+  .md ol { list-style: decimal; }
+  .md li { margin: .2em 0; }
+  .md li > ul, .md li > ol { margin: .2em 0; }
+  .md input[type='checkbox'] { margin-right: .4em; vertical-align: middle; accent-color: rgb(var(--accent)); }
+  .md ul:has(input[type='checkbox']) { list-style: none; padding-left: .25em; }
+  .md a { color: rgb(var(--accent-fg)); text-decoration: underline; text-underline-offset: 2px; }
+  .md a:hover { text-decoration-thickness: 2px; }
+  .md strong { font-weight: 650; }
+  .md del { color: rgb(var(--muted)); }
+  .md code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: .85em; padding: .1em .35em; border-radius: .35rem; background: rgb(var(--fg) / .08); }
+  .md pre { padding: .75rem 1rem; border-radius: .75rem; background: rgb(var(--fg) / .06); overflow-x: auto; }
+  .md pre code { padding: 0; background: none; font-size: .85em; }
+  .md blockquote { padding-left: .9rem; border-left: 3px solid rgb(var(--border)); color: rgb(var(--muted)); }
+  .md hr { margin: 1.25em 0; border: 0; border-top: 1px solid rgb(var(--border)); }
+  .md table { border-collapse: collapse; display: block; overflow-x: auto; }
+  .md th, .md td { padding: .4rem .6rem; border: 1px solid rgb(var(--border)); text-align: left; }
+  .md th { background: rgb(var(--fg) / .04); font-weight: 600; }
+
   /* Stat tiles (Dashboard, Review summary cards): label, one big number, then quiet supporting text. */
   .stat { display: block; width: 100%; text-align: left; }
-  .stat-label { font-size: .8125rem; font-weight: 500; color: rgb(var(--muted)); }
-  .stat-value { margin-top: .375rem; font-size: 1.875rem; line-height: 2.25rem; font-weight: 650; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
-  .stat-sub { margin-top: .25rem; font-size: .8125rem; color: rgb(var(--muted)); }
+  .stat-label { display: block; font-size: .8125rem; font-weight: 500; color: rgb(var(--muted)); }
+  .stat-value { display: block; margin-top: .375rem; font-size: 1.875rem; line-height: 2.25rem; font-weight: 650; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+  .stat-sub { display: block; margin-top: .25rem; font-size: .8125rem; color: rgb(var(--muted)); }
 
   /* ---- Review summary card ----
      One metric in charge (value, colour), a secondary line, and a tiny chart or a comparison underneath.
@@ -537,3 +712,104 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .day-pop-value input[type='number']::-webkit-outer-spin-button,
   .day-pop-value input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 }
+
+  /* ---- Dashboard Edit Mode & Widget Shells ---- */
+  .dash-widget-box {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    border-radius: calc(1rem * var(--rs));
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+  }
+
+  .dash-widget-box.dash-editing {
+    background: rgb(var(--surface));
+    border: 1.5px solid rgb(var(--line));
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+
+  .dash-widget-box.dash-editing:hover {
+    border-color: rgb(var(--accent) / 0.5);
+    box-shadow: var(--shadow-card), 0 0 0 1px rgb(var(--accent) / 0.2);
+  }
+
+  .dash-widget-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.3125rem 0.5rem;
+    background: rgb(var(--fg) / 0.035);
+    border-bottom: 1px solid rgb(var(--line));
+    user-select: none;
+  }
+
+  .dash-size-seg {
+    display: inline-flex;
+    padding: 1.5px;
+    background: rgb(var(--fg) / 0.06);
+    border: 1px solid rgb(var(--line));
+    border-radius: calc(0.5rem * var(--rs));
+    gap: 1px;
+  }
+
+  .dash-size-btn {
+    padding: 0.125rem 0.375rem;
+    border-radius: calc(0.375rem * var(--rs));
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: rgb(var(--muted));
+    cursor: pointer;
+    transition: background-color .12s, color .12s;
+    min-width: 1.25rem;
+    text-align: center;
+  }
+  .dash-size-btn:hover {
+    color: rgb(var(--fg));
+  }
+  .dash-size-btn[aria-pressed='true'] {
+    background: rgb(var(--selected));
+    color: rgb(var(--accent-fg));
+  }
+
+  .dash-ctrl-btn {
+    display: grid;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: calc(0.375rem * var(--rs));
+    color: rgb(var(--muted));
+    cursor: pointer;
+    transition: background-color .12s, color .12s;
+  }
+  .dash-ctrl-btn:hover:not(:disabled) {
+    background: rgb(var(--fg) / 0.08);
+    color: rgb(var(--fg));
+  }
+  .dash-ctrl-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .dash-widget-content {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: 100%;
+  }
+  .dash-widget-content > * {
+    flex: 1 1 auto;
+  }
+
+  /* In edit mode, neutralise nested card borders & backgrounds so the widget
+     blends seamlessly into the single outer dash-widget-box frame */
+  .dash-widget-box.dash-editing .dash-widget-content section.card,
+  .dash-widget-box.dash-editing .dash-widget-content div.card {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+  }

@@ -5,10 +5,7 @@
  *
  * - One row per task owns the recurrence rule (`recurrenceRule`) and the next due
  *   date (`recurrenceNext`). Instances are resolved at read time by resolveOccurrences
- *   (src/shared/tasks.ts); no child rows are ever created.
- * - Completing a recurring task marks it done. On the next read, resolveOccurrences
- *   advances recurrenceNext to the following date and returns the task to 'todo',
- *   so the series continues without copying rows.
+ *   (src/shared/tasks.ts); no child rows are ever created. * - Completing a recurring task marks it done. On the next read, resolveOccurrences advances recurrenceNext to the following date and returns the task to 'todo', so the series continues without copying rows.
  * - Soft delete: deleting a task sets deletedAt instead of removing the row. Deleted
  *   tasks are excluded from every view. restore/clearTrash manage the trash.
  * - Manual sort position: `position` (a float) replaces sort_order. Moving one card
@@ -18,7 +15,10 @@
 import type Database from 'better-sqlite3'
 import { filterTasks, localTaskDay, nextTaskDate, nextTaskDateAfter, resolveOccurrences, TASK_FIELD_ORDER, taskInputProblems } from '../shared/tasks'
 import { cleanTags, localDate } from './util'
+import { newBatchId, nowIso, restoreByWhere, trashByWhere } from './repo'
 import { emitAutomation } from './automations'
+import { indexOne, removeOne } from './searchIndex'
+import type { TrashEntry } from '../shared/trash'
 import type { Task, TaskCompletion, TaskInput, TaskStatus } from '../shared/types'
 
 interface TaskRow extends TaskRowBase {
@@ -27,6 +27,8 @@ interface TaskRow extends TaskRowBase {
   created_at: string
   completed_at: string | null
   deleted_at: string | null
+  updated_at: string
+  delete_batch_id: string | null
   project: string | null
   tags: string
   position: number
@@ -78,6 +80,16 @@ export function listTasks(db: Database.Database, today: string = localDate()): T
   const subtasks = db.prepare('SELECT * FROM task_subtasks ORDER BY sort_order, id').all() as SubtaskRow[]
   const tasks = rows.map((row) => toTask(row, subtasks))
   return resolveOccurrences(tasks, today)
+}
+
+// Hydrates live tasks by id (shared-search results do this), keeping the
+// normal recurrence resolution so a match behaves like the list view.
+export function getTasksByIds(db: Database.Database, ids: number[]): Task[] {
+  if (ids.length === 0) return []
+  const marks = ids.map(() => '?').join(',')
+  const rows = db.prepare(`SELECT * FROM tasks WHERE id IN (${marks}) AND deleted_at IS NULL`).all(...ids) as TaskRow[]
+  const subtasks = db.prepare(`SELECT * FROM task_subtasks WHERE task_id IN (${marks}) ORDER BY sort_order, id`).all(...ids) as SubtaskRow[]
+  return resolveOccurrences(rows.map((row) => toTask(row, subtasks)), localDate())
 }
 
 export function overdueTasks(db: Database.Database, today: string): { id: number; title: string; daysOverdue: number }[] {
@@ -179,7 +191,9 @@ export function createTask(db: Database.Database, input: TaskInput): Task {
     }
     return id
   })
-  return getTask(db, run())
+  const createdId = run()
+  indexOne(db, 'task', createdId)
+  return getTask(db, createdId)
 }
 
 export function updateTask(db: Database.Database, id: number, input: TaskInput): Task {
@@ -191,32 +205,43 @@ export function updateTask(db: Database.Database, id: number, input: TaskInput):
   db.transaction(() => {
     db.prepare(`UPDATE tasks SET title=@title, notes=@notes, status=@status, priority=@priority, due_date=@dueDate,
       due_time=@dueTime, project=@project, tags=@tags, position=@position, recurrence_rule=@recurrenceRule, recurrence_next=@recurrenceNext,
-      completed_at=@completedAt WHERE id=@id`)
+      completed_at=@completedAt, updated_at=@now WHERE id=@id AND deleted_at IS NULL`)
       .run({ ...task, id, dueTime: task.dueTime, tags: JSON.stringify(task.tags), position: previous.position ?? task.position,
         recurrenceRule: task.recurrenceRule ? JSON.stringify(task.recurrenceRule) : null,
-        recurrenceNext: task.recurrenceNext,
+        recurrenceNext: task.recurrenceNext, now,
         completedAt: task.status === 'done' ? (previous.status === 'done' ? previous.completed_at : now) : null })
     replaceSubtasks(db, id, task.subtasks)
     if (task.status === 'done' && previous.status !== 'done') {
       db.prepare('INSERT INTO task_completions (task_id, completed_at) VALUES (?, ?)').run(id, now)
     }
   })()
+  indexOne(db, 'task', id)
   return getTask(db, id)
 }
 
-export function softDeleteTask(db: Database.Database, id: number): void {
-  const row = db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as { deleted_at: string | null } | undefined
-  if (!row) throw new Error('Task not found')
-  if (row.deleted_at !== null) return // already deleted
-  const now = new Date().toISOString()
-  db.prepare('UPDATE tasks SET deleted_at = ? WHERE id = ?').run(now, id)
+export function softDeleteTask(db: Database.Database, id: number, batchId?: string): void {
+  const result = trashByWhere(db, 'tasks', "id = ? AND deleted_at IS NULL", [id], batchId ?? newBatchId())
+  if (result === 0) {
+    if (!db.prepare('SELECT id FROM tasks WHERE id = ?').get(id)) throw new Error('Task not found')
+    return // already trashed: nothing to do
+  }
+  db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(nowIso(), id)
+  removeOne(db, 'task', id)
 }
 
 export function restoreTask(db: Database.Database, id: number): void {
-  const row = db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as { deleted_at: string | null } | undefined
-  if (!row) throw new Error('Task not found')
-  if (row.deleted_at === null) return // not deleted
-  db.prepare('UPDATE tasks SET deleted_at = NULL WHERE id = ?').run(id)
+  // Restore the whole delete batch the row belongs to, so a group trashed as
+  // one action comes back as one. A lone row is its own batch, so this covers
+  // the single-item case too.
+  const batch = (db.prepare('SELECT delete_batch_id FROM tasks WHERE id = ?').get(id) as { delete_batch_id: string | null } | undefined)?.delete_batch_id
+  if (!batch) {
+    if (!db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(id)) throw new Error('Task not found')
+    return // live already
+  }
+  const restoredIds = (db.prepare('SELECT id FROM tasks WHERE delete_batch_id = ? AND deleted_at IS NOT NULL').all(batch) as { id: number }[]).map((r) => r.id)
+  restoreByWhere(db, 'tasks', 'delete_batch_id = ? AND deleted_at IS NOT NULL', [batch])
+  db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(nowIso(), id)
+  for (const rid of restoredIds) indexOne(db, 'task', rid)
 }
 
 export function deleteTaskForever(db: Database.Database, id: number): void {
@@ -228,14 +253,29 @@ export function clearTrash(db: Database.Database): void {
   db.transaction(() => db.prepare('DELETE FROM tasks WHERE deleted_at IS NOT NULL').run())()
 }
 
-export function deleteTask(db: Database.Database, id: number): void {
+// Trashes the task under its own delete batch id (returned, so the UI can
+// undo). A task's checklist rows come back with it on restore.
+export function deleteTask(db: Database.Database, id: number): string {
   softDeleteTask(db, id)
+  const row = db.prepare('SELECT delete_batch_id AS b FROM tasks WHERE id = ?').get(id) as { b: string | null }
+  if (!row) throw new Error('Task not found')
+  return row.b ?? ''
 }
 
-export function deleteTasks(db: Database.Database, ids: number[]): void {
+// A bulk delete is ONE action: every trashed row shares one delete batch id,
+// so undo (or a restore) brings the whole selection back together.
+export function deleteTasks(db: Database.Database, ids: number[]): string {
   checkTaskIds(ids)
-  db.transaction(() => ids.forEach((id) => softDeleteTask(db, id)))()
+  const batch = newBatchId()
+  db.transaction(() => ids.forEach((id) => softDeleteTask(db, id, batch)))()
+  return batch
 }
+
+/**
+ * Trashes one task. `batchId` lets a caller put several rows into one batch
+ * (a bulk delete); a single delete gets its own batch. Checklist rows stay
+ * below the task (they come back with it), matching every other group rule.
+ */
 
 export function reorderPosition(db: Database.Database, id: number, newPosition: number): void {
   const row = db.prepare('SELECT id, position FROM tasks WHERE deleted_at IS NULL ORDER BY position').all() as { id: number; position: number }[]
@@ -279,12 +319,12 @@ export function setTaskStatus(db: Database.Database, id: number, status: TaskSta
   if (task.deletedAt !== null) throw new Error('Task is deleted')
   if (raw.status !== task.status) {
     db.transaction(() => {
-      db.prepare('UPDATE tasks SET status = ?, completed_at = NULL WHERE id = ?').run(task.status, id)
+      db.prepare('UPDATE tasks SET status = ?, completed_at = NULL, updated_at = ? WHERE id = ?').run(task.status, nowIso(), id)
       db.prepare('UPDATE task_subtasks SET done = 0 WHERE task_id = ?').run(id)
     })()
   }
   if (status !== 'done' || task.status === 'done') {
-    db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?').run(status, status === 'done' ? task.completedAt : null, id)
+    db.prepare('UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?').run(status, status === 'done' ? task.completedAt : null, nowIso(), id)
     const updated = getTask(db, id)
     if (status === 'done' && task.status !== 'done') {
       emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
@@ -296,8 +336,8 @@ export function setTaskStatus(db: Database.Database, id: number, status: TaskSta
   const anchor = task.dueDate ?? task.recurrenceNext ?? today
   const next = nextTaskDateAfter(task.recurrenceNext ?? task.dueDate ?? today, task.recurrenceRule, anchor, today)
   db.transaction(() => {
-    db.prepare("UPDATE tasks SET status = 'done', completed_at = ?, recurrence_next = ? WHERE id = ?")
-      .run(now, next, id)
+    db.prepare("UPDATE tasks SET status = 'done', completed_at = ?, recurrence_next = ?, updated_at = ? WHERE id = ?")
+      .run(now, next, now, id)
     db.prepare('INSERT INTO task_completions (task_id, completed_at) VALUES (?, ?)').run(id, now)
   })()
   emitAutomation(db, 'task-completed', `task:${id}`, { taskId: id })
@@ -312,8 +352,8 @@ export function undoTaskStatus(db: Database.Database, id: number, status: TaskSt
     if (current.status === 'done' && status !== 'done' && current.completed_at !== null) {
       db.prepare('DELETE FROM task_completions WHERE task_id = ? AND completed_at = ?').run(id, current.completed_at)
     }
-    db.prepare('UPDATE tasks SET status = ?, completed_at = ?, recurrence_next = ? WHERE id = ?')
-      .run(status, completedAt, recurrenceNext, id)
+    db.prepare('UPDATE tasks SET status = ?, completed_at = ?, recurrence_next = ?, updated_at = ? WHERE id = ?')
+      .run(status, completedAt, recurrenceNext, nowIso(), id)
   })()
 }
 
@@ -326,14 +366,14 @@ export function rescheduleTasks(db: Database.Database, ids: number[], dueDate: s
   if (check.dueDate) throw new Error(check.dueDate)
   if (check.dueTime) throw new Error(check.dueTime)
   db.transaction(() => {
-    const updateOneOff = db.prepare('UPDATE tasks SET due_date = ?, due_time = ? WHERE id = ? AND deleted_at IS NULL')
-    const updateRecurring = db.prepare('UPDATE tasks SET recurrence_next = ?, due_time = ? WHERE id = ? AND deleted_at IS NULL')
+    const updateOneOff = db.prepare('UPDATE tasks SET due_date = ?, due_time = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+    const updateRecurring = db.prepare('UPDATE tasks SET recurrence_next = ?, due_time = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
     for (const id of ids) {
       const task = db.prepare('SELECT recurrence_rule FROM tasks WHERE id = ? AND deleted_at IS NULL').get(id) as { recurrence_rule: string | null } | undefined
       if (!task) throw new Error('A selected task no longer exists')
       const result = task.recurrence_rule
-        ? updateRecurring.run(dueDate, dueTime, id)
-        : updateOneOff.run(dueDate, dueTime, id)
+        ? updateRecurring.run(dueDate, dueTime, nowIso(), id)
+        : updateOneOff.run(dueDate, dueTime, nowIso(), id)
       if (result.changes === 0) throw new Error('A selected task no longer exists')
     }
   })()
@@ -343,6 +383,7 @@ export function setSubtaskDone(db: Database.Database, taskId: number, subtaskId:
   const result = db.prepare('UPDATE task_subtasks SET done = ? WHERE id = ? AND task_id = ?')
     .run(done ? 1 : 0, subtaskId, taskId)
   if (result.changes === 0) throw new Error('Checklist item not found')
+  db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(nowIso(), taskId)
 }
 
 export function reorderSubtasks(db: Database.Database, taskId: number, ids: number[]): void {
@@ -366,13 +407,23 @@ export function promoteSubtask(db: Database.Database, taskId: number, subtaskId:
   })()
 }
 
+// Trash page + undo: one line per trashed task.
+export function describeTrashed(db: Database.Database): TrashEntry[] {
+  const rows = db.prepare('SELECT id, delete_batch_id, deleted_at, title, notes FROM tasks WHERE deleted_at IS NOT NULL').all() as
+    { id: number; delete_batch_id: string | null; deleted_at: string; title: string; notes: string }[]
+  return rows.map((r) => ({
+    type: 'task' as const, id: r.id, batchId: r.delete_batch_id, trashedAt: r.deleted_at,
+    label: r.title, sublabel: r.notes ? r.notes.slice(0, 80) : undefined
+  }))
+}
+
 export function skipTaskOccurrence(db: Database.Database, id: number, today: string): Task {
   const task = getTask(db, id)
   if (task.deletedAt !== null) throw new Error('Task is deleted')
   if (!task.recurrenceRule) throw new Error('This task does not repeat')
   const next = nextTaskDate(task.recurrenceNext ?? task.dueDate ?? today, task.recurrenceRule, task.dueDate ?? today)
   db.transaction(() => {
-    db.prepare("UPDATE tasks SET status = 'todo', completed_at = NULL, recurrence_next = ? WHERE id = ?").run(next, id)
+    db.prepare("UPDATE tasks SET status = 'todo', completed_at = NULL, recurrence_next = ?, updated_at = ? WHERE id = ?").run(next, nowIso(), id)
     db.prepare('UPDATE task_subtasks SET done = 0 WHERE task_id = ?').run(id)
   })()
   return getTask(db, id)

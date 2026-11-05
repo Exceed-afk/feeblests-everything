@@ -1,6 +1,6 @@
 # Feeblest's Everything: Architecture
 
-Last verified: 2026-11-01 (package.json `0.12.0`). Every path and name below was checked against the code on this date.
+Last verified: 2026-11-03 (package.json `0.18.0`). Every path and name below was checked against the code on this date.
 
 > **Important correction to the app's own briefs.** The stack is **React + Electron + SQLite (better-sqlite3)**. There are **no Zustand stores, no Dexie/IndexedDB, and no shadcn/ui components** anywhere in the code (searched the whole repo). This document describes what the code actually does. Where a "store" is named, it means the one hand-rolled settings store, not Zustand.
 
@@ -28,7 +28,7 @@ Last verified: 2026-11-01 (package.json `0.12.0`). Every path and name below was
 | State | React `useState` per page + one settings store (`useSyncExternalStore`) | Page data refetched from SQLite on every load/write; only settings live in memory across pages |
 | Bridge | Electron `contextBridge` (`window.api`, `src/preload/index.ts`) | The only path between UI and data; ~60 typed IPC channels |
 | Logic | Pure rule modules in `src/shared/*.ts` | Streaks, recurrence, palette fuzzy match, appearance — tested with plain `tsx` |
-| Data | better-sqlite3, one file at `userData/data/everything.db` | 11 tables, 16 append-only migrations, WAL |
+| Data | better-sqlite3, one file at `userData/data/everything.db` | 34 tables + FTS5 search index, 27 append-only migrations, WAL |
 
 **Data flow in one paragraph:** every module page calls a promise-style method on `window.api`; the preload script turns it into `ipcRenderer.invoke('channel', payload)`; the matching handler in `src/main/index.ts` calls a query function in `src/main/<module>.ts` with the SQLite handle from `src/main/db.ts`; the result (plain JSON objects, never DB handles) resolves back to the page, which stores it in local `useState` and re-renders. Writes follow the same path in reverse, and pages re-fetch their lists after each write — there is no client-side data cache to keep in sync.
 
@@ -93,6 +93,16 @@ src/
       lib/               settingsStore, theme, navigation, dates, format, errors
       actions.ts         palette "actions" (open capture, toggle theme, ...)
   shared/                Pure logic, no DOM, no Electron; tests run in tsx
+    calculator/          Core math engine: parser, Pratt AST, evaluator, registry, scientific,
+                         statistics (descriptive stats, regression, distributions, hypothesis tests),
+                         finance (TVM, loans/amortization, simple/compound interest, NPV/IRR/XNPV/XIRR,
+                         percentages, trading position sizing & risk-reward),
+                         conversions (units, number bases, offline manual currency rate cross-conversions),
+                         graphing (2D function sampling, adaptive asymptote handling, roots & extrema finders),
+                         linear-algebra & complex (matrices, RREF, det, inv, rank, 2x2 eigenvalues, vectors, Cardano cubic roots, complex rectangular/polar),
+                         cas (algebraic simplification, symbolic differentiation, polynomial integration, limits, linear solve, Taylor series),
+                         scripting (bitwise arbitrary word sizes, sandboxed language with step limits, conditionals, loops, functions),
+                         datetime (calendar date diffs, intervals with month clamping, business days, age, duration arithmetic, time zone shifts)
     types.ts             All data shapes incl. the EverythingApi IPC contract
     habits.ts            due-day/streak/rate rules, week math, reminders helpers
     backup.ts            backup file format + validation
@@ -171,6 +181,7 @@ All `ipcMain.handle` calls live in `src/main/index.ts`; all caller wrappers in `
 | backup | `backup:chooseImport` / `applyImport` | – / file chosen earlier | `parseBackup` (validation) / `restoreBackup` after `safetyCopy()` | Settings |
 | intelligence | `intelligence:get` / `set` | feature toggles | settings get/set (`intelligence` key) | Intelligence |
 | assistant | `assistant:get` / `set` / `keyStatus` / `setKey` / `clearKey` / `functions` / `ask` | patch / plain key (encrypted immediately) / question | assistant.ts (key stored as encrypted blob via `safeStorage` in `settings.assistantKeyBlob`) | Assistant page |
+| calculator | `calculator:saveHistory` / `listHistory` / `clearHistory` / `deleteHistoryItem` / `togglePinHistory` / `saveVariable` / `listVariables` / `deleteVariable` / `saveProgram` / `listPrograms` / `deleteProgram` / `saveRateSet` / `listRateSets` / `saveRate` / `listRates` / `getSetting` / `setSetting` / `getAllSettings` | inputs / query parameters | `main/calculator.ts` queries | Calculator tool & history/rate/program adapters |
 
 ### 4.4 The app shell and module switching
 
@@ -299,9 +310,9 @@ flowchart LR
 
 - **Engine:** better-sqlite3, **file:** `everything.db` inside `userData/data/` (`dataDir()` in `src/main/db.ts`).
 - **Pragmas:** `journal_mode = WAL`, `foreign_keys = ON` (both set in `initDatabase`).
-- **Schema version:** the SQLite `user_version` pragma, equal to `MIGRATIONS.length` = **16**. Before applying migrations the app creates a database copy in `data/before-migrate/` (newest three kept); if backup or migration fails, startup shows an error and stops. `applyMigrations()` in `src/main/migrations.ts` runs pending entries (each wrapped in a transaction), so old databases upgrade in place.
+- **Schema version:** the SQLite `user_version` pragma, equal to `MIGRATIONS.length` = **26**. Before applying migrations the app creates a database copy in `data/before-migrate/` (newest three kept); if backup or migration fails, startup shows an error and stops. `applyMigrations()` in `src/main/migrations.ts` runs pending entries (each wrapped in a transaction), so old databases upgrade in place.
 
-### 6.2 Version history (16 migrations)
+### 6.2 Version history (26 migrations)
 
 | Ver. | What changed | Migration notes |
 |---|---|---|
@@ -321,6 +332,17 @@ flowchart LR
 | 14 | `task_completions` + completed-at index | preserves each completed occurrence, including recurring tasks |
 | 15 | `automation_events.hidden` | hides activity without removing deduplication claims |
 | 16 | `trades.closed_at` (ISO timestamp) | stamped open→closed and on create-already-closed; old rows NULL and silent for the quick-re-entry rule |
+| 17 | **Phase 0 soft delete everywhere**: `deleted_at`, `delete_batch_id` on all user-facing tables; backfills `tasks.updated_at` | soft delete and group batch undo across logbook, trades, savings, habits, tasks |
+| 18 | `links` table + bidirectional indexes | generic cross-entity links with normalized source/target ordering |
+| 19 | `tags` and `taggings` tables + unique indexes | shared tags foundation across entities |
+| 20 | `templates` table | saved starter templates with `{{date}}`, `{{weekday}}`, `{{time}}` variables |
+| 21 | `search_index` FTS5 virtual table | shared full-text search index across all modules |
+| 22 | **Phase 1 expenses**: `expense_categories` (seeded), `expense_transactions`, `expense_budgets`, `recurring_bills`, `recurring_bill_occurrences` (unique `recurring_id + due_date`) | money as integer cents + currency; soft delete everywhere |
+| 23 | **Phase 2 notes**: `notes` (title, title_key for `[[wiki links]]`, body, tags, pinned, archived) + indexes | markdown pages, soft delete; built-in templates seeded in code (`src/main/builtinTemplates.ts`) |
+| 24 | **Phase 3 content**: `content_items` (stage, position, script_note_id, checklist/stage_dates/assets JSON, stream + post-publish fields) + indexes | fixed six-stage pipeline; assets by path only |
+| 25 | **Phase 4 focus**: `projects`, `time_sessions`, `active_focus_session` | pomodoro & count-up timer, midnight splitting, active session persistence across restarts |
+| 26 | **Phase 5 tools**: `snippets`, `scratchpads` | saved snippets and autosaving plain-text pads |
+| 27 | **Phase 12 calculator**: `calc_history`, `calc_variables`, `calc_programs`, `calc_rate_sets`, `calc_rates`, `calc_rate_overrides`, `calc_settings` | calculation history, saved programs, variables, offline currency rate sets & overrides |
 
 A backup file also records `schemaVersion` (`MIGRATIONS.length`) so an import is validated against the current schema (`src/shared/backup.ts`).
 
@@ -337,10 +359,29 @@ Tables are created in `src/main/migrations.ts`; all queries are in the named mod
 | `savings_transactions` | savings.ts | `id` | `idx_savings_tx_goal(goal_id,date)` | goal_id (FK CASCADE), date, kind, amount, note | Savings |
 | `habits` | habits.ts | `id` | – (single-row reads dominate) | name, days(JSON number[]), archived, start_date, type, target, unit, sort_order, time_of_day, reminder_time, auto_complete_on | Habits |
 | `habit_checkins` | habits.ts | **composite** `(habit_id, date)` | the PK | status ('done'/'skipped'), value (count/duration), created_at | Habits |
-| `tasks` | tasks.ts | `id` | `idx_tasks_due_status`, `idx_tasks_deleted` | title, status, priority, due_date/due_time, position, recurrence_rule(JSON)/recurrence_next, deleted_at, tags(JSON), project | Tasks |
+| `tasks` | tasks.ts | `id` | `idx_tasks_due_status`, `idx_tasks_deleted` | title, status, priority, due_date/due_time, position, recurrence_rule(JSON)/recurrence_next, deleted_at, tags(JSON), project, delete_batch_id, updated_at | Tasks |
 | `task_completions` | tasks.ts | `id` | `idx_task_completions_completed_at` | task_id (FK), completed_at (each historical occurrence) | Tasks, Assistant, Insights |
 | `task_subtasks` | tasks.ts | `id` | – | task_id (FK CASCADE), title, done, sort_order | Tasks |
 | `automation_events` | automations.ts | `id` | `idx_automation_once(rule,event_key)` unique | rule, event, event_key, label, entry_id, hidden | Intelligence automations |
+| `links` | links.ts | `id` | `idx_links_source`, `idx_links_target`, `idx_links_once` | source_type, source_id, target_type, target_id, relation, created_at, deleted_at | Links service |
+| `tags` | tags.ts | `id` | name unique | name, colour, created_at, updated_at | Tags service |
+| `taggings` | tags.ts | `id` | `idx_taggings_entity`, `idx_taggings_once` | tag_id (FK CASCADE), entity_type, entity_id, created_at, updated_at, deleted_at | Tags service |
+| `templates` | templates.ts | `id` | – | kind, name, payload(JSON), is_builtin, created_at, updated_at, deleted_at | Templates engine |
+| `search_index` (FTS5) | searchIndex.ts / search.ts | – | FTS5 full-text | entity_type UNINDEXED, entity_id UNINDEXED, text | Universal search |
+| `notes` | notes.ts | `id` | `idx_notes_title_key`, `idx_notes_deleted`, `idx_notes_archived` | title, title_key, body, tags(JSON), pinned, archived | Notes |
+| `content_items` | content.ts | `id` | `idx_content_stage`, `idx_content_publish`, `idx_content_deleted` | title, type, platform, hook, stage, position, series, tags, target/published dates, script_note_id (FK notes), checklist/stage_dates/assets(JSON), stream*, views* | Content planner |
+| `projects` | focus.ts | `id` | name unique, `idx_projects_deleted` | name, colour, archived, created_at, updated_at, deleted_at | Focus & Projects |
+| `time_sessions` | focus.ts | `id` | `idx_time_sessions_started`, `idx_time_sessions_task`, `idx_time_sessions_project`, `idx_time_sessions_deleted` | task_id (FK), project_id (FK), started_at, ended_at, planned_seconds, actual_seconds, type, completed, note, source | Focus & Sessions |
+| `active_focus_session` | focus.ts | `id` (PK=1) | – | status, mode, type, started_at, target_seconds, elapsed_seconds, paused_at, round, task_id, project_id | Focus Timer |
+| `snippets` | tools.ts | `id` | `idx_snippets_deleted` | title, body, tags(JSON) | Tools hub |
+| `scratchpads` | tools.ts | `id` | `idx_scratchpads_deleted` | name, content, position | Tools hub |
+| `calc_history` | calculator.ts | `id` | `idx_calc_history_created` | created_at, mode, input, result, result_format, rate_snapshot, pinned | Calculator |
+| `calc_variables` | calculator.ts | `name` | PK only | value, updated_at | Calculator |
+| `calc_programs` | calculator.ts | `id` | – | name, source, created_at, updated_at | Calculator |
+| `calc_rate_sets` | calculator.ts | `id` | – | name, base_currency, is_active, updated_at | Calculator |
+| `calc_rates` | calculator.ts | `id` | unique (rate_set_id, currency_code) | rate_set_id, currency_code, name, rate_to_base, note, updated_at | Calculator |
+| `calc_rate_overrides` | calculator.ts | `id` | unique (rate_set_id, from_code, to_code) | rate_set_id, from_code, to_code, rate, updated_at | Calculator |
+| `calc_settings` | calculator.ts | `key` | PK only | value (JSON) | Calculator |
 
 ### 6.4 Entity relationships
 
@@ -417,7 +458,7 @@ Both rows of the linking tables are owned by strict rules: `habit_checkins` FK i
 | `src/main/insights.ts` | reads/writes `settings.insightDismissals` (`{ id, until }[]`) |
 | `src/main/dashboard.ts` / `calendar.ts` / `briefing.ts` / `review.ts` / `insights.ts` | **no own SQL** — call the module query functions and pure shared helpers, then aggregate |
 | `src/main/search.ts` | **no own SQL** — calls each module's search function |
-| `src/main/backup.ts` | full-table export and import-restore (trades carry `closedAt`)
+| `src/main/backup.ts` | full-table export and import-restore (trades carry `closedAt`; includes calculator `calc_*` tables)
 | `src/main/index.ts` | a few small read exceptions (`automations:staleTasks` filters `listTasks` in JS; counts via `currentCounts`) |
 
 So: no repository/service *class* exists — the "layer" is the module-file convention (one file per table group, `db` passed in). Documented as-is.
@@ -428,7 +469,7 @@ So: no repository/service *class* exists — the "layer" is the module-file conv
 - **IDs**: SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`.
 - **Timestamps**: ISO strings `created_at`/`updated_at` set on every write.
 - **JSON-in-TEXT columns**: `tags`, `habits.days`, `tasks.recurrence_rule` (parsed with `JSON.parse` at the edge of the query file).
-- **Soft delete vs hard delete**: only tasks use `deleted_at` (soft); logbook/trades/habits rows are hard-deleted (habits cascade their checkins). Foreign keys enforced by `foreign_keys = ON`.
+- **Soft delete vs hard delete**: every user-facing table uses `deleted_at` and `delete_batch_id` (migration 17); queries read live rows through the `LIVE()` helper in `src/main/repo.ts`. Trashed rows are excluded from all totals and can be undone or restored via Trash (`src/main/trash.ts`), with auto-purge after configurable retention (default 30 days). Foreign keys enforced by `foreign_keys = ON`.
 - **Migrations**: append-only array in `src/main/migrations.ts`, applied by counting `user_version`, each in a transaction; never edit an old entry.
 - **Backups**: automatic daily copy kept 14 days (`dailyBackup` in db.ts); a manual JSON export through `backup:exportJson` (format + validation in `src/shared/backup.ts`), trades-only CSV export; import → validate (`parseBackup`), `safetyCopy()` (kept 5) of the current DB, then full restore. The AI assistant's API key is stored in the `settings` table as an **encrypted blob** (Electron `safeStorage`), never in plain text. JSON exports omit it; daily `.db` copies can contain the ciphertext.
 

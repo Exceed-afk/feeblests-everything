@@ -14,7 +14,7 @@
 //   run       called when the user presses Enter on it; the palette closes right after.
 //             It receives { navigate, open } for actions that go somewhere (see ActionContext).
 import type { LucideIcon } from 'lucide-react'
-import { Archive, Check, CheckSquare, Clock3, LayoutGrid, PenLine, Sunrise } from 'lucide-react'
+import { Archive, Check, CheckSquare, Clock3, LayoutGrid, PenLine, Scissors, Sunrise } from 'lucide-react'
 import { validateActions, type ActionMeta } from '../../shared/palette'
 import { getCurrentSettings } from './lib/settingsStore'
 import { DEFAULT_INTELLIGENCE } from '../../shared/types'
@@ -34,6 +34,11 @@ export interface ActionDef extends ActionMeta {
 const taskEvent = (name: string): void => { window.setTimeout(() => window.dispatchEvent(new CustomEvent(name)), 0) }
 
 export const ACTIONS: ActionDef[] = [
+  // Phase 5: copy a snippet from the palette. Fetches the newest snippets and
+  // copies the first match, so "Copy snippet daily standup" works without
+  // opening the Tools page.
+  { id: 'copy-snippet', title: 'Copy snippet…', icon: Scissors, keywords: ['snippet', 'paste', 'clipboard', 'copy', 'tools'],
+    run: () => { window.setTimeout(() => window.dispatchEvent(new CustomEvent('snippets:copy')), 0) } },
   { id: 'quick-capture', title: 'Quick capture', icon: PenLine, keywords: ['note', 'log', 'add', 'trade', 'deposit', 'habit', 'check in', 'window'],
     run: () => { window.api.capture.open() } },
   { id: 'open-briefing', title: 'Open daily briefing', icon: Sunrise, keywords: ['today', 'summary', 'morning', 'brief', 'agenda'],

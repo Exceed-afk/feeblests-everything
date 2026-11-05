@@ -1,6 +1,10 @@
 // What every tool must declare, without anything React-specific, so the rules can be checked
 // in a plain test. The renderer's registry (src/renderer/src/tools.ts) adds the icon and the page.
 
+import { LINK_TYPES, type LinkType } from './links'
+
+const LINKABLE_TYPES: readonly string[] = LINK_TYPES as readonly LinkType[]
+
 // Tool groups, in the order the sidebar shows them. A new tool picks one of these; a new group is one line here.
 // A group with `flat: true` has no heading and cannot be collapsed (used for the start page on its own).
 // A group that has no tools yet (Health) is simply not shown until one arrives.
@@ -14,6 +18,47 @@ export const TOOL_CATEGORIES = [
 ] as const
 export type ToolCategory = (typeof TOOL_CATEGORIES)[number]['id']
 
+// ---------- the module contract (Phase 0) ----------
+//
+// One place declares what a module contributes everywhere else, instead of
+// the ad-hoc wiring: the shared FTS search index, the Links service, Quick
+// capture and (later phases) calendar/insights/assistant/dashboard. A module
+// that fills its contract shows up in each of those places without any of
+// them importing the module by name. Search, links and quick capture are
+// LIVE from Phase 0; the later providers get their keys now so later phases
+// only fill them in.
+export interface SearchProvider {
+  // The main item type the search index holds (searchIndex EntityType).
+  type: string
+  // The words the index matches (informational for now; the FTS row build in
+  // src/main/searchIndex.ts owns the real column list).
+  textFields: string[]
+  // Whether the item's own tags feed the filter (#work).
+  supportsTags: boolean
+}
+
+export interface LinkableType {
+  // The entity type in links/taggings (src/shared/links.ts).
+  type: string
+  // What the "Linked items" panel calls it, e.g. "Journal entry".
+  label: string
+}
+
+export interface ModuleContract {
+  // Joined universal search through the shared index (with its text fields).
+  search?: SearchProvider
+  // Can be linked to and from other items (Links + Linked items panel).
+  linkable?: LinkableType
+  // Quick capture entry types this tool saves (CaptureKind in shared/types).
+  quickCapture?: string[]
+  // Later phases: calendar events, insights datasets, assistant data tools,
+  // dashboard widgets. Keys exist now; values arrive with their phases.
+  calendar?: boolean
+  insights?: boolean
+  assistant?: boolean
+  dashboard?: boolean
+}
+
 export interface ToolMeta {
   id: string // short and lowercase, e.g. "trades". Used in code ("go to trades").
   name: string // shown in the sidebar
@@ -22,6 +67,10 @@ export interface ToolMeta {
   keywords: string[] // lowercase words that should find this tool in search
   shortcut?: string // "1" to "9": Ctrl+<digit> opens it. Leave out for most tools.
   footer?: boolean // sits at the bottom of the sidebar, always visible, and cannot be pinned (Settings)
+  // What this module contributes beyond its page (see ModuleContract).
+  contract?: ModuleContract
+  // The module can be switched off in Settings > Modules (default: on).
+  toggleable?: boolean
 }
 
 // Returns a list of mistakes (empty = fine), so a typo in one entry gives a clear message
@@ -48,6 +97,20 @@ export function validateTools(tools: ToolMeta[]): string[] {
       if (!/^[1-9]$/.test(t.shortcut)) problems.push(`${who}: the shortcut must be a single digit from 1 to 9.`)
       else once('shortcut', t.shortcut, who)
     }
+    // Module contract: a declared linkable type must be a real one, so the
+    // Links service and the user can never meet a type nobody answers for.
+    if (t.contract?.linkable) {
+      if (!/^[a-z][a-z0-9-]*$/.test(t.contract.linkable.type))
+        problems.push(`${who}: the linkable type "${t.contract.linkable.type}" must look like "trade".`)
+      else if (!LINKABLE_TYPES.includes(t.contract.linkable.type))
+        problems.push(`${who}: "${t.contract.linkable.type}" is not a linkable type (src/shared/links.ts LINK_TYPES).`)
+    }
+    if (t.contract?.search && !/^[a-z][a-z0-9_-]*$/.test(t.contract.search.type))
+      problems.push(`${who}: the search type "${t.contract.search.type}" must look like "note".`)
+    if (t.contract?.search?.textFields.some((f) => !f.trim()))
+      problems.push(`${who}: the search text fields must name real columns.`)
+    if (t.contract?.quickCapture?.some((k) => !k.trim()))
+      problems.push(`${who}: quick capture kinds must be non-empty.`)
   })
   if (tools[0]?.footer) problems.push('The first tool is the start page and cannot be a footer tool.')
   return problems

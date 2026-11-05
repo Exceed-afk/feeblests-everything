@@ -456,6 +456,11 @@ export interface ReviewInput {
   habits: Habit[] // with stats worked out for `today`
   tasks: Task[]
   entries: LogEntry[] // entries in the period and the one before, plus every review reflection
+  expenses?: { id: number; amount: number; date: string; type: string; categoryId: number | null }[]
+  categories?: { id: number; name: string }[]
+  notesCreated?: number
+  focusSeconds?: number
+  contentPublished?: number
 }
 
 export function buildReview(i: ReviewInput): ReviewData {
@@ -469,12 +474,43 @@ export function buildReview(i: ReviewInput): ReviewData {
   const tasks = taskReview(i.tasks, range.start, range.end)
   const mood = moodSection(i.entries, range, prev, days)
   const complete = i.today > range.end
+
+  // Spending section (Phase 1 / 6)
+  let spending: ReviewData['spending'] = undefined
+  if (i.expenses) {
+    const curTxs = i.expenses.filter((e) => e.type === 'expense' && inRange(e.date, range.start, range.end))
+    const prevTxs = i.expenses.filter((e) => e.type === 'expense' && inRange(e.date, prev.start, prev.end))
+    const totalSpent = curTxs.reduce((a, b) => a + b.amount, 0)
+    const previousSpent = prevTxs.reduce((a, b) => a + b.amount, 0)
+    const catMap = new Map((i.categories ?? []).map((c) => [c.id, c.name]))
+    const byCat = new Map<number, number>()
+    for (const t of curTxs) {
+      const cid = t.categoryId ?? 0
+      byCat.set(cid, (byCat.get(cid) ?? 0) + t.amount)
+    }
+    const topCategories = [...byCat.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([id, amount]) => ({ id, name: catMap.get(id) ?? 'Other', amount }))
+
+    spending = {
+      totalSpent,
+      previousSpent,
+      txCount: curTxs.length,
+      topCategories
+    }
+  }
+
   return {
     kind: i.kind, start: range.start, end: range.end, today: i.today, complete,
     prevStart: prev.start, prevEnd: prev.end,
     label: periodLabel(i.kind, range.start, range.end), title,
     trades, savings, habits, tasks, mood,
     journal: journalSection(i.entries, range, title),
+    spending,
+    notesCreated: i.notesCreated,
+    focusSeconds: i.focusSeconds,
+    contentPublished: i.contentPublished,
     insights: insightsOf(trades, habits, mood),
     prompts: promptsOf({ kind: i.kind, complete, trades, savings, habits, mood })
   }

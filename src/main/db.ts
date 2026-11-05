@@ -6,6 +6,7 @@ import { mkdirSync, readdirSync, unlinkSync, existsSync } from 'fs'
 import { DEFAULT_SETTINGS, type Settings } from '../shared/types'
 import { migrateColorScheme } from '../shared/appearance'
 import { applyMigrations } from './migrations'
+import { seedBuiltinTemplates } from './builtinTemplates'
 import { localDate } from './util'
 
 let db: Database.Database
@@ -24,6 +25,7 @@ export async function initDatabase(): Promise<boolean> {
     applyMigrations(db)
     migrateSettingsKeys(db)
     migrateInsightDismissalShape(db)
+    seedBuiltinTemplates(db, templateResetAt(db)) // built-in templates (idempotent; keeps deletions)
   }, (error) => {
     const message = error instanceof Error ? error.message : String(error)
     console.error('Database migration failed; startup is stopping:', error)
@@ -146,7 +148,7 @@ async function dailyBackup(dir: string): Promise<void> {
 }
 
 export function getSettings(): Settings {
-  const rows = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
+  const rows = db.prepare("SELECT key, value FROM settings WHERE key NOT IN ('templatesResetAt')").all() as { key: string; value: string }[]
   const saved = Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]))
   const legacyScheme = saved.colorScheme ?? saved.colourScheme
   if (legacyScheme !== undefined) {
@@ -167,6 +169,15 @@ export function getSettings(): Settings {
 export function setSetting(key: string, value: unknown): void {
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
     .run(key, JSON.stringify(value))
+}
+
+// When "Restore built-in templates" was last used (an ISO timestamp), or null.
+// It is written and read here, not exposed as a numbered setting: the Templates
+// manager turns it into the seeding call in initDatabase.
+export function templateResetAt(handle: Database.Database = db): string | null {
+  const row = handle.prepare("SELECT value FROM settings WHERE key = 'templatesResetAt'").get() as { value: string } | undefined
+  if (!row) return null
+  try { return typeof JSON.parse(row.value) === 'string' ? JSON.parse(row.value) : null } catch { return null }
 }
 
 export function deleteSetting(key: string): void {

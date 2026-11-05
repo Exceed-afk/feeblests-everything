@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  AlertCircle, ArrowDownRight, ArrowUpRight, BookOpen, CalendarCheck, CandlestickChart, Flame, Lightbulb, PiggyBank,
-  Plus, Smile, Sparkles, TrendingDown, TrendingUp
+  AlertCircle, ArrowDownRight, ArrowUpRight, BookOpen, CalendarCheck, CandlestickChart, ChevronRight, Flame, Lightbulb, PiggyBank,
+  Plus, Smile, Sparkles, TrendingDown, TrendingUp, Wallet
 } from 'lucide-react'
 import { MOODS, DEFAULT_INTELLIGENCE, type InsightsPayload, type Mood, type ReviewData, type ReviewGoal, type ReviewKind, type ReviewTx } from '../../../shared/types'
 import { REVIEW_TAG, reviewRange, shiftRange, periodLabel, summaryText, weeklyInsights } from '../../../shared/review'
@@ -180,13 +180,43 @@ export function ReviewBody({ data, onOpen, onNavigate }: Nav & { data: ReviewDat
 
   return (
     <>
-      {/* ---- Summary: the four headline figures, in one row on a wide screen ---- */}
+      {/* ---- Summary: the headline figures, in one row on a wide screen ---- */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TradingCard data={data} onNavigate={onNavigate} />
         <SavingsCard data={data} onNavigate={onNavigate} />
         <HabitCard data={data} onNavigate={onNavigate} />
         <MoodCard data={data} onNavigate={onNavigate} />
       </div>
+
+      {data.spending && data.spending.txCount > 0 && (
+        <section className="card card-pad mt-4">
+          <div className="flex items-center justify-between">
+            <h2 className="card-head-title"><span className="card-head-icon"><Wallet size={15} /></span>Spending in {data.label}</h2>
+            <button className="section-link" onClick={() => onNavigate('expenses')}>Open expenses <ChevronRight size={12} /></button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-baseline justify-between gap-3">
+            <div>
+              <div className="stat-value mt-0">{fmtAmount(data.spending.totalSpent / 100)}</div>
+              <div className="stat-sub">{data.spending.txCount} {data.spending.txCount === 1 ? 'transaction' : 'transactions'}</div>
+            </div>
+            {data.spending.previousSpent > 0 && (
+              <div className="text-xs text-muted">
+                Previous period: {fmtAmount(data.spending.previousSpent / 100)}
+              </div>
+            )}
+          </div>
+          {data.spending.topCategories.length > 0 && (
+            <ul className="mt-3 flex flex-col gap-1.5 border-t border-line pt-2 text-xs">
+              {data.spending.topCategories.map((c) => (
+                <li key={c.id} className="flex justify-between items-center text-muted">
+                  <span>{c.name}</span>
+                  <span className="font-medium text-fg">{fmtAmount(c.amount / 100)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {nothing && (
         <div className="mt-4">
@@ -202,6 +232,24 @@ export function ReviewBody({ data, onOpen, onNavigate }: Nav & { data: ReviewDat
           <SavingsPanel data={data} onOpen={onOpen} onNavigate={onNavigate} />
           <HabitsPanel data={data} onNavigate={onNavigate} />
           <MoodPanel data={data} onNavigate={onNavigate} />
+          {data.notesCreated !== undefined && data.notesCreated > 0 && (
+            <div className="card card-pad flex items-center justify-between">
+              <span className="text-sm font-medium">Notes created {word === 'week' ? 'this week' : 'this month'}</span>
+              <span className="badge badge-muted">{data.notesCreated}</span>
+            </div>
+          )}
+          {data.focusSeconds !== undefined && data.focusSeconds > 0 && (
+            <div className="card card-pad flex items-center justify-between">
+              <span className="text-sm font-medium">Focus time {word === 'week' ? 'this week' : 'this month'}</span>
+              <span className="badge badge-pos">{(data.focusSeconds / 3600).toFixed(1)} hrs</span>
+            </div>
+          )}
+          {data.contentPublished !== undefined && data.contentPublished > 0 && (
+            <div className="card card-pad flex items-center justify-between">
+              <span className="text-sm font-medium">Videos published {word === 'week' ? 'this week' : 'this month'}</span>
+              <span className="badge badge-pos">{data.contentPublished}</span>
+            </div>
+          )}
         </div>
       )}
 

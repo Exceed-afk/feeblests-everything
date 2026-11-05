@@ -7,7 +7,7 @@ import { useTaskFilters } from '../lib/useTaskFilters'
 import { today, localTime, formatDate } from '../lib/dates'
 import { errMsg } from '../lib/errors'
 import { parseQuickAdd } from '../../../shared/quickAdd'
-import { addTaskDays, applyColumnOrder, filterTasks, taskInputForEdit, type TaskInlinePatch } from '../../../shared/tasks'
+import { addTaskDays, applyColumnOrder, filterTasks, taskInputForEdit, taskIsOverdue, type TaskInlinePatch } from '../../../shared/tasks'
 import { saveProposal } from '../lib/quickAddSave'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
@@ -470,7 +470,7 @@ export function Tasks({ target, onTargetHandled }: ModuleProps) {
             action={view !== 'trash' && view !== 'completed' ? <button className="btn-primary" onClick={() => setEditing('new')}><Plus size={16} /> Create a task</button> : undefined} />}
           {filtered.map((task) => {
             const due = task.recurrenceNext ?? task.dueDate
-            const overdue = due !== null && (due < day || (due === day && task.dueTime !== null && task.dueTime < clock)) && task.status !== 'done'
+            const overdue = taskIsOverdue(task, day, clock)
             const done = task.status === 'done'
             const picked = selected.has(task.id)
             if (view === 'completed') return (

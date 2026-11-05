@@ -49,7 +49,29 @@ const WHITE: RGB = [255, 255, 255]
 const INK: RGB = [17, 23, 21] // the design system's dark page colour
 
 // Text colour for buttons filled with the accent: white, unless the accent is too light for it (amber, emerald).
+// This is the icon/large-text grade (3:1). Body text uses onAccentText below, which reaches 4.5:1.
 export const onAccent = (accent: RGB): RGB => (contrast(WHITE, accent) >= 3.5 ? WHITE : INK)
+
+// Text and fill for a filled control (primary button, calculator's = key).
+// The brand violet is 4.23:1 against white, so the FILL is mixed a little toward black until white
+// clears 4.5:1 (same hue, readable label), and --on-accent is then chosen AGAINST THAT FILL.
+// A very light custom accent, where white can never work, falls back to the design ink.
+export const accentFill = (accent: RGB): RGB => {
+  if (contrast(WHITE, accent) >= 4.5) return accent
+  for (let t = 0; t <= 0.2001; t += 0.02) {
+    const out = mix(accent, [0, 0, 0], t)
+    if (contrast(WHITE, out) >= 4.5) return out
+  }
+  return accent
+}
+
+export const onAccentText = (fill: RGB): RGB => {
+  const white = contrast(WHITE, fill)
+  const ink = contrast(INK, fill)
+  if (white >= 4.5) return WHITE
+  if (ink >= 4.5) return INK
+  return white >= ink ? WHITE : INK // a deliberately extreme custom accent: the more readable one
+}
 
 export function accentTint(accent: RGB, t: Tokens, dark: boolean): RGB {
   return mix(hexToRgb(t.surface), accent, dark ? 0.2 : 0.14)
@@ -370,11 +392,29 @@ export function normalizeSettings(raw: SettingsInput | null | undefined): Settin
     taskLayout: pick<TaskLayout>(r.taskLayout, ['list', 'board'], d.taskLayout),
     taskSort: pick<TaskSort>(r.taskSort, ['manual', 'due-date', 'priority'], d.taskSort),
     taskSavedViews: cleanTaskViews(r.taskSavedViews),
+    disabledModules: cleanIds(r.disabledModules),
+    trash: r.trash && typeof r.trash === 'object' && typeof (r.trash as { purgeDays?: unknown }).purgeDays === 'number'
+      ? { purgeDays: Math.max(1, Math.min(365, Math.floor((r.trash as { purgeDays: number }).purgeDays))) }
+      : d.trash,
+    focus: r.focus && typeof r.focus === 'object'
+      ? {
+          focusDuration: Math.max(1, Math.min(180, Math.floor(Number((r.focus as { focusDuration?: unknown }).focusDuration) || d.focus.focusDuration))),
+          shortBreakDuration: Math.max(1, Math.min(60, Math.floor(Number((r.focus as { shortBreakDuration?: unknown }).shortBreakDuration) || d.focus.shortBreakDuration))),
+          longBreakDuration: Math.max(1, Math.min(120, Math.floor(Number((r.focus as { longBreakDuration?: unknown }).longBreakDuration) || d.focus.longBreakDuration))),
+          longBreakInterval: Math.max(1, Math.min(12, Math.floor(Number((r.focus as { longBreakInterval?: unknown }).longBreakInterval) || d.focus.longBreakInterval))),
+          autoStartBreaks: (r.focus as { autoStartBreaks?: unknown }).autoStartBreaks === true,
+          autoStartFocus: (r.focus as { autoStartFocus?: unknown }).autoStartFocus === true,
+          soundEnabled: (r.focus as { soundEnabled?: unknown }).soundEnabled !== false
+        }
+      : d.focus,
     intelligence: r.intelligence && typeof r.intelligence === 'object'
       ? {
           features: { ...DEFAULT_INTELLIGENCE.features, ...((r.intelligence as { features?: Partial<IntelligenceSettings['features']> }).features ?? {}) }
         }
-      : DEFAULT_INTELLIGENCE
+      : DEFAULT_INTELLIGENCE,
+    // A malformed value is kept as-is here and falls back to the default layout in the Dashboard
+    // (parseLayout), so a damaged backup never loses the rest of the settings with it.
+    dashboardLayout: typeof r.dashboardLayout === 'string' ? r.dashboardLayout : ''
   }
 }
 
@@ -384,13 +424,16 @@ export function normalizeSettings(raw: SettingsInput | null | undefined): Settin
 export function appearanceVars(s: Settings, dark: boolean): Record<string, string> {
   const t = resolveTokens(s, dark)
   const accent = hexToRgb(accentFor(s.accent, dark))
+  const fill = accentFill(accent)
   const modernBorder = cardBorder(t, 'modern')
   return {
     '--bg': triple(hexToRgb(t.bg)), '--surface': triple(hexToRgb(t.surface)), '--sidebar': triple(hexToRgb(t.sidebar)),
     '--border': triple(hexToRgb(t.border)), '--text': triple(hexToRgb(t.text)), '--muted': triple(hexToRgb(t.muted)),
     '--panel': triple(hexToRgb(t.sidebar)), '--card': triple(hexToRgb(t.surface)), '--line': triple(hexToRgb(t.border)), '--fg': triple(hexToRgb(t.text)),
     '--card-border': triple(modernBorder), '--selected': triple(accentTint(accent, t, dark)),
-    '--accent': triple(accent), '--on-accent': triple(onAccent(accent)), '--accent-fg': triple(accentText(accent, t, dark)),
+    // --accent stays the identity colour (tints, charts, borders). --accent-fill is the same colour
+    // darkened just enough that --on-accent text on it reaches 4.5:1 (filled buttons and keys).
+    '--accent': triple(accent), '--accent-fill': triple(fill), '--on-accent': triple(onAccentText(fill)), '--accent-fg': triple(accentText(accent, t, dark)),
     // A full rgb() colour, not a triple: the charts use it as plain CSS text (fill: var(--mood)), where a triple is invalid.
     '--mood': `rgb(${hexToRgb(dark ? COLOR_TOKENS.dark.mood : COLOR_TOKENS.light.mood).join(' ')})`,
     '--rs': String(RADIUS_SCALE[s.radius]), '--d': String(DENSITY_SCALE[s.density]), '--ts': String(TEXT_SCALE[s.textSize]),

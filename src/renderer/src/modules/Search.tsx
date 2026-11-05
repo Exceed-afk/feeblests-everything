@@ -1,7 +1,7 @@
 import { PageHeader } from '../components/PageHeader'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BookOpen, CandlestickChart, CheckSquare, PiggyBank, Receipt, Search as SearchIcon, X } from 'lucide-react'
+import { BookOpen, CandlestickChart, CheckSquare, Edit3, PiggyBank, Receipt, Search as SearchIcon, Timer, X } from 'lucide-react'
 import type { SearchGroup, SearchResults } from '../../../shared/types'
 import { isEmptyQuery, parseQuery } from '../../../shared/search'
 import { progressPercent } from '../../../shared/savings'
@@ -24,7 +24,7 @@ let lastQuery = ''
 const rowClass =
   'w-full card card-pad-sm text-left hover:border-accent/50'
 
-export function Search({ onOpen }: ModuleProps) {
+export function Search({ onOpen, onNavigate }: ModuleProps) {
   const [query, setQuery] = useState(lastQuery)
   const [limit, setLimit] = useState(PAGE)
   const [results, setResults] = useState<SearchResults | null>(null)
@@ -64,6 +64,8 @@ export function Search({ onOpen }: ModuleProps) {
 
   const grandTotal = results
     ? results.logbook.total + results.trades.total + results.goals.total + results.transactions.total + results.tasks.total
+      + (results.notes?.total ?? 0) + (results.content?.total ?? 0) + (results.snippets?.total ?? 0) + (results.expenses?.total ?? 0)
+      + (results.focus?.total ?? 0) + (results.scratchpads?.total ?? 0)
     : 0
 
   return (
@@ -198,6 +200,51 @@ export function Search({ onOpen }: ModuleProps) {
               </button>
             ))}
           </Group>
+
+          {results.expenses && (
+            <Group title="Expenses" icon={<Receipt size={14} />} group={results.expenses} onMore={more}>
+              {results.expenses.items.map((ex) => (
+                <button key={ex.id} className={rowClass} onClick={() => onNavigate('expenses')}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium"><Highlight text={ex.payee || 'Expense'} terms={terms} /></span>
+                    <span className="text-sm font-medium tabular-nums text-neg">
+                      {fmtAmount(ex.amount / 100)} {ex.currency}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs capitalize text-muted">{formatDate(ex.date)} · {ex.type}</div>
+                  {ex.note && <p className="mt-1 text-sm text-muted"><Highlight text={ex.note} terms={terms} /></p>}
+                </button>
+              ))}
+            </Group>
+          )}
+
+          {results.focus && (
+            <Group title="Focus sessions" icon={<Timer size={14} />} group={results.focus} onMore={more}>
+              {results.focus.items.map((fs) => (
+                <button key={fs.id} className={rowClass} onClick={() => onNavigate('focus')}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium"><Highlight text={fs.projectName || 'Focus'} terms={terms} /></span>
+                    <span className="text-sm font-medium tabular-nums">
+                      {Math.round(fs.actualSeconds / 60)} min
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs capitalize text-muted">{formatDate(fs.startedAt.slice(0, 10))} · {fs.type}</div>
+                  {fs.note && <p className="mt-1 text-sm text-muted"><Highlight text={fs.note} terms={terms} /></p>}
+                </button>
+              ))}
+            </Group>
+          )}
+
+          {results.scratchpads && (
+            <Group title="Scratchpads" icon={<Edit3 size={14} />} group={results.scratchpads} onMore={more}>
+              {results.scratchpads.items.map((sp) => (
+                <button key={sp.id} className={rowClass} onClick={() => onNavigate('tools')}>
+                  <div className="font-medium"><Highlight text={sp.name || 'Scratchpad'} terms={terms} /></div>
+                  {sp.content && <p className="mt-1 text-sm text-muted line-clamp-2"><Highlight text={sp.content} terms={terms} /></p>}
+                </button>
+              ))}
+            </Group>
+          )}
         </>
       )}
     </div>

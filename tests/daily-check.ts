@@ -113,10 +113,12 @@ test('the checks run even when every rule is off; the state is still marked', ()
   db.close()
 })
 
-test('the migration list grew by exactly the closed_at migration and nothing else', () => {
-  // R3 needed a migration (trades.closed_at, migration 16); the P1 daily check
-  // itself stores state in the settings table, so it added none.
-  assert.equal(MIGRATIONS.length, 16)
+test('the migration list has the expected count', () => {
+  // R3 needed trades.closed_at (migration 16); Phase 0 adds 17-21; Phase 1 adds
+  // 22 (expenses); Phase 2 adds 23 (notes); Phase 3 adds 24 (content planner);
+  // Phase 4 adds 25 (focus timer & projects); Phase 5 adds 26 (snippets, pads);
+  // Phase 12 adds 27 (calculator tables).
+  assert.equal(MIGRATIONS.length, 27)
 })
 
 console.log(`${n} daily check checks passed`)

@@ -34,6 +34,107 @@ The tests find the second one through `tests/sqlite.ts`. You only need to run th
 - `src/renderer/` - the UI (React). Each feature is a file in `src/renderer/src/modules/`
 - `src/shared/types.ts` - types used by all three
 
+## Dashboard and Templates (Phase 6)
+
+**Dashboard** is now a customizable grid of widgets.
+
+- **Widgets**: Total saved, Trading P&L, Trades logged, Logbook streak, Left to spend, This month's spending, Savings progress, P&L over time, Recent trades, Habits today, Tasks, Focus today, Next to publish, Pinned notes, Recent log entries and Daily doors (briefing / review / insights).
+- **Customize** (top right of the page): drag a card by its handle, or use the up/down arrow buttons on it; **Alt+Up / Alt+Down** also moves the focused card. Each card is **S**, **M** or **L** (3, 4 or 6 of the 12 columns). Remove a card with the bin button, add one from the list or the menu. `Esc` leaves edit mode.
+- **Presets**: Reset to default, Minimal, Money focus and Daily. The arrangement saves as you go, in the `dashboardLayout` settings key (JSON), so it survives restarts and rides along in the JSON backup.
+- **Module off**: a widget whose module is switched off in Settings > Modules is skipped, and comes back in the same place when the module is switched on again. Widgets load lazily, and each fetches its data only when it is on screen.
+- The grid is 12 columns on a wide window, 6 or 3 when it is narrow; a card that is wider than the space left starts the next row rather than overflowing.
+
+**Settings > Templates** manages every template kind: journal entries, tasks (with subtasks, default tags, priority and repeat rule), notes, content stage checklists, and trade checklists (pre-trade and post-trade).
+
+- Built-in starters now ship for every kind (Morning pages, Evening review, Deep work block, Weekly review, Video: full checklist, Pre-trade and post-trade, Meeting note, Blank checklist).
+- **Restore built-ins** brings the starters back without touching your own templates. A built-in you delete after a restore stays deleted. User templates can be edited by name, or removed.
+- Trade templates can edit their two checklists directly in the manager. Other kinds are edited best from the tool itself and re-saved with **Save as template** (which still works everywhere it did before).
+
+## Calculator (All-in-One Mathematical Engine)
+**Calculator** (Utilities in the sidebar, or `/calculator`) is an all-in-one local-only mathematical engine built on an exact decimal core (`decimal.js`) with zero dynamic code execution (`eval`/`new Function` are completely prohibited).
+
+- **Core & Scientific**: Operator precedence, parentheses, implicit multiplication (e.g. `2(3+4)`), trigonometric (`sin`, `cos`, `tan`), inverse trig (`asin`, `acos`, `atan`), hyperbolic (`sinh`, `cosh`, `tanh`), angle modes (DEG, RAD, GRAD), logarithms (`ln`, `log10`, `log2`, `exp`), roots, combinatorics (`nPr`, `nCr`, `fact`), GCD/LCM, and constants (`pi`, `e`).
+- **Statistics & Probability**: Descriptive statistics (mean, median, all modes, population & sample variance/standard deviation, quartiles Q1/Q3/IQR, percentiles), regressions (linear, exponential, logarithmic, power), distributions (normal, binomial, Poisson, Student's t, chi-square, uniform) with PDF/CDF/inverse, hypothesis tests (t-tests, z-tests), and gamma functions.
+- **Finance**: Time Value of Money (TVM solver for PV, FV, PMT, rate, nper for ordinary and annuity-due), loan & mortgage amortization tables with extra monthly payments, simple and compound interest, NPV, IRR, XNPV, XIRR, payback period, percentage helpers (markup, margin, discount, sales tax, tip & split), and trading position sizing & risk-reward ratios.
+- **Conversions & Offline Currency**: Everyday non-engineering unit conversions across length, mass, volume, temperature (Celsius/Fahrenheit/Kelvin), speed, area, data, time, and pressure. Number base conversions (bases 2 to 36) with grouping. Offline user-entered currency rates with exact arbitrary-precision arithmetic, direct pair overrides, automatic inverse and cross rates, stale rate warnings based on `staleRateDays`, rate sets with cascading deletes, CSV/JSON import & export with strict per-row validation, and audit rate snapshots saved to conversion history.
+- **2D Graphing**: Interactive HTML5 Canvas function plotter with zoom, pan, grid, axes, multiple functions with colors, trace cursor, discontinuity/asymptote protection, and root and local extrema finders.
+- **Linear Algebra & Complex Numbers**: Matrix operations (add, subtract, multiply, transpose, determinant, Gauss-Jordan inverse, rank, RREF, 2x2 eigenvalues, linear systems $Ax=b$), vector operations (dot, cross, norm, angle), cubic real roots (Cardano's method), and complex numbers (rectangular $a+bi$, polar $r \angle \theta$, powers, and $n$-th roots).
+- **Symbolic Math (CAS)**: AST-backed symbolic simplifier, symbolic differentiation (product, quotient, chain rules), polynomial integration, limits, linear equation solving, and Taylor series.
+- **Programming & Bitwise**: Bitwise tools (AND, OR, XOR, NOT, shifts) across 8/16/32/64-bit words with binary grouping, and a sandboxed scripting interpreter (variables, conditionals, while loops, functions, return) with strict step-limit execution safety.
+- **Date & Time Arithmetic**: Calendar date differences, intervals with month-end day clamping, business days, age calculator, duration arithmetic (`2h 30m + 45m = 3h 15m`), and UTC time zone shifts.
+- **Interface & History**: Full keyboard navigation, history recall (`ArrowUp` / `ArrowDown`), autocomplete function suggestions, in-app function reference modal with clickable examples, copy results as plain text or LaTeX (`toLatexResult`), and persistent SQLite storage (`calc_*` tables).
+- **Web Worker Offloading & Non-blocking UI**: CAS operations, 2D function graph sampling, and sandboxed script execution run in dedicated Web Workers (`cas.worker.ts`, `graph.worker.ts`, `script.worker.ts`) managed by a shared harness with request-id correlation, hard termination on timeouts, and abort cancellation. The UI displays "Running..." with a "Cancel" button, remaining responsive to typing and mode navigation at all times. CAS defaults to a 5 s limit via `CasOptions.timeLimitMs`, graphing samples within a 2 s limit with stale-request cancellation during rapid pan/zoom (maintaining 60 FPS / ~16 ms frame times), and scripts enforce both a 100k step cap and a 5 s wall-clock limit. Core math modules remain synchronously callable for headless testing.
+- **Documentation & Benchmarks**: Automatically generated function and constant reference available in `docs/calculator-functions.md` via `npm run gen:calc-docs`. Hardware-calibrated baseline timings and performance regression tests available in `docs/calculator-performance.md` via `npm run test:calc-perf`.
+- **Currency panel** (Convert → Offline Currency Rates): rate-set picker (create, rename, delete with confirmation; the default set cannot be deleted), every rate shows its `last updated` date, stale rates are flagged against the `Stale after N days` setting, clicking a rate edits its value/note in place, pair overrides can be added and deleted, CSV/JSON export and a preview-then-apply import (merge or replace, rejected rows name their row and change nothing), and a `Show N dp` setting that only affects the displayed result — stored rates are never rounded. Every conversion is written to history with `mode: currency` and a rate snapshot; clicking that history row reopens the Convert tab with the amount and both codes filled in.
+
+## Tools hub (0.18.0)
+**Tools** (Utilities) is one page with four tabs — **Loan**, **Stopwatch**, **Scratchpad** and **Snippets** — plus a percentage, bill-split, date and savings-projection helper. Pin a tool to keep it first in the strip.
+
+- **Loan calculator**: principal, annual rate, term and optional extra monthly payment. Shows the monthly payment, total interest, total paid, payoff date and the full amortization table, and how much an extra payment saves.
+- **Rounding policy**: every payment and every period's interest rounds to the whole cent; a period's principal is payment minus interest; the final payment clears the balance. A loan whose payment cannot cover its interest stops at the term and says so.
+- **Stopwatch**: laps and splits, `Space` to start/stop, `L` to lap, `R` to reset. **Log to Focus** records the elapsed time as a Focus session.
+- **Scratchpad**: plain-text pads that autosave as you type. Several pads; **Save as note** copies one into Notes.
+- **Snippets**: title, body, tags, a one-click **Copy**, and full-text search.
+- Everything is offline and keyboard accessible; copy actions use the OS clipboard.
+
+## Tools (0.18.0)
+**Tools** (Utilities) is one page with four tabs. Pinned tools sort to the front of the strip.
+
+- **Loan calculator**: monthly payment, total interest, total paid, payoff date and a full amortisation schedule, with an optional extra monthly payment that shows the interest and months saved. Grouped with it: **percentage** (five modes), **bill split & tip**, a **date calculator**, and a **savings projection**. Every result has a copy button.
+- **Rounding**: the payment and each period's interest are rounded half-up to whole cents; the final payment of the term clears the balance exactly. A loan whose payment is below its interest is shown as unrepayable rather than quietly zeroed.
+- **Stopwatch**: laps and splits, `Space` to start/stop, `L` to lap, `R` to reset. **Log to a Focus session** writes the time into Phase 4's time tracking.
+- **Scratchpad**: plain-text pads that autosave as you type. **Save as note** copies a pad into Notes.
+- **Snippets**: title, body and tags; copy in one click. The command palette's **Copy snippet…** copies your most recently edited snippet.
+- Snippets are included in Search; snippets and pads go to Trash like everything else.
+
+## Focus (0.17.0)
+**Focus** (under Productivity in the sidebar) is a Pomodoro timer and time tracking suite.
+
+- **Pomodoro & Count-up timer**: circular visual clock with Focus (25m), Short break (5m), Long break (15m), and open-ended Count-up modes. Rounds are tracked automatically.
+- **Clock-based elapsed timing**: timer stores timestamps on the system clock rather than counting ticks, eliminating timer throttle when the window is hidden or minimized.
+- **Persistent across restarts**: active timer state is stored in SQLite (`active_focus_session`), surviving window close, crash, or app restart without loss of elapsed time.
+- **Power monitor awareness**: pauses the running timer when the operating system suspends to prevent phantom time accumulation during sleep.
+- **Midnight splitting**: sessions that span local midnights are split across calendar days so reports reflect exact day time.
+- **Projects**: lightweight projects with custom colours and archive support, seeded from existing task projects.
+- **Reports & Heatmap**: period views for Today, 7 Days, and 30 Days with total focus/break time, by-project progress bars, by-task breakdown, and an activity intensity heatmap.
+- **Assistant integration**: ask "How many hours did I spend on project X this week?" via the Assistant's `time_spent` tool.
+- **Audio chime**: zero-dependency chime using HTML5 Web Audio API synthesizer.
+
+## Notes (0.16.0)
+**Notes** (under Notes in the sidebar) is for undated material — ideas, reference, meeting notes, checklists — while the Logbook stays your dated journal.
+
+- **Markdown editor** with a live split preview, autosave after a pause, a word count, and a read/write toggle (`Ctrl+E`).
+- **Tags, pinning and archive.** Tags can be typed in the editor or written in the text as `#tag`; pinned notes sort first and the archive hides notes without deleting them.
+- **Checklists.** `- [ ]` lines are ticked in the editor and each can be sent to Tasks in one click.
+- **Wiki links.** Type `[[Another note]]` to link notes; the target shows Backlinks. Links to trashed notes hide and return on restore.
+- **Templates.** A meeting note and a blank checklist ship built in; start a note from either.
+- **Promote.** A Logbook entry can be converted to a note from its editor.
+- **Safety.** Markdown is parsed with raw HTML disabled and then sanitised (DOMPurify); only `http(s)` links open, through the OS browser, via the app's existing navigation guard.
+
+## Tags (0.16.0)
+**Tags** (Utilities) lists every tag with how many items of each tool carry it. Pick a tag to see its items grouped by tool and to **rename** it everywhere (merging if the name already exists), **merge** it into another tag, change its **colour**, or **delete** it. Deleting a tag removes it from the items; the items themselves are never touched.
+
+## Content planner (0.16.0)
+**Content** (Productivity) is a board for videos, shorts, streams and posts, moving through **Idea › Script › Record › Edit › Publish › Published**.
+
+- Drag a card between columns, or use the arrows on the card (keyboard-friendly).
+- Each stage carries its own checklist, seeded from built-in templates the first time a card reaches that stage (Record: audio, lighting, backups, test take; Edit: cuts, captions, thumbnail; Publish: title, description, tags, schedule).
+- **Create script note** makes a markdown note and links it to the item both ways.
+- **Assets** store local file paths only — nothing is copied — and a path that no longer exists is flagged.
+- **Published** records the date, URL and manual views at 24 hours and 7 days. Publish dates and planned dates appear on the Calendar.
+
+## Expenses (0.15.0)
+The **Expenses** page (sidebar, under Money) is one page with four tabs: **Overview**, **Transactions**, **Budgets** and **Recurring**. All money is stored and passed as **integer cents** plus a currency code (default `USD`); nothing in the module does float arithmetic on amounts.
+
+- **Overview**: the month's *left to spend* (`total budget − spent so far − bills still due this month`), a *safe to spend per day* figure (`left to spend ÷ days remaining`, inclusive of today), spent so far, bills still due, a per-category bar list and the unpaid bills for the rest of the month (overdue ones marked). The leftover box moves money to a Savings goal.
+- **Transactions**: month view with search (payee, note, category, tag) and type / category filters, a running total (spending, income, transfers — transfers are never counted as spending), and a keyboard-friendly editor (`Ctrl+Enter` saves, `Esc` closes).
+- **Budgets**: one amount per category per month, saved on blur or `Enter`; a zero clears the budget. **Copy last month** fills a new month from the previous one. Bars show this month's spending against each budget.
+- **Recurring**: bills and subscriptions with a weekly / monthly / yearly / custom cadence, next due date, category, reminder lead time, autopay flag and trial end date. Autopay bills log themselves on the due date; manual bills wait in *Due this month* until you press **Mark paid**. Monthly totals are shown; weekly and custom bills are averaged so the totals stay comparable.
+- **Move to savings**: creates the expense transfer and the savings deposit in **one database transaction**, so a failure leaves neither behind and the money is never counted twice.
+- **Keyboard**: the tab strip supports `←` / `→`, `Home` and `End`; `Ctrl+1…4` switches tab; `Ctrl+N` starts a new transaction or bill. Every list and dialog is reachable with `Tab`, `Enter` and `Esc`.
+- **Where things live**: all rules and SQL are in `src/modules/expenses/service/` (see its `API.md` for the full function contract); the pages are in `src/modules/expenses/ui/` and call the service only through `window.api.expenses`. Schema: migration 22 (categories, transactions, budgets, recurring bills and their occurrences). Tests: `tests/expenses-service.ts`.
+- Categories ship seeded (Food & Dining, Transport, Housing, Bills & Utilities, Health & Medical, Fun & Entertainment, Shopping, Other) and can be archived; budgets and spending are tracked per category.
+
 ## What's new in 0.13.0 (task manager)
 - **Task lifecycle**: deleted tasks go to Trash, where they can be restored or permanently deleted; task and bulk-delete actions offer Undo. The board keeps its three status columns visible when empty, and list/board distinguish an empty task collection from filters with no matches.
 - **Task views and dates**: Today includes undated tasks, Upcoming includes undated tasks and dated tasks due within seven days, and Overdue includes earlier dates plus tasks whose due time has passed today. Due-time reminders appear once per task occurrence while the app is running; as with habit reminders, there is no closed-app catch-up.

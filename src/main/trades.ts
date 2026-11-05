@@ -5,11 +5,15 @@ import { cleanTags, escapeLike, isDate, searchWhere } from './util'
 import type { ParsedQuery } from '../shared/search'
 import type { Direction, SearchGroup, Trade, TradeFilter, TradeInput, TradeMeta } from '../shared/types'
 import { emitAutomation } from './automations'
+import { LIVE, newBatchId, trashByWhere } from './repo'
+import type { TrashEntry } from '../shared/trash'
+import { indexOne, removeOne } from './searchIndex'
 
 interface Row {
   id: number; date: string; asset: string; direction: Direction; entry_price: number
   exit_price: number | null; quantity: number; fees: number; notes: string
   tags: string; closed_at: string | null; created_at: string; updated_at: string
+  deleted_at: string | null
 }
 
 const toTrade = (r: Row): Trade => {
@@ -22,7 +26,7 @@ const toTrade = (r: Row): Trade => {
 }
 
 export function listTrades(db: Database.Database, f: TradeFilter = {}): Trade[] {
-  const where: string[] = []
+  const where: string[] = [LIVE('trades')]
   const params: string[] = []
   if (f.from) { where.push('date >= ?'); params.push(f.from) }
   if (f.to) { where.push('date <= ?'); params.push(f.to) }
@@ -43,10 +47,11 @@ export function listTrades(db: Database.Database, f: TradeFilter = {}): Trade[] 
 
 // Existing assets and tags, used for autocomplete and the tag filter.
 export function tradeMeta(db: Database.Database): TradeMeta {
-  const assets = (db.prepare('SELECT DISTINCT asset FROM trades ORDER BY asset').all() as { asset: string }[])
+  const assets = (db.prepare(`SELECT DISTINCT asset FROM trades WHERE ${LIVE('trades')} ORDER BY asset`).all() as { asset: string }[])
     .map((r) => r.asset)
   const tags = db.prepare(
     `SELECT value AS tag, COUNT(*) AS count FROM trades, json_each(trades.tags)
+     WHERE ${LIVE('trades')}
      GROUP BY value ORDER BY count DESC, tag`
   ).all() as TradeMeta['tags']
   return { assets, tags }
@@ -83,6 +88,7 @@ export function createTrade(db: Database.Database, input: TradeInput, now: Date 
      VALUES (@date, @asset, @direction, @entry, @exit, @quantity, @fees, @notes, @tags, @closedAt, @now, @now)`
   ).run({ ...t, closedAt: t.exit === null ? null : nowIso, now: nowIso })
   const trade = getTrade(db, Number(info.lastInsertRowid))
+  indexOne(db, 'trade', trade.id)
   const recent = allTradesLight(db)
   // R3 sees every NEW trade (open or closed) plus when it was created.
   emitAutomation(db, 'trade-created', `trade:${trade.id}`, {
@@ -104,10 +110,13 @@ export function updateTrade(db: Database.Database, id: number, input: TradeInput
   // Editing an already-closed trade keeps its original stamp; re-opening clears it.
   const wasOpen = !before || before.exit_price === null
   const closedAt = t.exit === null ? null : (wasOpen ? now : before!.closed_at)
-  db.prepare(
+  const info = db.prepare(
     `UPDATE trades SET date=@date, asset=@asset, direction=@direction, entry_price=@entry, exit_price=@exit,
-     quantity=@quantity, fees=@fees, notes=@notes, tags=@tags, closed_at=@closedAt, updated_at=@now WHERE id=@id`
+     quantity=@quantity, fees=@fees, notes=@notes, tags=@tags, closed_at=@closedAt, updated_at=@now
+     WHERE id=@id AND ${LIVE('trades')}`
   ).run({ ...t, id, now, closedAt })
+  if (info.changes === 0) throw new Error('Trade not found')
+  indexOne(db, 'trade', id)
   const trade = getTrade(db, id)
   // A trade CLOSING (was open, now has an exit) is an automation event.
   if (before && before.exit_price === null && trade.exitPrice !== null && trade.pnl !== null) {
@@ -119,9 +128,10 @@ export function updateTrade(db: Database.Database, id: number, input: TradeInput
 }
 
 // The light rows the trade rules need (date + pnl + id), for consecutiveLosses
-// and tradesOnDate / the re-entry rule. PnL and closed_at included.
+// and tradesOnDate / the re-entry rule. PnL and closed_at included. Live rows
+// only: a trashed trade is out of the rules as much as out of the totals.
 function allTradesLight(db: Database.Database): { id: number; date: string; pnl: number | null; closedAt: string | null }[] {
-  const rows = db.prepare('SELECT id, date, direction, entry_price, exit_price, quantity, fees, closed_at FROM trades').all() as Row[]
+  const rows = db.prepare(`SELECT id, date, direction, entry_price, exit_price, quantity, fees, closed_at FROM trades WHERE ${LIVE('trades')}`).all() as Row[]
   return rows.map((row) => ({
     id: row.id,
     date: row.date,
@@ -130,20 +140,55 @@ function allTradesLight(db: Database.Database): { id: number; date: string; pnl:
   }))
 }
 
-export function deleteTrade(db: Database.Database, id: number): void {
-  db.prepare('DELETE FROM trades WHERE id = ?').run(id)
+// Trashes the trade (Undo-able). P&L, win rate and every other trade total
+// read through listTrades, so the numbers drop the trashed row right away.
+// Returns the delete batch id so the UI can undo the action.
+export function deleteTrade(db: Database.Database, id: number): string {
+  const batch = newBatchId()
+  const trashed = trashByWhere(db, 'trades', `id = ? AND ${LIVE('trades')}`, [id], batch)
+  if (trashed > 0) removeOne(db, 'trade', id)
+  else if (!db.prepare('SELECT 1 FROM trades WHERE id = ?').get(id)) throw new Error('Trade not found')
+  // Already-trashed rows keep their batch, so undo after a second delete
+  // still covers the first deletion's group.
+  const row = db.prepare('SELECT delete_batch_id AS b FROM trades WHERE id = ?').get(id) as { b: string | null }
+  return row.b ?? batch
+}
+
+// Deletes a trashed trade for good.
+export function deleteTradeForever(db: Database.Database, id: number): void {
+  const result = db.prepare('DELETE FROM trades WHERE id = ? AND deleted_at IS NOT NULL').run(id)
+  if (result.changes === 0) throw new Error('Trade is not in Trash')
+}
+
+// Trash page + undo: one line per trashed trade.
+export function describeTrashed(db: Database.Database): TrashEntry[] {
+  return (db.prepare('SELECT id, delete_batch_id, deleted_at, asset, direction, date FROM trades WHERE deleted_at IS NOT NULL').all() as
+    { id: number; delete_batch_id: string | null; deleted_at: string; asset: string; direction: string; date: string }[])
+    .map((r) => ({
+      type: 'trade' as const, id: r.id, batchId: r.delete_batch_id, trashedAt: r.deleted_at,
+      label: r.asset, sublabel: `${r.direction === 'short' ? 'Short' : 'Long'} on ${r.date}`
+    }))
+}
+
+// Hydrates live trades by id (shared-search results do this), newest date first.
+export function getTradesByIds(db: Database.Database, ids: number[]): Trade[] {
+  if (ids.length === 0) return []
+  const marks = ids.map(() => '?').join(',')
+  return (db.prepare(`SELECT * FROM trades WHERE id IN (${marks}) AND ${LIVE('trades')}`).all(...ids) as Row[])
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+    .map(toTrade)
 }
 
 // Universal search: asset, notes, tags, date and direction ("long" / "short"). Newest first.
 export function searchTrades(db: Database.Database, q: ParsedQuery, limit: number): SearchGroup<Trade> {
   const w = searchWhere(q, ['asset', 'notes', 'tags', 'date', 'direction'], 'tags')
-  const items = (db.prepare(`SELECT * FROM trades WHERE ${w.sql} ORDER BY date DESC, id DESC LIMIT ?`)
+  const items = (db.prepare(`SELECT * FROM trades WHERE ${w.sql} AND ${LIVE('trades')} ORDER BY date DESC, id DESC LIMIT ?`)
     .all(...w.params, limit) as Row[]).map(toTrade)
-  const { n } = db.prepare(`SELECT COUNT(*) AS n FROM trades WHERE ${w.sql}`).get(...w.params) as { n: number }
+  const { n } = db.prepare(`SELECT COUNT(*) AS n FROM trades WHERE ${w.sql} AND ${LIVE('trades')}`).get(...w.params) as { n: number }
   return { items, total: n }
 }
 
 // Dashboard: the newest few trades.
 export function recentTrades(db: Database.Database, limit: number): Trade[] {
-  return (db.prepare('SELECT * FROM trades ORDER BY date DESC, id DESC LIMIT ?').all(limit) as Row[]).map(toTrade)
+  return (db.prepare(`SELECT * FROM trades WHERE ${LIVE('trades')} ORDER BY date DESC, id DESC LIMIT ?`).all(limit) as Row[]).map(toTrade)
 }

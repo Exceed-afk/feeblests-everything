@@ -72,6 +72,94 @@ const api: EverythingApi = {
     // Saves the new manual order after drag-and-drop (first id = top).
     reorder: (ids) => ipcRenderer.invoke('habits:reorder', ids)
   },
+  // Phase 1: Expenses. One channel per service function in
+  // src/modules/expenses/service (contract in its API.md).
+  expenses: {
+    overview: (month, today, currency) => ipcRenderer.invoke('expenses:overview', month, today, currency),
+    dueBills: (month, asOfDate) => ipcRenderer.invoke('expenses:dueBills', month, asOfDate),
+    listCategories: (includeArchived) => ipcRenderer.invoke('expenses:listCategories', includeArchived),
+    listTransactions: (filter) => ipcRenderer.invoke('expenses:listTransactions', filter),
+    createTransaction: (input) => ipcRenderer.invoke('expenses:createTransaction', input),
+    updateTransaction: (id, input) => ipcRenderer.invoke('expenses:updateTransaction', id, input),
+    deleteTransaction: (id) => ipcRenderer.invoke('expenses:deleteTransaction', id),
+    listBudgets: (month) => ipcRenderer.invoke('expenses:listBudgets', month),
+    setBudget: (input) => ipcRenderer.invoke('expenses:setBudget', input),
+    deleteBudget: (id) => ipcRenderer.invoke('expenses:deleteBudget', id),
+    copyBudgets: (targetMonth) => ipcRenderer.invoke('expenses:copyBudgets', targetMonth),
+    listRecurringBills: (includeArchived) => ipcRenderer.invoke('expenses:listRecurringBills', includeArchived),
+    createRecurringBill: (input) => ipcRenderer.invoke('expenses:createRecurringBill', input),
+    updateRecurringBill: (id, input) => ipcRenderer.invoke('expenses:updateRecurringBill', id, input),
+    deleteRecurringBill: (id) => ipcRenderer.invoke('expenses:deleteRecurringBill', id),
+    markBillPaid: (options) => ipcRenderer.invoke('expenses:markBillPaid', options),
+    transferLeftover: (input) => ipcRenderer.invoke('expenses:transferLeftover', input)
+  },
+  notes: {
+    list: (filter) => ipcRenderer.invoke('notes:list', filter),
+    get: (id) => ipcRenderer.invoke('notes:get', id),
+    create: (input) => ipcRenderer.invoke('notes:create', input),
+    update: (id, input) => ipcRenderer.invoke('notes:update', id, input),
+    remove: (id) => ipcRenderer.invoke('notes:remove', id),
+    setPinned: (id, pinned) => ipcRenderer.invoke('notes:setPinned', id, pinned),
+    setArchived: (id, archived) => ipcRenderer.invoke('notes:setArchived', id, archived),
+    backlinks: (id) => ipcRenderer.invoke('notes:backlinks', id),
+    findByTitle: (title) => ipcRenderer.invoke('notes:findByTitle', title),
+    promoteEntry: (entryId) => ipcRenderer.invoke('notes:promoteEntry', entryId)
+  },
+  content: {
+    list: () => ipcRenderer.invoke('content:list'),
+    get: (id) => ipcRenderer.invoke('content:get', id),
+    create: (input) => ipcRenderer.invoke('content:create', input),
+    update: (id, input) => ipcRenderer.invoke('content:update', id, input),
+    move: (id, stage) => ipcRenderer.invoke('content:move', id, stage),
+    reorder: (stage, ids) => ipcRenderer.invoke('content:reorder', stage, ids),
+    setChecklistDone: (id, lineId, done) => ipcRenderer.invoke('content:setChecklistDone', id, lineId, done),
+    addChecklistLine: (id, stage, text) => ipcRenderer.invoke('content:addChecklistLine', id, stage, text),
+    removeChecklistLine: (id, lineId) => ipcRenderer.invoke('content:removeChecklistLine', id, lineId),
+    setScript: (id, noteId) => ipcRenderer.invoke('content:setScript', id, noteId),
+    createScript: (id, title) => ipcRenderer.invoke('content:createScript', id, title),
+    addAsset: (id, asset) => ipcRenderer.invoke('content:addAsset', id, asset),
+    removeAsset: (id, path) => ipcRenderer.invoke('content:removeAsset', id, path),
+    remove: (id) => ipcRenderer.invoke('content:remove', id),
+    missingAssets: (paths) => ipcRenderer.invoke('content:missingAssets', paths)
+  },
+  projects: {
+    list: (includeArchived) => ipcRenderer.invoke('projects:list', includeArchived),
+    create: (input) => ipcRenderer.invoke('projects:create', input),
+    update: (id, input) => ipcRenderer.invoke('projects:update', id, input),
+    delete: (id) => ipcRenderer.invoke('projects:delete', id)
+  },
+  focus: {
+    active: () => ipcRenderer.invoke('focus:active'),
+    start: (params) => ipcRenderer.invoke('focus:start', params),
+    pause: () => ipcRenderer.invoke('focus:pause'),
+    resume: () => ipcRenderer.invoke('focus:resume'),
+    stop: (completed, note) => ipcRenderer.invoke('focus:stop', completed, note),
+    discard: () => ipcRenderer.invoke('focus:discard'),
+    summary: (today) => ipcRenderer.invoke('focus:summary', today),
+    report: (from, to) => ipcRenderer.invoke('focus:report', from, to),
+    listSessions: (filter) => ipcRenderer.invoke('focus:listSessions', filter),
+    logManual: (input) => ipcRenderer.invoke('focus:logManual', input),
+    updateSession: (id, input) => ipcRenderer.invoke('focus:updateSession', id, input),
+    deleteSession: (id) => ipcRenderer.invoke('focus:deleteSession', id),
+    taskSeconds: (taskId) => ipcRenderer.invoke('focus:taskSeconds', taskId)
+  },
+  snippets: {
+    list: () => ipcRenderer.invoke('snippets:list'),
+    create: (input) => ipcRenderer.invoke('snippets:create', input),
+    update: (id, input) => ipcRenderer.invoke('snippets:update', id, input),
+    remove: (id) => ipcRenderer.invoke('snippets:remove', id)
+  },
+  tools: {
+    copyText: (text) => ipcRenderer.invoke('tools:copyText', text)
+  },
+  scratchpads: {
+    list: () => ipcRenderer.invoke('scratchpads:list'),
+    ensure: () => ipcRenderer.invoke('scratchpads:ensure'),
+    create: (input) => ipcRenderer.invoke('scratchpads:create', input),
+    update: (id, patch) => ipcRenderer.invoke('scratchpads:update', id, patch),
+    remove: (id) => ipcRenderer.invoke('scratchpads:remove', id),
+    saveAsNote: (id) => ipcRenderer.invoke('scratchpads:saveAsNote', id)
+  },
   dashboard: {
     summary: (today) => ipcRenderer.invoke('dashboard:summary', today)
   },
@@ -98,6 +186,34 @@ const api: EverythingApi = {
   },
   search: {
     run: (query, limit) => ipcRenderer.invoke('search:run', query, limit)
+  },
+  // ---- Phase 0: trash (with Undo), links, tags, templates ----
+  trash: {
+    list: () => ipcRenderer.invoke('trash:list'),
+    restore: (batchId) => ipcRenderer.invoke('trash:restore', batchId),
+    deleteForever: (batchId) => ipcRenderer.invoke('trash:deleteForever', batchId)
+  },
+  links: {
+    add: (a, b, relation) => ipcRenderer.invoke('links:add', a, b, relation),
+    list: (type, id) => ipcRenderer.invoke('links:list', type, id),
+    remove: (linkId) => ipcRenderer.invoke('links:remove', linkId)
+  },
+  tags: {
+    list: () => ipcRenderer.invoke('tags:list'),
+    counts: () => ipcRenderer.invoke('tags:counts'),
+    setEntityTags: (type, entityId, names) => ipcRenderer.invoke('tags:setEntityTags', type, entityId, names),
+    tagsOf: (type, entityId) => ipcRenderer.invoke('tags:of', type, entityId),
+    setColour: (name, colour) => ipcRenderer.invoke('tags:setColour', name, colour),
+    rename: (from, to) => ipcRenderer.invoke('tags:rename', from, to),
+    merge: (from, into) => ipcRenderer.invoke('tags:merge', from, into),
+    delete: (name) => ipcRenderer.invoke('tags:delete', name),
+    items: (name) => ipcRenderer.invoke('tags:items', name)
+  },
+  templates: {
+    list: (kind) => ipcRenderer.invoke('templates:list', kind),
+    save: (kind, name, payload) => ipcRenderer.invoke('templates:save', kind, name, payload),
+    remove: (id) => ipcRenderer.invoke('templates:remove', id),
+    restoreBuiltins: () => ipcRenderer.invoke('templates:restoreBuiltins')
   },
   app: {
     dataPath: () => ipcRenderer.invoke('app:dataPath'),
@@ -133,6 +249,34 @@ const api: EverythingApi = {
       functions: () => ipcRenderer.invoke('assistant:functions'),
       ask: (question, today, previousRequest) => ipcRenderer.invoke('assistant:ask', question, today, previousRequest)
     }
+  },
+  calculator: {
+    saveHistory: (item) => ipcRenderer.invoke('calculator:saveHistory', item),
+    listHistory: (limit) => ipcRenderer.invoke('calculator:listHistory', limit),
+    clearHistory: () => ipcRenderer.invoke('calculator:clearHistory'),
+    deleteHistoryItem: (id) => ipcRenderer.invoke('calculator:deleteHistoryItem', id),
+    togglePinHistory: (id) => ipcRenderer.invoke('calculator:togglePinHistory', id),
+    saveVariable: (name, value) => ipcRenderer.invoke('calculator:saveVariable', name, value),
+    listVariables: () => ipcRenderer.invoke('calculator:listVariables'),
+    deleteVariable: (name) => ipcRenderer.invoke('calculator:deleteVariable', name),
+    saveProgram: (program) => ipcRenderer.invoke('calculator:saveProgram', program),
+    listPrograms: () => ipcRenderer.invoke('calculator:listPrograms'),
+    deleteProgram: (id) => ipcRenderer.invoke('calculator:deleteProgram', id),
+    saveRateSet: (rateSet) => ipcRenderer.invoke('calculator:saveRateSet', rateSet),
+    renameRateSet: (id, newName) => ipcRenderer.invoke('calculator:renameRateSet', id, newName),
+    deleteRateSet: (id) => ipcRenderer.invoke('calculator:deleteRateSet', id),
+    selectRateSet: (id) => ipcRenderer.invoke('calculator:selectRateSet', id),
+    listRateSets: () => ipcRenderer.invoke('calculator:listRateSets'),
+    saveRate: (rate) => ipcRenderer.invoke('calculator:saveRate', rate),
+    updateRate: (id, rateToBase, note, name) => ipcRenderer.invoke('calculator:updateRate', id, rateToBase, note, name),
+    listRates: (rateSetId) => ipcRenderer.invoke('calculator:listRates', rateSetId),
+    saveRateOverride: (override) => ipcRenderer.invoke('calculator:saveRateOverride', override),
+    listRateOverrides: (rateSetId) => ipcRenderer.invoke('calculator:listRateOverrides', rateSetId),
+    deleteRateOverride: (id) => ipcRenderer.invoke('calculator:deleteRateOverride', id),
+    importRateSet: (rateSetId, rows, mode) => ipcRenderer.invoke('calculator:importRateSet', rateSetId, rows, mode),
+    getSetting: (key) => ipcRenderer.invoke('calculator:getSetting', key),
+    setSetting: (key, value) => ipcRenderer.invoke('calculator:setSetting', key, value),
+    getAllSettings: () => ipcRenderer.invoke('calculator:getAllSettings')
   }
 }
 

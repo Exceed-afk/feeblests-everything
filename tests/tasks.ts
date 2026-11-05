@@ -557,6 +557,49 @@ test('backup export/import round-trips the full migration-9 task schema', () => 
   source.close()
 })
 
+test('collectBackup exports every user-facing table, and a restore fully replaces the target', () => {
+  const source = openTaskDb()
+  createTask(source, fullInput('Exported', null, null))
+  source.prepare("INSERT INTO savings_goals (name, created_at, updated_at) VALUES ('Trip', 'now', 'now')").run()
+  source.prepare("INSERT INTO savings_transactions (goal_id, date, kind, amount, created_at, updated_at) VALUES (1, '2026-10-01', 'deposit', 100, 'now', 'now')").run()
+  source.prepare("INSERT INTO trades (date, asset, direction, entry_price, quantity, fees, tags, created_at, updated_at) VALUES ('2026-10-01', 'XAUUSD', 'long', 1, 1, 0, '[]', 'now', 'now')").run()
+  source.prepare("INSERT INTO tags (name, created_at, updated_at) VALUES ('work', 'now', 'now')").run()
+  source.prepare("INSERT INTO taggings (tag_id, entity_type, entity_id, created_at, updated_at) VALUES (1, 'task', 1, 'now', 'now')").run()
+  source.prepare("INSERT INTO links (source_type, source_id, target_type, target_id, relation, created_at) VALUES ('task', 1, 'goal', 1, 'related', 'now')").run()
+  source.prepare("INSERT INTO templates (kind, name, payload, is_builtin, created_at, updated_at) VALUES ('note', 'Mine', '{}', 0, 'now', 'now')").run()
+
+  const backup = collectBackup(source)
+  // Every list a restore writes is present when its table had rows.
+  for (const key of ['logbook', 'trades', 'savingsGoals', 'savingsTransactions', 'tasks', 'taskSubtasks', 'taskCompletions', 'tags', 'taggings', 'links', 'templates']) {
+    const list = (backup as unknown as Record<string, unknown[]>)[key]
+    assert.equal(Array.isArray(list), true, `${key} must be a list`)
+  }
+  assert.equal(backup.tasks.length, 1)
+  assert.equal(backup.savingsGoals.length, 1)
+  assert.equal(backup.trades.length, 1)
+  assert.equal(backup.tags?.length, 1)
+  assert.equal(backup.taggings?.length, 1)
+  assert.equal(backup.links?.length, 1)
+  assert.equal(backup.templates?.length, 1)
+
+  const parsed = parseBackup(JSON.stringify(backup), MIGRATIONS.length)
+  const target = openTaskDb()
+  // Pre-existing rows on the target must NOT survive the import.
+  createTask(target, fullInput('Stray', null, null))
+  target.prepare("INSERT INTO savings_goals (name, created_at, updated_at) VALUES ('Old goal', 'now', 'now')").run()
+  restoreBackup(target, parsed)
+
+  assert.deepEqual(listTasks(target).map((t) => t.title), ['Exported'])
+  assert.deepEqual((target.prepare('SELECT name FROM savings_goals').all() as { name: string }[]).map((r) => r.name), ['Trip'])
+  assert.equal((target.prepare('SELECT COUNT(*) AS n FROM trades').get() as { n: number }).n, 1)
+  assert.deepEqual((target.prepare('SELECT name FROM tags').all() as { name: string }[]).map((r) => r.name), ['work'])
+  assert.equal((target.prepare('SELECT COUNT(*) AS n FROM taggings').get() as { n: number }).n, 1)
+  assert.equal((target.prepare('SELECT COUNT(*) AS n FROM links').get() as { n: number }).n, 1)
+  assert.deepEqual((target.prepare('SELECT name FROM templates').all() as { name: string }[]).map((r) => r.name), ['Mine'])
+  target.close()
+  source.close()
+})
+
 test('a restore clears the automation activity so it never mixes machine histories', () => {
   const source = openTaskDb()
   void createTask(source, fullInput('Done deal', null, null))

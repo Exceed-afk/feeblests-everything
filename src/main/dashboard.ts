@@ -8,6 +8,7 @@ import { listTrades, recentTrades } from './trades'
 import { listGoals } from './savings'
 import { listHabits } from './habits'
 import { listTasks } from './tasks'
+import { getFocusSummary } from './focus'
 import { taskDashboard } from '../shared/tasks'
 import { habitsToday } from '../shared/dashboard'
 import { isDate } from './util'
@@ -28,6 +29,7 @@ export function getDashboard(db: Database.Database, today: string): DashboardDat
     totalSaved: round8(goals.reduce((sum, g) => sum + g.balance, 0)),
     log: logbookSummary(db, today),
     habits: habitsToday(listHabits(db, today).habits, today), // same request, no extra round trip
-    tasks: taskDashboard(listTasks(db, today), today)
+    tasks: taskDashboard(listTasks(db, today), today),
+    focus: getFocusSummary(db, today)
   }
 }

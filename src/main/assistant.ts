@@ -23,6 +23,11 @@ import { listTrades } from './trades'
 import { listAllTransactions, listGoals } from './savings'
 import { listHabits } from './habits'
 import { listCompletions, listTasks } from './tasks'
+import { listProjects, listSessions } from './focus'
+import { listExpenseTransactions } from '../modules/expenses/service/transactions'
+import { listCategories as listExpenseCategories } from '../modules/expenses/service/categories'
+import { listNotes } from './notes'
+import { listContentItems } from './content'
 import { deleteSetting, getSettings, setSetting } from './db'
 import { isDate } from './util'
 
@@ -105,15 +110,33 @@ export function keyStatus(): AssistantKeyStatus {
 
 // ---------- the rows the chosen function may read ----------
 
-const loadRows = (db: Database.Database, today: string, range: { from: string; to: string }): AssistantRows => ({
-  txs: listAllTransactions(db),
-  goals: listGoals(db),
-  trades: listTrades(db),
-  habits: listHabits(db, today).habits,
-  tasks: listTasks(db, today),
-  completions: listCompletions(db, range),
-  entries: listEntries(db)
-})
+const loadRows = (db: Database.Database, today: string, range: { from: string; to: string }): AssistantRows => {
+  const categories = listExpenseCategories(db, true)
+  const catMap = new Map(categories.map((c) => [c.id, c.name]))
+  const expenseRows = listExpenseTransactions(db).map((e) => ({
+    id: e.id,
+    amount: e.amount,
+    currency: e.currency,
+    date: e.date,
+    categoryName: e.categoryId ? catMap.get(e.categoryId) : undefined,
+    type: e.type,
+    payee: e.payee
+  }))
+  return {
+    txs: listAllTransactions(db),
+    goals: listGoals(db),
+    trades: listTrades(db),
+    habits: listHabits(db, today).habits,
+    tasks: listTasks(db, today),
+    completions: listCompletions(db, range),
+    entries: listEntries(db),
+    timeSessions: listSessions(db),
+    projects: listProjects(db),
+    expenses: expenseRows,
+    notes: listNotes(db).map((n) => ({ id: n.id, title: n.title, body: n.body, tags: n.tags, createdAt: n.createdAt })),
+    contentItems: listContentItems(db).map((c) => ({ id: c.id, title: c.title, stage: c.stage, platform: c.platform, targetPublishDate: c.targetPublishDate, publishedDate: c.publishedDate }))
+  }
+}
 
 // ---------- one question, one function call ----------
 

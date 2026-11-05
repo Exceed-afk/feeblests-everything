@@ -7,9 +7,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, Flame, PiggyBank, Sparkles } from 'lucide-react'
+import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, Clapperboard, Edit3, Flame, PiggyBank, Receipt, Sparkles, Timer } from 'lucide-react'
 import { MOODS, type CaptureKind, type Direction, type Mood, type SavingsGoal, type TxKind } from '../../../shared/types'
 import { buildDeposit, buildNote, buildTrade, habitsForToday, type CaptureHabit } from '../../../shared/capture'
+import type { ExpenseCategoryDTO } from '../../../modules/expenses/service/bridge'
 import { parseQuickAdd, describeProposal, type QuickAddParse } from '../../../shared/quickAdd'
 import { QuickAddPreview } from '../components/QuickAddPreview'
 import { saveProposal } from '../lib/quickAddSave'
@@ -21,6 +22,10 @@ import { loadSettings } from '../lib/settingsStore'
 
 const TABS: { id: CaptureKind | 'ask'; label: string; icon: LucideIcon }[] = [
   { id: 'note', label: 'Note', icon: BookOpen },
+  { id: 'expense', label: 'Expense', icon: Receipt },
+  { id: 'focus', label: 'Focus', icon: Timer },
+  { id: 'content', label: 'Content', icon: Clapperboard },
+  { id: 'scratchpad', label: 'Pad', icon: Edit3 },
   { id: 'trade', label: 'Trade', icon: CandlestickChart },
   { id: 'deposit', label: 'Deposit', icon: PiggyBank },
   { id: 'habit', label: 'Habits', icon: CalendarCheck },
@@ -69,6 +74,7 @@ export function Capture() {
   const [text, setText] = useState('')
   const [mood, setMood] = useState<Mood | null>(null)
   const [tags, setTags] = useState('')
+  const [noteDestination, setNoteDestination] = useState<'logbook' | 'notes'>('logbook')
   // Trade
   const [asset, setAsset] = useState(() => memory.get(K.asset) ?? '')
   const [direction, setDirection] = useState<Direction>(() => (memory.get(K.direction) === 'short' ? 'short' : 'long'))
@@ -87,6 +93,26 @@ export function Capture() {
   const [habits, setHabits] = useState<{ items: CaptureHabit[]; rest: number }>({ items: [], rest: 0 })
   const [habitDay, setHabitDay] = useState('')
   const [busyHabit, setBusyHabit] = useState<number | null>(null)
+  // Expense
+  const [expenseAmount, setExpenseAmount] = useState('')
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategoryDTO[]>([])
+  const [expenseCategoryId, setExpenseCategoryId] = useState<number | null>(null)
+  const [expensePayee, setExpensePayee] = useState('')
+  const [expenseNote, setExpenseNote] = useState('')
+
+  // Focus
+  const [focusMinutes, setFocusMinutes] = useState('25')
+  const [focusNote, setFocusNote] = useState('')
+
+  // Content
+  const [contentTitle, setContentTitle] = useState('')
+  const [contentType, setContentType] = useState<'video' | 'short' | 'stream' | 'post'>('video')
+  const [contentPlatform, setContentPlatform] = useState('YouTube')
+  const [contentHook, setContentHook] = useState('')
+
+  // Scratchpad
+  const [padText, setPadText] = useState('')
+
   // Task
   const [taskTitle, setTaskTitle] = useState('')
 
@@ -104,14 +130,23 @@ export function Capture() {
   // Everything the forms offer to pick from: known assets, goals, today's habits.
   const reload = useCallback(async () => {
     try {
-      const [meta, goalList, overview] = await Promise.all([window.api.trades.meta(), window.api.savings.listGoals(), window.api.habits.list()])
+      const [meta, goalList, overview, categories] = await Promise.all([
+        window.api.trades.meta(),
+        window.api.savings.listGoals(),
+        window.api.habits.list(),
+        window.api.expenses.listCategories()
+      ])
       setAssets(meta.assets)
       setGoals(goalList)
       setGoalId((cur) => goalList.find((g) => g.id === cur)?.id ?? goalList.find((g) => String(g.id) === memory.get(K.goal))?.id ?? goalList[0]?.id ?? null)
       setHabits(habitsForToday(overview.habits, overview.today))
       setHabitDay(overview.today)
+      setExpenseCategories(categories)
+      if (categories.length > 0 && expenseCategoryId === null) {
+        setExpenseCategoryId(categories[0].id)
+      }
     } catch (e) { setError(errMsg(e)) }
-  }, [])
+  }, [expenseCategoryId])
 
   // The window is shown again: refresh the look and the lists, and start typing straight away.
   useEffect(() => {
@@ -153,12 +188,31 @@ export function Capture() {
     const day = today() // read now, not when the window opened: it may have sat hidden past midnight
     try {
       if (tab === 'note') {
-        const r = buildNote({ text, mood, tags, today: day })
-        if (!r.ok) return setError(r.error)
-        setBusy(true)
-        await window.api.logbook.create(r.value)
-        setText(''); setMood(null); setTags('')
-        await finished('Saved to your Logbook')
+        if (noteDestination === 'notes') {
+          const trimmed = text.trim()
+          if (!trimmed) return setError('Write something in your note.')
+          setBusy(true)
+          const lines = trimmed.split('\n')
+          const title = lines[0].replace(/^[#\s]+/, '').trim() || 'Untitled note'
+          const body = lines.slice(1).join('\n').trim()
+          const tagList = tags.split(',').map((t) => t.trim()).filter(Boolean)
+          await window.api.notes.create({
+            title,
+            body: body || title,
+            tags: tagList,
+            pinned: false,
+            archived: false
+          })
+          setText(''); setMood(null); setTags('')
+          await finished('Saved to Notes')
+        } else {
+          const r = buildNote({ text, mood, tags, today: day })
+          if (!r.ok) return setError(r.error)
+          setBusy(true)
+          await window.api.logbook.create(r.value)
+          setText(''); setMood(null); setTags('')
+          await finished('Saved to your Logbook')
+        }
       } else if (tab === 'trade') {
         const r = buildTrade({ asset, direction, entry, exit, qty, fees, today: day })
         if (!r.ok) return setError(r.error)
@@ -180,6 +234,59 @@ export function Capture() {
         }
         setTaskTitle('')
         await finished('Task added for today')
+      } else if (tab === 'expense') {
+        const parsedAmount = Math.round(Number(expenseAmount) * 100)
+        if (!parsedAmount || parsedAmount <= 0) return setError('Enter a positive expense amount.')
+        setBusy(true)
+        await window.api.expenses.createTransaction({
+          amount: parsedAmount,
+          currency: 'USD',
+          date: day,
+          categoryId: expenseCategoryId,
+          payee: expensePayee.trim(),
+          note: expenseNote.trim(),
+          type: 'expense',
+          tags: []
+        })
+        setExpenseAmount('')
+        setExpensePayee('')
+        setExpenseNote('')
+        await finished('Expense logged')
+      } else if (tab === 'focus') {
+        const mins = Math.max(1, Math.min(180, parseInt(focusMinutes, 10) || 25))
+        setBusy(true)
+        await window.api.focus.start({
+          type: 'focus',
+          mode: 'pomodoro',
+          targetSeconds: mins * 60,
+          note: focusNote.trim()
+        })
+        setFocusNote('')
+        await finished(`Started ${mins}m focus session`)
+      } else if (tab === 'content') {
+        const title = contentTitle.trim()
+        if (!title) return setError('Enter a content idea title.')
+        setBusy(true)
+        await window.api.content.create({
+          title,
+          type: contentType,
+          platform: contentPlatform.trim(),
+          hook: contentHook.trim(),
+          stage: 'idea',
+          tags: []
+        })
+        setContentTitle('')
+        setContentHook('')
+        await finished('Content idea saved to Idea stage')
+      } else if (tab === 'scratchpad') {
+        const textToAppend = padText.trim()
+        if (!textToAppend) return setError('Write something to append.')
+        setBusy(true)
+        const pad = await window.api.scratchpads.ensure()
+        const newContent = pad.content ? `${pad.content}\n\n${textToAppend}` : textToAppend
+        await window.api.scratchpads.update(pad.id, { content: newContent })
+        setPadText('')
+        await finished('Appended to scratchpad')
       } else {
         const r = buildDeposit({ goalId, kind: txKind, amount, note: txNote, today: day })
         if (!r.ok) return setError(r.error)
@@ -232,7 +339,7 @@ export function Capture() {
   const goal = goals.find((g) => g.id === goalId) ?? null
   const habitList = [...habits.items].sort((a, b) => a.name.localeCompare(b.name)) // alphabetical, so rows never jump when one is ticked
   const left = habits.items.filter((h) => !h.done).length
-  const saveLabel = tab === 'note' ? 'Save note' : tab === 'trade' ? 'Save trade' : tab === 'task' ? 'Add task' : txKind === 'deposit' ? 'Add deposit' : 'Add withdrawal'
+  const saveLabel = tab === 'note' ? 'Save note' : tab === 'trade' ? 'Save trade' : tab === 'task' ? 'Add task' : tab === 'expense' ? 'Log expense' : tab === 'focus' ? 'Start timer' : tab === 'content' ? 'Save idea' : tab === 'scratchpad' ? 'Append to pad' : txKind === 'deposit' ? 'Add deposit' : 'Add withdrawal'
 
   return (
     <div ref={root} className="min-h-[200px] border border-line">
@@ -278,16 +385,25 @@ export function Capture() {
         )}
 
         {tab === 'note' && (<>
-          <textarea data-autofocus aria-label="Note" className="field min-h-[7rem] resize-none leading-relaxed" value={text}
-            placeholder="What is on your mind? The first line becomes the title." onChange={(e) => setText(e.target.value)} />
-          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Mood (optional)">
-            {MOODS.map((m) => (
-              <button key={m} aria-pressed={mood === m} onClick={() => setMood(mood === m ? null : m)}
-                className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs ${mood === m ? 'border-accent bg-accent/15' : 'border-line text-muted hover:text-fg'}`}>
-                <span className={`h-2 w-2 rounded-full ${MOOD_STYLE[m].dot}`} aria-hidden="true" />{MOOD_STYLE[m].label}
-              </button>
-            ))}
+          <div className="flex items-center justify-between gap-2 text-xs text-muted">
+            <span>Destination</span>
+            <div className="seg" role="group" aria-label="Note destination">
+              <button aria-pressed={noteDestination === 'logbook'} onClick={() => setNoteDestination('logbook')}>Journal</button>
+              <button aria-pressed={noteDestination === 'notes'} onClick={() => setNoteDestination('notes')}>Notes</button>
+            </div>
           </div>
+          <textarea data-autofocus aria-label="Note" className="field min-h-[7rem] resize-none leading-relaxed" value={text}
+            placeholder={noteDestination === 'notes' ? "Write a note... The first line becomes the title." : "What is on your mind? The first line becomes the title."} onChange={(e) => setText(e.target.value)} />
+          {noteDestination === 'logbook' && (
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Mood (optional)">
+              {MOODS.map((m) => (
+                <button key={m} aria-pressed={mood === m} onClick={() => setMood(mood === m ? null : m)}
+                  className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs ${mood === m ? 'border-accent bg-accent/15' : 'border-line text-muted hover:text-fg'}`}>
+                  <span className={`h-2 w-2 rounded-full ${MOOD_STYLE[m].dot}`} aria-hidden="true" />{MOOD_STYLE[m].label}
+                </button>
+              ))}
+            </div>
+          )}
           <input aria-label="Tags (optional)" className="field" value={tags} placeholder="Tags, optional: work, idea" onChange={(e) => setTags(e.target.value)} />
         </>)}
 
@@ -318,6 +434,68 @@ export function Capture() {
             </label>
           </div>
         </>)}
+
+        {tab === 'focus' && (
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col text-xs text-muted">Minutes
+              <input data-autofocus type="number" min="1" max="180" className="field mt-1" value={focusMinutes} onChange={(e) => setFocusMinutes(e.target.value)} />
+            </label>
+            <label className="flex flex-col text-xs text-muted">Focus note (optional)
+              <input className="field mt-1" value={focusNote} placeholder="What are you working on?" onChange={(e) => setFocusNote(e.target.value)} />
+            </label>
+          </div>
+        )}
+
+        {tab === 'content' && (
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col text-xs text-muted">Idea title
+              <input data-autofocus className="field mt-1" value={contentTitle} placeholder="What is the video/content about?" onChange={(e) => setContentTitle(e.target.value)} />
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col text-xs text-muted">Type
+                <select className="field mt-1" value={contentType} onChange={(e) => setContentType(e.target.value as never)}>
+                  <option value="video">Video</option>
+                  <option value="short">Short</option>
+                  <option value="stream">Stream</option>
+                  <option value="post">Post</option>
+                </select>
+              </label>
+              <label className="flex flex-col text-xs text-muted">Platform
+                <input className="field mt-1" value={contentPlatform} placeholder="YouTube" onChange={(e) => setContentPlatform(e.target.value)} />
+              </label>
+            </div>
+            <label className="flex flex-col text-xs text-muted">Hook (optional)
+              <input className="field mt-1" value={contentHook} placeholder="The first sentence / hook" onChange={(e) => setContentHook(e.target.value)} />
+            </label>
+          </div>
+        )}
+
+        {tab === 'scratchpad' && (
+          <label className="flex flex-col text-xs text-muted">Append to scratchpad
+            <textarea data-autofocus className="field mt-1 min-h-[6.5rem] resize-none" value={padText}
+              placeholder="Quick thought, link, or snippet to keep in your active pad..."
+              onChange={(e) => setPadText(e.target.value)} />
+          </label>
+        )}
+
+        {tab === 'expense' && (
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col text-xs text-muted">Amount ($)
+              <input data-autofocus type="number" step="0.01" min="0" inputMode="decimal" className="field mt-1" value={expenseAmount} placeholder="0.00" onChange={(e) => setExpenseAmount(e.target.value)} />
+            </label>
+            <label className="flex flex-col text-xs text-muted">Category
+              <select className="field mt-1" value={expenseCategoryId ?? ''} onChange={(e) => setExpenseCategoryId(Number(e.target.value))}>
+                {expenseCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col text-xs text-muted">Payee
+              <input className="field mt-1" value={expensePayee} placeholder="e.g. Coffee shop" onChange={(e) => setExpensePayee(e.target.value)} />
+            </label>
+            <label className="flex flex-col text-xs text-muted">Note (optional)
+              <input className="field mt-1" value={expenseNote} placeholder="Details" onChange={(e) => setExpenseNote(e.target.value)} />
+            </label>
+          </div>
+        )}
 
         {tab === 'task' && (
           <label className="flex flex-col text-xs text-muted">Task

@@ -11,7 +11,13 @@ import { MIGRATIONS } from '../src/main/migrations'
 let n = 0
 const test = (name: string, fn: () => void) => { try { fn(); n++; console.log('ok  ', name) } catch (e) { console.error(e); throw e } }
 
-const TODAY = '2026-11-02'
+// The automation stamps the REAL current date, so this must not be hardcoded or
+// the test breaks the day the clock rolls over. Same local-date rule the app uses.
+const todayLocal = (): string => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const TODAY = todayLocal()
 const trade = (id: number, date: string, pnl: number | null) => ({ id, date, pnl })
 
 const settings = (patch: Partial<AutomationSettings>): AutomationSettings => ({

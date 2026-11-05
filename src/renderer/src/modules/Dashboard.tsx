@@ -1,354 +1,330 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
-import { BookOpen, CalendarCheck, CandlestickChart, Check, CheckSquare, ChevronRight, Circle, ClipboardCheck, Flame, Lightbulb, PiggyBank, TrendingUp } from 'lucide-react'
-import type { DashboardData, SavingsGoal } from '../../../shared/types'
-import { progressPercent } from '../../../shared/savings'
-import { moodStyle } from '../lib/moods'
-import { formatDate, today } from '../lib/dates'
-import { fmtAmount, fmtPnl, pnlColor } from '../lib/format'
-import { errMsg } from '../lib/errors'
-import { useRefreshOnCapture } from '../lib/dataChanged'
-import { getCurrentSettings } from '../lib/settingsStore'
-import { DEFAULT_INTELLIGENCE } from '../../../shared/types'
+// The Dashboard (Phase 6): a 12-column grid of widgets, arranged by the user.
+//
+// - Every cell is a widget from src/renderer/src/widgets.ts, loaded lazily and
+//   fetched only when it is on screen.
+// - The arrangement is an ordered list of { id, size } saved in settings
+//   (dashboardLayout, as JSON). The placement arithmetic, the presets and the
+//   move/add/remove rules are pure and live in src/shared/dashboardLayout.ts.
+// - Edit mode: add, remove, reorder (drag, or the arrow buttons, which also
+//   answer Alt+ArrowUp / Alt+ArrowDown from the keyboard) and resize between
+//   the widget's preset sizes. Nothing is free-form: no drag-resize.
+// - A widget whose module is switched off (Settings > Modules) is skipped;
+//   the stored layout is left alone, so turning the module back on brings the
+//   widget back where it was.
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDown, ArrowUp, Check, GripVertical, Plus, RotateCcw, Settings2, Trash2 } from 'lucide-react'
 import type { ModuleProps } from '../lib/navigation'
-import { ProgressBar } from '../components/ProgressBar'
-import { PnlChart } from '../components/PnlChart'
+import { updateSettings, useSettings } from '../lib/settingsStore'
+import { formatDate, today } from '../lib/dates'
+import { useRefreshOnCapture } from '../lib/dataChanged'
+import {
+  DASHBOARD_PRESETS, LAYOUT_PRESETS, WIDGET_SIZE_LABELS, WIDGET_SIZES, addWidget, moveWidgetBy,
+  normaliseSize, parseLayout, placeWidgets, removeWidget, resolveLayout, serializeLayout, setWidgetSize,
+  type DashboardPreset, type WidgetSize
+} from '../../../shared/dashboardLayout'
+import { WIDGETS, findWidget, hasWidget, widgetAllowed, type WidgetProps } from '../widgets'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
-import { Pnl } from '../components/Pnl'
-
-const MAX_GOALS = 4 // savings goals shown before "View all"
-const MAX_HABITS = 6 // habits listed in the tile before "+N more"
+import { invalidateSummary } from '../lib/dashboardSummary'
 
 const greeting = (): string => {
   const hour = new Date().getHours()
   return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 }
 
-// Goals still in progress come first (closest to done on top), then reached
-// goals, then goals with no target (largest balance first).
-function featuredGoals(goals: SavingsGoal[]): SavingsGoal[] {
-  const pct = (g: SavingsGoal) => progressPercent(g.balance, g.target)
-  const rank = (g: SavingsGoal) => { const p = pct(g); return p === null ? 2 : p >= 100 ? 1 : 0 }
-  return [...goals].sort((a, b) =>
-    rank(a) - rank(b) || (rank(a) === 0 ? (pct(b) ?? 0) - (pct(a) ?? 0) : b.balance - a.balance))
+// How often the grid changes its column count: 12 on a wide window, 6 when
+// the page is narrower, and 1 (stack) on small screens.
+function useGridColumns(ref: React.RefObject<HTMLElement | null>): number {
+  const [columns, setColumns] = useState(() => {
+    if (typeof window === 'undefined') return 12
+    const w = window.innerWidth
+    return w >= 1060 ? 12 : w >= 660 ? 6 : 1
+  })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => {
+      const w = el.clientWidth
+      setColumns(w >= 1000 ? 12 : w >= 620 ? 6 : 1)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref])
+  return columns
 }
 
+// Where the saved layout lives: the `dashboardLayout` settings key (JSON text),
+// read through useSettings() and written through updateSettings(). It is one
+// settings key, so it rides along in the JSON backup like every other choice.
+
 export function Dashboard({ onOpen, onNavigate }: ModuleProps) {
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [error, setError] = useState('')
+  const settings = useSettings()
+  const disabled = settings.disabledModules ?? []
+  const gridRef = useRef<HTMLDivElement>(null)
+  const columns = useGridColumns(gridRef)
 
-  const load = useCallback(() => {
-    window.api.dashboard.summary(today()).then(setData).catch((e) => setError(errMsg(e)))
+  // The layout as the user last saved it. The settings value is JSON text; an
+  // unreadable value falls back to the shipped arrangement.
+  const stored = useMemo(() => parseLayout(settings.dashboardLayout) ?? LAYOUT_PRESETS.default, [settings.dashboardLayout])
+  // Widgets whose module is off (or that no longer exist) are skipped, not deleted.
+  const allowed = useCallback((id: string) => {
+    const def = findWidget(id)
+    return def !== undefined && widgetAllowed(def, disabled)
+  }, [disabled])
+  const layout = useMemo(() => resolveLayout(stored, allowed), [stored, allowed])
+
+  const [editing, setEditing] = useState(false)
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const [announce, setAnnounce] = useState('')
+
+  const save = useCallback((next: { id: string; size: WidgetSize }[]) => {
+    updateSettings({ dashboardLayout: serializeLayout(next) })
+    invalidateSummary()
   }, [])
-  useEffect(() => { load() }, [load])
-  useRefreshOnCapture(load) // something was saved from the Quick capture window
 
-  const header = <PageHeader title={greeting()} subtitle={`${formatDate(today())}. Your data stays on this computer.`} />
+  // Widgets read fresh numbers whenever something was saved elsewhere (Quick
+  // capture, undo of a delete) by remounting: the key changes with the reload.
+  const [reloadKey, setReloadKey] = useState(0)
+  const reload = useCallback(() => { invalidateSummary(); setReloadKey((k) => k + 1) }, [])
+  useRefreshOnCapture(reload)
 
-  if (!data) {
-    return (
-      <div className="page page-lg">
-        {header}
-        {error && <p role="alert" className="text-sm text-neg">{error}</p>}
-      </div>
-    )
+  const indexOf = (id: string) => layout.findIndex((w) => w.id === id)
+  const titleOf = (id: string) => findWidget(id)?.title ?? id
+
+  const move = (id: string, delta: number) => {
+    const from = indexOf(id)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= layout.length) return
+    save(moveWidgetBy(layout, id, delta))
+    setAnnounce(`${titleOf(id)} moved to position ${to + 1} of ${layout.length}.`)
+    // Focus follows the widget, so repeated presses keep moving the same one.
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-widget-handle="${id}"]`)?.focus())
+  }
+  const drop = (targetId: string | null) => {
+    const id = dragging
+    setDragging(null)
+    setOverId(null)
+    if (!id) return
+    if (targetId === null) { move(id, layout.length - indexOf(id)); return }
+    if (targetId === id) return
+    const from = indexOf(id)
+    const to = indexOf(targetId)
+    if (from < 0 || to < 0) return
+    save(moveWidgetBy(layout, id, to - from))
+    setAnnounce(`${titleOf(id)} moved to position ${to + 1} of ${layout.length}.`)
+  }
+  const remove = (id: string) => {
+    save(removeWidget(layout, id))
+    setAnnounce(`${titleOf(id)} removed from the dashboard.`)
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-add-widget]')?.focus())
+  }
+  const add = (id: string) => {
+    const def = findWidget(id)
+    save(addWidget(layout, id, def?.sizes.includes('m') ? 'm' : def?.sizes[0] ?? 'm'))
+    setAnnounce(`${titleOf(id)} added to the dashboard.`)
+  }
+  const resize = (id: string, size: WidgetSize) => {
+    save(setWidgetSize(layout, id, size))
+    setAnnounce(`${titleOf(id)} is now ${WIDGET_SIZE_LABELS[size].toLowerCase()}.`)
+  }
+  const applyPreset = (preset: DashboardPreset) => {
+    save(LAYOUT_PRESETS[preset])
+    setAnnounce(preset === 'default' ? 'The dashboard is back to its default arrangement.' : `The ${DASHBOARD_PRESETS.find((p) => p.id === preset)?.name} layout is applied.`)
   }
 
-  const { tradeStats: ts, log, goals, habits } = data
-  const goalsShown = featuredGoals(goals).slice(0, MAX_GOALS)
+  // Escape leaves edit mode, whichever control has focus.
+  useEffect(() => {
+    if (!editing) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditing(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editing])
 
-  // A clickable stat tile: the whole tile opens the module it summarises.
-  const stat = (label: string, value: string, sub: string, to: string, color = '') => (
-    <button className="stat card card-pad-sm card-interactive" onClick={() => onNavigate(to)} aria-label={`${label}: ${value}. ${sub}. Open ${to}`}>
-      <div className="stat-label">{label}</div>
-      <div className={`stat-value ${color}`}>{value}</div>
-      <div className="stat-sub">{sub}</div>
-    </button>
-  )
-
-  // The daily briefing card: shown only when the feature is on in Intelligence settings.
-  const briefingOn = getCurrentSettings().intelligence?.features.dailyBriefing
-    ?? DEFAULT_INTELLIGENCE.features.dailyBriefing
-  const insightsOn = getCurrentSettings().intelligence?.features.insights
-    ?? DEFAULT_INTELLIGENCE.features.insights
-
-  // A clickable stat tile: the whole tile opens the module it summarises.
+  const slots = placeWidgets(layout, columns)
+  const toAdd = WIDGETS.filter((w) => widgetAllowed(w, disabled) && !layout.some((p) => p.id === w.id))
+  const widgetProps: WidgetProps = { editMode: editing, onNavigate, onOpen }
 
   return (
     <div className="page page-lg">
-      {header}
+      <PageHeader title={greeting()} subtitle={`${formatDate(today())}. Your data stays on this computer.`}>
+        {!editing ? (
+          <button className="btn btn-sm" onClick={() => setEditing(true)}>
+            <Settings2 size={14} aria-hidden="true" /> Customize
+          </button>
+        ) : (
+          <button className="btn-primary btn-sm" onClick={() => setEditing(false)}>
+            <Check size={14} aria-hidden="true" /> Done
+          </button>
+        )}
+      </PageHeader>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {stat('Total saved', fmtAmount(data.totalSaved), goals.length === 0 ? 'No goals yet' : `across ${goals.length} ${goals.length === 1 ? 'goal' : 'goals'}`, 'savings')}
-        {stat('Trading P&L', ts.closed === 0 ? '-' : fmtPnl(ts.totalPnl),
-          ts.winRate === null ? 'No closed trades yet' : `${ts.winRate.toFixed(0)}% win rate`, 'trades', ts.closed === 0 ? '' : pnlColor(ts.totalPnl))}
-        {stat('Trades logged', String(ts.total), `${ts.closed} closed, ${ts.open} open`, 'trades')}
-        {stat('Logbook streak', `${log.streak} ${log.streak === 1 ? 'day' : 'days'}`,
-          log.total === 0 ? 'Write your first entry'
-            : log.streak === 0 ? 'Write today to start one'
-            : `${log.thisMonth} ${log.thisMonth === 1 ? 'entry' : 'entries'} this month`, 'logbook')}
-      </div>
-
-      {/* Cross-module insights: a light door when the feature is on */}
-      {insightsOn && (
-        <button className="card card-pad-sm card-interactive mt-4 flex w-full items-center justify-between gap-3 text-left" onClick={() => onNavigate('insights')}
-          aria-label="Open insights: patterns across your tools">
-          <span className="flex min-w-0 items-center gap-3">
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent-fg"><Lightbulb size={16} /></span>
-            <span className="min-w-0">
-              <span className="block text-sm font-medium">See patterns</span>
-              <span className="block truncate text-xs text-muted">Habit days vs savings and trades, mood vs tasks, weekday breakdowns.</span>
-            </span>
-          </span>
-          <ChevronRight size={14} className="shrink-0 text-muted" />
-        </button>
-      )}
-
-      {/* One door to the daily briefing that gathers everything in one quiet summary */}
-      {briefingOn && (
-        <button className="card card-pad-sm card-interactive mt-4 flex w-full items-center justify-between gap-3 text-left" onClick={() => onNavigate('briefing')}
-          aria-label="Open the daily briefing: today's tasks, habits, savings, trades and journal">
-          <span className="flex min-w-0 items-center gap-3">
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent-fg"><ClipboardCheck size={16} /></span>
-            <span className="min-w-0">
-              <span className="block text-sm font-medium">Your daily briefing</span>
-              <span className="block truncate text-xs text-muted">Tasks due, habits left, savings, trades and your journal, for today.</span>
-            </span>
-          </span>
-          <ChevronRight size={14} className="shrink-0 text-muted" />
-        </button>
-      )}
-
-      {/* One door to the weekly / monthly summary that ties the tools together */}
-      <button className="card card-pad-sm card-interactive mt-4 flex w-full items-center justify-between gap-3 text-left" onClick={() => onNavigate('review')}>
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent-fg"><ClipboardCheck size={16} /></span>
-          <span className="min-w-0">
-            <span className="block text-sm font-medium">Review your week</span>
-            <span className="block truncate text-xs text-muted">Trades, savings, habits and mood in one summary, with a prompt to write it down.</span>
-          </span>
-        </span>
-        <ChevronRight size={14} className="shrink-0 text-muted" />
-      </button>
-
-      <button className="card card-pad-sm card-interactive mt-4 flex w-full items-center justify-between gap-4 text-left" onClick={() => onNavigate('tasks')}
-        aria-label={`Tasks: ${data.tasks.dueToday} due today, ${data.tasks.overdue} overdue, ${data.tasks.completedThisWeek} completed this week`}>
-        <span className="flex items-center gap-3"><CheckSquare size={18} className="text-muted" /><span><span className="block text-sm font-medium">Tasks</span>
-          <span className="meta">{data.tasks.dueToday} due today · {data.tasks.overdue} overdue · {data.tasks.completedThisWeek} completed this week</span></span></span>
-        <ChevronRight size={14} className="text-muted" />
-      </button>
-
-      {/* Today + the P&L curve */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-2"><HabitsTile habits={habits} onOpenHabits={() => onNavigate('habits')} /></div>
-        <div className="lg:col-span-3">
-          <Panel title="P&L over time" icon={<TrendingUp size={15} />} onViewAll={() => onNavigate('trades')} showViewAll={data.pnlSeries.length > 0}>
-            {data.pnlSeries.length === 0 ? (
-              <EmptyState compact title="No closed trades yet" text="Close a trade (add its exit price) and your running P&L shows up here."
-                action={<button className="btn-primary" onClick={() => onNavigate('trades')}>Open trades</button>} />
-            ) : <PnlChart points={data.pnlSeries} />}
-          </Panel>
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel title="Recent log entries" icon={<BookOpen size={15} />} onViewAll={() => onNavigate('logbook')} showViewAll={data.recentEntries.length > 0}>
-          {data.recentEntries.length === 0 ? (
-            <EmptyState compact title="Nothing written yet" text="One line about today is a good start."
-              action={<button className="btn-primary" onClick={() => onNavigate('logbook')}>Write an entry</button>} />
-          ) : data.recentEntries.map((e) => (
-            <Row key={e.id} onClick={() => onOpen({ module: 'logbook', entry: e })}>
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{e.title}</div>
-                <div className="meta mt-0.5 flex items-center gap-2">
-                  {e.mood && <span title={moodStyle(e.mood).label} className={`h-2 w-2 rounded-full ${moodStyle(e.mood).dot}`} />}
-                  {formatDate(e.date)}
-                  {e.mood && <span>{moodStyle(e.mood).label}</span>}
-                </div>
+      {editing && (
+        <section className="card card-pad-sm mb-4 border border-line shadow-sm" aria-label="Dashboard layout options">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted">Layout</span>
+              <div className="seg" role="group" aria-label="Dashboard presets">
+                {DASHBOARD_PRESETS.map((p) => (
+                  <button key={p.id} onClick={() => applyPreset(p.id)} title={p.hint}>
+                    {p.id === 'default' ? <span className="flex items-center gap-1"><RotateCcw size={12} aria-hidden="true" />{p.name}</span> : p.name}
+                  </button>
+                ))}
               </div>
-            </Row>
-          ))}
-        </Panel>
-
-        <Panel title="Recent trades" icon={<CandlestickChart size={15} />} onViewAll={() => onNavigate('trades')} showViewAll={data.recentTrades.length > 0}>
-          {data.recentTrades.length === 0 ? (
-            <EmptyState compact title="No trades yet" text="Your first entry starts the track record."
-              action={<button className="btn-primary" onClick={() => onNavigate('trades')}>Log a trade</button>} />
-          ) : data.recentTrades.map((t) => (
-            <Row key={t.id} onClick={() => onOpen({ module: 'trades', trade: t })}>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium">{t.asset}</span>
-                  <span className={`badge capitalize ${t.direction === 'long' ? 'badge-pos' : 'badge-neg'}`}>{t.direction}</span>
-                </div>
-                <div className="meta mt-0.5">{formatDate(t.date)}</div>
-              </div>
-              <span className="shrink-0 text-sm font-medium">
-                {t.pnl === null ? <span className="badge badge-open">Open</span> : <Pnl value={t.pnl} />}
-              </span>
-            </Row>
-          ))}
-        </Panel>
-      </div>
-
-      <div className="mt-4">
-        <Panel title="Savings progress" icon={<PiggyBank size={15} />} onViewAll={() => onNavigate('savings')} showViewAll={goals.length > 0}>
-          {goals.length === 0 ? (
-            <EmptyState compact title="No savings goals yet" text="Every big balance starts with one goal."
-              action={<button className="btn-primary" onClick={() => onNavigate('savings')}>Create a goal</button>} />
-          ) : (
-            <>
-              <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
-                {goalsShown.map((g) => {
-                  const pct = progressPercent(g.balance, g.target)
-                  return (
-                    <Row key={g.id} onClick={() => onOpen({ module: 'savings', goalId: g.id })}>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline justify-between gap-3">
-                          <span className="truncate text-sm font-medium">{g.name}</span>
-                          <span className="num shrink-0 text-sm">{fmtAmount(g.balance)}</span>
-                        </div>
-                        {g.target !== null && pct !== null ? (
-                          <>
-                            <div className="mt-2"><ProgressBar percent={pct} /></div>
-                            <div className="meta mt-1 flex justify-between">
-                              <span>{pct >= 100 ? 'Goal reached' : `${Math.floor(pct)}%`}</span>
-                              <span>Target {fmtAmount(g.target)}</span>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="meta mt-1">No target set</div>
-                        )}
-                      </div>
-                    </Row>
-                  )
-                })}
-              </div>
-              {goals.length > goalsShown.length && (
-                <button className="section-link mt-2" onClick={() => onNavigate('savings')}>
-                  + {goals.length - goalsShown.length} more {goals.length - goalsShown.length === 1 ? 'goal' : 'goals'}
-                </button>
-              )}
-            </>
-          )}
-        </Panel>
-      </div>
-    </div>
-  )
-}
-
-// "Habits today": done / due, the longest running streak, and today's list. The tile and each line open the Habits page.
-function HabitsTile({ habits, onOpenHabits }: { habits: DashboardData['habits']; onOpenHabits: () => void }) {
-  const shown = habits.items.slice(0, MAX_HABITS)
-  const more = habits.items.length - shown.length
-  const allDone = habits.due > 0 && habits.done === habits.due
-  const head = (
-    <div className="flex items-center justify-between">
-      <h2 className="section-title"><CalendarCheck size={15} /> Habits today</h2>
-      {habits.total > 0 && <span className="section-link">Open <ChevronRight size={12} /></span>}
-    </div>
-  )
-
-  if (habits.total === 0) {
-    return (
-      <section className="card card-pad h-full">
-        {head}
-        <div className="mt-3">
-          <EmptyState compact title="No habits yet" text="Add one you can do even on a bad day."
-            action={<button className="btn-primary" onClick={onOpenHabits}>Add a habit</button>} />
-        </div>
-      </section>
-    )
-  }
-
-  return (
-    <section className="card card-pad card-interactive h-full" onClick={onOpenHabits}>
-      {head}
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          {/* The progress ring: "X of Y due", the same numbers the Habits
-              page's header shows, worked out by the same helpers. */}
-          <ProgressRing percent={habits.due === 0 ? 0 : Math.round((habits.done / habits.due) * 100)} label={`${habits.done} of ${habits.due} habits done today`} />
-          <div>
-            <div className="stat-value mt-0">{habits.done}<span className="text-muted"> / {habits.due}</span></div>
-            <div className="stat-sub">{habits.due === 0 ? 'Nothing scheduled today' : allDone ? 'All done. Nicely done.' : 'due today'}</div>
-          </div>
-        </div>
-        <div className="meta flex items-center gap-1" title="Longest current streak among your habits">
-          <Flame size={14} className={habits.longestStreak > 0 ? 'warn' : ''} />
-          <span className="num font-medium text-fg">{habits.longestStreak}-day</span> best streak
-        </div>
-      </div>
-      {habits.due > 0 && <div className="mt-3"><ProgressBar percent={(habits.done / habits.due) * 100} /></div>}
-      {shown.length > 0 && (
-        <ul className="mt-3 flex flex-col gap-0.5">
-          {shown.map((h) => (
-            <li key={h.id}>
-              <button className="row-link" onClick={(e) => { e.stopPropagation(); onOpenHabits() }}
-                aria-label={`${h.name}: ${h.done ? 'done' : 'not done yet'}`}>
-                <span className="flex min-w-0 items-center gap-2.5">
-                  {h.done
-                    ? <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-accent text-on-accent"><Check size={11} strokeWidth={3} /></span>
-                    : <Circle size={16} className="shrink-0 text-muted" />}
-                  <span className={`truncate text-sm ${h.done ? 'text-muted line-through decoration-muted/50' : ''}`}>{h.name}</span>
-                </span>
-                {h.streak > 0 && <span className="meta num flex shrink-0 items-center gap-0.5"><Flame size={12} className="warn" />{h.streak}</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="widget-to-add" className="text-xs font-semibold uppercase tracking-wider text-muted">Add widget</label>
+              <select id="widget-to-add" data-add-widget className="field w-48 py-1 text-xs" value=""
+                onChange={(e) => { if (e.target.value) add(e.target.value); e.target.value = '' }}>
+                <option value="" disabled>{toAdd.length === 0 ? 'All widgets added' : 'Choose a widget…'}</option>
+                {toAdd.map((w) => <option key={w.id} value={w.id}>{w.title}</option>)}
+              </select>
+              <button className="btn btn-sm" disabled={toAdd.length === 0} onClick={() => toAdd[0] && add(toAdd[0].id)} aria-label="Add a widget">
+                <Plus size={14} aria-hidden="true" />
               </button>
-            </li>
-          ))}
-        </ul>
+            </div>
+          </div>
+          <p className="meta mt-2 text-xs">
+            Drag a card by its handle to move it, or use the arrow buttons. Alt+Up and Alt+Down also move the focused card.
+            Each card can be small, medium or large. Changes save as you go.
+          </p>
+        </section>
       )}
-      {more > 0 && <div className="meta mt-1">+ {more} more</div>}
-      {/* Top 3 current streaks (biggest first), from the same stats the
-          Habits page shows on each row. */}
-      {habits.topStreaks.length > 0 && (
-        <div className="meta mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line pt-2" aria-label={`Top streaks: ${habits.topStreaks.map((s) => `${s.name}, ${s.current} days`).join('; ')}`}>
-          <span className="flex shrink-0 items-center gap-1"><Flame size={12} className="warn" /> Top streaks</span>
-          {habits.topStreaks.map((s) => (
-            <span key={s.id} className="num">
-              {s.name} <span className="font-medium text-fg">{s.current}</span>
-            </span>
-          ))}
+
+      {/* Screen-reader feedback for every move and change */}
+      <p role="status" aria-live="polite" className="sr-only">{announce}</p>
+      <p role="status" aria-live="polite" className={`${announce ? '' : 'hidden'} mb-3 text-sm text-muted`}>{announce}</p>
+
+      {layout.length === 0 ? (
+        <div className="card card-pad">
+          <EmptyState title="An empty dashboard" text="Add the widgets you want to see each morning: savings, habits, tasks, spending."
+            action={<button className="btn-primary" onClick={() => setEditing(true)}><Plus size={14} aria-hidden="true" /> Add widgets</button>} />
+        </div>
+      ) : (
+        <div ref={gridRef} className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: `repeat(${Math.max(1, Math.min(12, columns))}, minmax(0, 1fr))` }}>
+          {slots.map((slot, i) => {
+            const def = findWidget(slot.id)
+            if (!def) return null
+            const size = normaliseSize(slot.size, def.sizes)
+            return (
+              <div
+                key={`${slot.id}-${reloadKey}`}
+                style={{ gridColumn: `${slot.offset + 1} / span ${slot.columns}` }}
+                className={overId === slot.id && dragging !== slot.id ? 'rounded-[inherit] outline outline-2 -outline-offset-2 outline-accent' : ''}
+                onDragOver={editing ? (e) => { if (dragging) { e.preventDefault(); setOverId(slot.id) } } : undefined}
+                onDragLeave={editing ? () => setOverId((o) => (o === slot.id ? null : o)) : undefined}
+                onDrop={editing ? (e) => { e.preventDefault(); drop(slot.id) } : undefined}
+              >
+                <div className={`dash-widget-box ${editing ? 'dash-editing' : ''}`}>
+                  {editing && (
+                    <div className="dash-widget-bar">
+                      {/* Left: Reorder controls */}
+                      <div className="flex items-center gap-1">
+                        <div
+                          data-widget-handle={slot.id}
+                          role="button"
+                          tabIndex={0}
+                          draggable
+                          aria-label={`Drag to move ${def.title}. Position ${i + 1} of ${layout.length}. Alt+Up and Alt+Down move it.`}
+                          onDragStart={(e) => { setDragging(slot.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', slot.id) }}
+                          onDragEnd={() => { setDragging(null); setOverId(null) }}
+                          onKeyDown={(e) => {
+                            if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); move(slot.id, -1) }
+                            if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); move(slot.id, 1) }
+                          }}
+                          className="flex cursor-grab items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold text-fg hover:bg-fg/10 active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                        >
+                          <GripVertical size={13} className="shrink-0 text-muted" aria-hidden="true" />
+                          <span>Move</span>
+                        </div>
+                        <button
+                          className="dash-ctrl-btn"
+                          aria-label={`Move ${def.title} up`}
+                          title={`Move ${def.title} up (Alt+Up)`}
+                          disabled={i === 0}
+                          onClick={() => move(slot.id, -1)}
+                        >
+                          <ArrowUp size={12} aria-hidden="true" />
+                        </button>
+                        <button
+                          className="dash-ctrl-btn"
+                          aria-label={`Move ${def.title} down`}
+                          title={`Move ${def.title} down (Alt+Down)`}
+                          disabled={i === layout.length - 1}
+                          onClick={() => move(slot.id, 1)}
+                        >
+                          <ArrowDown size={12} aria-hidden="true" />
+                        </button>
+                      </div>
+
+                      {/* Right: Size selector and Remove */}
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {def.sizes.length > 1 && (
+                          <div className="dash-size-seg" role="group" aria-label={`Size of ${def.title}`}>
+                            {WIDGET_SIZES.filter((s) => def.sizes.includes(s)).map((s) => (
+                              <button
+                                key={s}
+                                aria-pressed={size === s}
+                                onClick={() => resize(slot.id, s)}
+                                title={`${WIDGET_SIZE_LABELS[s]} (${s.toUpperCase()})`}
+                                className="dash-size-btn"
+                              >
+                                {s.toUpperCase()}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          className="dash-ctrl-btn hover:text-neg hover:bg-neg/10"
+                          aria-label={`Remove ${def.title} from the dashboard`}
+                          title={`Remove ${def.title}`}
+                          onClick={() => remove(slot.id)}
+                        >
+                          <Trash2 size={13} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="dash-widget-content">
+                    <Suspense fallback={<WidgetLoading title={def.title} />}>
+                      <def.component {...widgetProps} />
+                    </Suspense>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
-    </section>
+
+      {editing && toAdd.length > 0 && (
+        <section className="mt-4" aria-label="Widgets you can add">
+          <h2 className="section-title"><Plus size={15} /> Available widgets</h2>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {toAdd.map((w) => <button key={w.id} className="btn btn-sm" onClick={() => add(w.id)}><Plus size={12} aria-hidden="true" /> {w.title}</button>)}
+          </div>
+        </section>
+      )}
+    </div>
   )
 }
 
-// The small circular progress ring for "X of Y due today".
-// Drawn with theme tokens (currentColor), so light and dark mode both work.
-function ProgressRing({ percent, label }: { percent: number; label: string }) {
-  const radius = 9
-  const circumference = 2 * Math.PI * radius
-  const filled = (Math.max(0, Math.min(100, percent)) / 100) * circumference
+// The card shape shown while a widget's code is still arriving.
+function WidgetLoading({ title }: { title: string }) {
   return (
-    <svg width={26} height={26} viewBox="0 0 26 26" role="img" aria-label={`${label} (${percent}%)`} className="shrink-0">
-      {/* The empty ring, in the theme's line colour. */}
-      <circle cx={13} cy={13} r={radius} fill="none" strokeWidth={3} className="text-line" stroke="currentColor" />
-      {/* The filled arc, starting at 12 o'clock. An empty arc is simply zero long. */}
-      <circle cx={13} cy={13} r={radius} fill="none" strokeWidth={3} strokeLinecap="round"
-        strokeDasharray={`${filled} ${circumference}`} transform="rotate(-90 13 13)"
-        className="text-accent" stroke="currentColor" />
-    </svg>
-  )
-}
-
-function Panel({ title, icon, onViewAll, showViewAll, children }: {
-  title: string; icon: ReactNode; onViewAll: () => void; showViewAll: boolean; children: ReactNode
-}) {
-  return (
-    <section className="card card-pad h-full">
-      <div className="flex items-center justify-between">
-        <h2 className="section-title">{icon} {title}</h2>
-        {showViewAll && <button className="section-link" onClick={onViewAll}>View all <ChevronRight size={12} /></button>}
+    <div className="card card-pad-sm">
+      <div className="section-title flex items-center gap-2 text-sm">{title}</div>
+      <div className="mt-3 flex flex-col gap-2" aria-hidden="true">
+        <div className="h-6 w-1/3 rounded bg-fg/10" />
+        <div className="h-2 w-full rounded bg-fg/10" />
       </div>
-      <div className="mt-3 flex flex-col gap-0.5">{children}</div>
-    </section>
+    </div>
   )
 }
 
-// A clickable line inside a panel.
-function Row({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return <button onClick={onClick} className="row-link">{children}</button>
-}
+// Exported for the widget registry's own sanity check and for tests: every id a
+// preset or the default layout names must be a widget that exists.
+export const KNOWN_WIDGET_IDS = (): string[] => WIDGETS.map((w) => w.id)
+export const hasWidgetId = hasWidget

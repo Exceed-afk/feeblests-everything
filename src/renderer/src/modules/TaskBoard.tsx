@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { CalendarDays, ListChecks, SkipForward } from 'lucide-react'
 import type { Task, TaskFilter, TaskPriority, TaskSort, TaskStatus } from '../../../shared/types'
 import type { TaskInlinePatch } from '../../../shared/tasks'
-import { applyColumnOrder, groupTasksForBoard, sortTasks } from '../../../shared/tasks'
+import { applyColumnOrder, groupTasksForBoard, sortTasks, taskIsOverdue } from '../../../shared/tasks'
 import { formatDate } from '../lib/dates'
 import { errMsg } from '../lib/errors'
 import { EmptyState } from '../components/EmptyState'
@@ -115,7 +115,7 @@ export function TaskBoard({ tasks, filter, today, nowTime, sort, loaded, refresh
             {list.length === 0 && <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-xs text-muted">Nothing here</p>}
             {list.map((task) => {
               const due = task.recurrenceNext ?? task.dueDate
-              const overdue = due !== null && (due < today || (due === today && task.dueTime !== null && task.dueTime < nowTime)) && task.status !== 'done'
+              const overdue = taskIsOverdue(task, today, nowTime)
               const doneSubtasks = task.subtasks.filter((s) => s.done).length
               return (
                 <article key={task.id} draggable={!busy}

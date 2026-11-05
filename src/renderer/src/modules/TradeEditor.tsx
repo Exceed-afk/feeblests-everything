@@ -5,6 +5,8 @@ import { calcPnl } from '../../../shared/trades'
 import { today } from '../lib/dates'
 import { fmtPnl, pnlColor } from '../lib/format'
 import { TagInput, addTag } from '../components/TagInput'
+import { LinkedItems } from '../components/LinkedItems'
+import { noteUndoableDelete } from '../lib/undo'
 
 interface Props {
   trade: Trade | null // null = logging a new trade
@@ -59,9 +61,11 @@ export function TradeEditor({ trade, assets, knownTags, onSaved, onClose }: Prop
     }
   }
 
+  // Deleting is soft (Trash) and undoable: the delete returns the batch id.
   const remove = async () => {
     if (!trade) return
-    await window.api.trades.remove(trade.id)
+    const batchId = await window.api.trades.remove(trade.id)
+    if (batchId) noteUndoableDelete({ label: `trade ${trade.asset} on ${trade.date}`, batchId })
     onSaved()
   }
 
@@ -132,6 +136,8 @@ export function TradeEditor({ trade, assets, knownTags, onSaved, onClose }: Prop
         </div>
 
         <TagInput tags={tags} onTagsChange={setTags} input={tagInput} onInputChange={setTagInput} suggestions={knownTags} />
+
+        {trade && <LinkedItems type="trade" id={trade.id} />}
 
         <label className="flex min-h-[6rem] flex-1 flex-col text-xs text-muted">Notes
           <textarea className="field mt-1 flex-1 resize-none leading-relaxed" value={notes}

@@ -31,7 +31,14 @@ export interface Settings {
   taskLayout: TaskLayout // Tasks: the list or the board, remembered between sessions
   taskSort: TaskSort
   taskSavedViews: TaskSavedView[]
+  disabledModules: string[] // tool ids turned off in Settings > Modules (Phase 0)
+  trash: TrashSettings // how long the Trash keeps things before purging (Phase 0)
+  focus: FocusSettings // Pomodoro focus settings (Phase 4)
+  dashboardLayout: string // Phase 6: the Dashboard's widget order and sizes, as JSON (see shared/dashboardLayout.ts)
 }
+
+// Phase 0: the Trash (auto-purge window; 30 days unless changed).
+export interface TrashSettings { purgeDays: number }
 
 // Default intelligence feature toggles. Daily briefing is on; everything else is off.
 export const DEFAULT_INTELLIGENCE: IntelligenceSettings = {
@@ -43,7 +50,10 @@ export const DEFAULT_SETTINGS: Settings = {
   intelligence: DEFAULT_INTELLIGENCE,
   theme: 'dark', accent: '#8b5cf6', tagColors: {},
   palette: 'default', uiStyle: 'modern', radius: 'soft', density: 'comfortable', textSize: 'default', font: 'system',
-  colors: { light: {}, dark: {} }, sidebarCollapsed: false, pinnedTools: [], sidebarClosedGroups: [],   recentTools: [], taskLayout: 'list', taskSort: 'manual', taskSavedViews: []
+  colors: { light: {}, dark: {} }, sidebarCollapsed: false, pinnedTools: [], sidebarClosedGroups: [],   recentTools: [], taskLayout: 'list', taskSort: 'manual', taskSavedViews: [],
+  disabledModules: [], trash: { purgeDays: 30 },
+  focus: DEFAULT_FOCUS_SETTINGS,
+  dashboardLayout: '' // empty text = the shipped arrangement (LAYOUT_PRESETS.default)
 }
 
 // The API the renderer can call. The preload script implements it and
@@ -84,32 +94,171 @@ export interface EverythingApi {
     tags(): Promise<TagCount[]>
     create(input: LogEntryInput): Promise<LogEntry>
     update(id: number, input: LogEntryInput): Promise<LogEntry>
-    remove(id: number): Promise<void>
+    remove(id: number): Promise<DeleteBatch> // trashes the entry; returns the batch id for Undo
   }
   trades: {
     list(filter?: TradeFilter): Promise<Trade[]>
     meta(): Promise<TradeMeta>
     create(input: TradeInput): Promise<Trade>
     update(id: number, input: TradeInput): Promise<Trade>
-    remove(id: number): Promise<void>
+    remove(id: number): Promise<DeleteBatch> // trashes the trade; returns the batch id for Undo
   }
   savings: {
     listGoals(): Promise<SavingsGoal[]>
     createGoal(input: SavingsGoalInput): Promise<SavingsGoal>
     updateGoal(id: number, input: SavingsGoalInput): Promise<SavingsGoal>
-    removeGoal(id: number): Promise<void>
+    removeGoal(id: number): Promise<DeleteBatch> // trashes the goal AND its transactions under one batch id
     listTransactions(goalId: number): Promise<SavingsTx[]>
     addTransaction(input: SavingsTxInput): Promise<SavingsTx>
     updateTransaction(id: number, input: SavingsTxInput): Promise<SavingsTx>
-    removeTransaction(id: number): Promise<void>
+    removeTransaction(id: number): Promise<DeleteBatch> // trashes the transaction; returns the batch id for Undo
   }
   dashboard: {
     // `today` is the user's local date ("YYYY-MM-DD"), so the streak follows their clock
     summary(today: string): Promise<DashboardData>
   }
+  // Phase 5: Tools hub (snippets and scratchpads).
+  snippets: {
+    list(): Promise<import('./toolsData').SnippetDTO[]>
+    create(input: import('./toolsData').SnippetInputDTO): Promise<import('./toolsData').SnippetDTO>
+    update(id: number, input: import('./toolsData').SnippetInputDTO): Promise<import('./toolsData').SnippetDTO>
+    remove(id: number): Promise<string>
+  }
+  // Copy text to the OS clipboard inside the app (no network).
+  tools: {
+    copyText(text: string): Promise<void>
+  }
+  scratchpads: {
+    list(): Promise<import('./toolsData').ScratchpadDTO[]>
+    ensure(): Promise<import('./toolsData').ScratchpadDTO>
+    create(input: { name?: string; content?: string }): Promise<import('./toolsData').ScratchpadDTO>
+    update(id: number, patch: { name?: string; content?: string }): Promise<import('./toolsData').ScratchpadDTO>
+    remove(id: number): Promise<string>
+    saveAsNote(id: number): Promise<{ id: number; title: string }>
+  }
   search: {
     // limit = most results per group (default 8)
     run(query: string, limit?: number): Promise<SearchResults>
+  }
+  trash: {
+    // The Trash page list: one undoable group per delete batch. Restoring a
+    // batch restores EVERY row of it; the same for delete-forever.
+    list(): Promise<TrashBatch[]>
+    restore(batchId: string): Promise<number>
+    deleteForever(batchId: string): Promise<number>
+  }
+  links: {
+    add(a: LinkEndpoint, b: LinkEndpoint, relation?: string): Promise<number>
+    // Every link one item takes part in, from both sides; links to trashed or
+    // missing items are hidden (they reappear when the item is restored).
+    list(type: LinkType, id: number): Promise<LinkedItemRef[]>
+    remove(linkId: number): Promise<void>
+  }
+  tags: {
+    list(): Promise<TagRow[]>
+    counts(): Promise<TagCountEntry[]>
+    setEntityTags(type: TagEntityType, entityId: number, names: string[]): Promise<void>
+    tagsOf(type: TagEntityType, entityId: number): Promise<TagRow[]>
+    setColour(name: string, colour: string | null): Promise<void>
+    // Phase 2: the Tags page. Rename applies everywhere (and merges if taken);
+    // merge folds `from` into `into`; delete removes the taggings only.
+    rename(from: string, to: string): Promise<TagRow>
+    merge(from: string, into: string): Promise<TagRow>
+    delete(name: string): Promise<number>
+    // Live items carrying the tag, of every kind (untyped by tool for now).
+    items(name: string): Promise<{ type: TagEntityType; id: number; label: string; sublabel?: string }[]>
+  }
+  templates: {
+    list(kind?: TemplateKind): Promise<Template[]>
+    save(kind: TemplateKind, name: string, payload: unknown): Promise<Template>
+    remove(id: number): Promise<void>
+    // Phase 6: Settings > Templates. Puts the built-in starters back and
+    // returns the fresh list (user templates are never touched).
+    restoreBuiltins(): Promise<Template[]>
+  }
+  notes: {
+    list(filter?: NoteFilterDTO): Promise<NoteDTO[]>
+    get(id: number): Promise<NoteDTO>
+    create(input: NoteInputDTO): Promise<NoteDTO>
+    update(id: number, input: NoteInputDTO): Promise<NoteDTO>
+    remove(id: number): Promise<string>
+    setPinned(id: number, pinned: boolean): Promise<NoteDTO>
+    setArchived(id: number, archived: boolean): Promise<NoteDTO>
+    backlinks(id: number): Promise<NoteDTO[]>
+    findByTitle(title: string): Promise<NoteDTO | null>
+    // Turns a journal entry into a note (the entry stays put).
+    promoteEntry(entryId: number): Promise<NoteDTO>
+  }
+  content: {
+    list(): Promise<ContentItemDTO[]>
+    get(id: number): Promise<ContentItemDTO>
+    create(input: ContentInputDTO): Promise<ContentItemDTO>
+    update(id: number, input: ContentInputDTO): Promise<ContentItemDTO>
+    move(id: number, stage: ContentStage): Promise<ContentItemDTO>
+    reorder(stage: ContentStage, ids: number[]): Promise<void>
+    setChecklistDone(id: number, lineId: string, done: boolean): Promise<ContentItemDTO>
+    addChecklistLine(id: number, stage: ContentStage, text: string): Promise<ContentItemDTO>
+    removeChecklistLine(id: number, lineId: string): Promise<ContentItemDTO>
+    setScript(id: number, noteId: number | null): Promise<ContentItemDTO>
+    // Creates the script note AND links it in one go (one click from a card).
+    createScript(id: number, title: string): Promise<ContentItemDTO>
+    addAsset(id: number, asset: ContentAsset): Promise<ContentItemDTO>
+    removeAsset(id: number, path: string): Promise<ContentItemDTO>
+    remove(id: number): Promise<string>
+    // Local files that are referenced but missing (paths only, never read).
+    missingAssets(paths: string[]): Promise<string[]>
+  }
+  // Phase 1: the Expenses logic layer (src/modules/expenses/service, contract in its API.md).
+  // Every money value here is an integer number of cents.
+  expenses: {
+    overview(month: string, today: string, currency?: string): Promise<ExpenseSummary>
+    dueBills(month: string, asOfDate: string): Promise<DueBill[]>
+    listCategories(includeArchived?: boolean): Promise<ExpenseCategoryDTO[]>
+    listTransactions(filter?: ExpenseTxFilter): Promise<ExpenseTransactionDTO[]>
+    createTransaction(input: ExpenseTransactionInputDTO): Promise<ExpenseTransactionDTO>
+    updateTransaction(id: number, input: ExpenseTransactionInputDTO): Promise<ExpenseTransactionDTO>
+    deleteTransaction(id: number): Promise<string>
+    listBudgets(month: string): Promise<ExpenseBudgetDTO[]>
+    setBudget(input: { categoryId: number; month: string; amount: number; currency?: string }): Promise<ExpenseBudgetDTO>
+    deleteBudget(id: number): Promise<string>
+    copyBudgets(targetMonth: string): Promise<ExpenseBudgetDTO[]>
+    listRecurringBills(includeArchived?: boolean): Promise<RecurringBillDTO[]>
+    createRecurringBill(input: RecurringBillInputDTO): Promise<RecurringBillDTO>
+    updateRecurringBill(id: number, input: RecurringBillInputDTO): Promise<RecurringBillDTO>
+    deleteRecurringBill(id: number): Promise<string>
+    markBillPaid(options: { recurringId: number; dueDate: string; paidDate?: string; amount?: number; currency?: string }): Promise<{ occurrence: RecurringOccurrenceDTO; transaction: ExpenseTransactionDTO }>
+    transferLeftover(input: { amountCents: number; currency?: string; goalId: number; date: string; note?: string }): Promise<SavingsTransferResultDTO>
+  }
+  // Phase 4: Focus timer and time tracking (src/main/focus.ts, src/shared/focus.ts).
+  focus: {
+    active(): Promise<import('./focus').ActiveFocusSession | null>
+    start(params: {
+      type: import('./focus').FocusType
+      mode: import('./focus').FocusTimerMode
+      targetSeconds: number
+      taskId?: number | null
+      projectId?: number | null
+      projectName?: string
+      round?: number
+      note?: string
+    }): Promise<import('./focus').ActiveFocusSession>
+    pause(): Promise<import('./focus').ActiveFocusSession | null>
+    resume(): Promise<import('./focus').ActiveFocusSession | null>
+    stop(completed?: boolean, note?: string): Promise<import('./focus').TimeSession | null>
+    discard(): Promise<void>
+    summary(today: string): Promise<import('./focus').FocusDashboardSummary>
+    report(from: string, to: string): Promise<import('./focus').FocusReport>
+    listSessions(filter?: { from?: string; to?: string; projectId?: number; taskId?: number; type?: import('./focus').FocusType }): Promise<import('./focus').TimeSession[]>
+    logManual(input: import('./focus').ManualSessionInput): Promise<import('./focus').TimeSession>
+    updateSession(id: number, input: Partial<import('./focus').ManualSessionInput>): Promise<import('./focus').TimeSession>
+    deleteSession(id: number): Promise<string>
+    taskSeconds(taskId: number): Promise<number>
+  }
+  projects: {
+    list(includeArchived?: boolean): Promise<import('./focus').Project[]>
+    create(input: import('./focus').ProjectInput): Promise<import('./focus').Project>
+    update(id: number, input: Partial<import('./focus').ProjectInput>): Promise<import('./focus').Project>
+    delete(id: number): Promise<string>
   }
   app: {
     dataPath(): Promise<string>
@@ -119,7 +268,7 @@ export interface EverythingApi {
     list(): Promise<HabitsOverview>
     create(input: HabitInput): Promise<Habit>
     update(id: number, input: HabitInput): Promise<Habit>
-    remove(id: number): Promise<void>
+    remove(id: number): Promise<DeleteBatch> // trashes the habit; history comes back with it
     // Idempotent: checking an already-checked day (or unchecking an unchecked one) changes nothing.
     setCheckin(habitId: number, date: string, done: boolean): Promise<void>
     // Set what a day says: 'done', 'skipped', or null to clear it (the day
@@ -140,7 +289,7 @@ export interface EverythingApi {
     trash(): Promise<Task[]>
     create(input: TaskInput): Promise<Task>
     update(id: number, input: TaskInput): Promise<Task>
-    remove(id: number): Promise<void>
+    remove(id: number): Promise<DeleteBatch> // trashes the task (checklist rows come back with it)
     restore(id: number): Promise<void>
     deleteForever(id: number): Promise<void>
     clearTrash(): Promise<void>
@@ -149,7 +298,7 @@ export interface EverythingApi {
     undoStatus(id: number, status: TaskStatus, completedAt: string | null, recurrenceNext: string | null): Promise<void>
     // Bulk actions: every id is changed in one transaction, so a failure changes nothing.
     setStatusMany(ids: number[], status: TaskStatus): Promise<void>
-    removeMany(ids: number[]): Promise<void>
+    removeMany(ids: number[]): Promise<DeleteBatch> // ONE delete batch for the whole selection
     reorder(ids: number[]): Promise<void>
     setSubtaskDone(taskId: number, subtaskId: number, done: boolean): Promise<void>
     reorderSubtasks(taskId: number, ids: number[]): Promise<void>
@@ -193,6 +342,34 @@ export interface EverythingApi {
     applyImport(): Promise<ImportResult>
   }
   intelligence: IntelligenceApiInner
+  calculator: {
+    saveHistory(item: Omit<import('./calculator').CalcHistoryItem, 'id' | 'createdAt'>): Promise<import('./calculator').CalcHistoryItem>
+    listHistory(limit?: number): Promise<import('./calculator').CalcHistoryItem[]>
+    clearHistory(): Promise<void>
+    deleteHistoryItem(id: string): Promise<void>
+    togglePinHistory(id: string): Promise<void>
+    saveVariable(name: string, value: string): Promise<void>
+    listVariables(): Promise<Record<string, string>>
+    deleteVariable(name: string): Promise<void>
+    saveProgram(program: Omit<import('./calculator').CalcProgram, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<import('./calculator').CalcProgram>
+    listPrograms(): Promise<import('./calculator').CalcProgram[]>
+    deleteProgram(id: string): Promise<void>
+    saveRateSet(rateSet: Omit<import('./calculator').CalcRateSet, 'id' | 'updatedAt'> & { id?: string }): Promise<import('./calculator').CalcRateSet>
+    renameRateSet(id: string, newName: string): Promise<import('./calculator').CalcRateSet>
+    deleteRateSet(id: string): Promise<void>
+    selectRateSet(id: string): Promise<void>
+    listRateSets(): Promise<import('./calculator').CalcRateSet[]>
+    saveRate(rate: Omit<import('./calculator').CalcRate, 'id' | 'updatedAt'> & { id?: string }): Promise<import('./calculator').CalcRate>
+    updateRate(id: string, rateToBase: string, note?: string, name?: string): Promise<import('./calculator').CalcRate>
+    listRates(rateSetId: string): Promise<import('./calculator').CalcRate[]>
+    saveRateOverride(override: Omit<import('./calculator').CalcRateOverride, 'id' | 'updatedAt'> & { id?: string }): Promise<import('./calculator').CalcRateOverride>
+    listRateOverrides(rateSetId: string): Promise<import('./calculator').CalcRateOverride[]>
+    deleteRateOverride(id: string): Promise<void>
+    importRateSet(rateSetId: string, rows: import('./calculator').RateSetImportRow[], mode: 'merge' | 'replace'): Promise<{ count: number }>
+    getSetting<K extends keyof import('./calculator').CalcSettings>(key: K): Promise<import('./calculator').CalcSettings[K]>
+    setSetting<K extends keyof import('./calculator').CalcSettings>(key: K, value: import('./calculator').CalcSettings[K]): Promise<void>
+    getAllSettings(): Promise<import('./calculator').CalcSettings>
+  }
 }
 
 // ---------- Insights ----------
@@ -207,6 +384,25 @@ export interface InsightsPayload extends InsightsResult {
 export interface ExportResult { path: string; counts: BackupCounts }
 
 export interface BackupCounts { entries: number; trades: number; goals: number; transactions: number; habits: number; checkins: number; tasks: number; subtasks: number }
+
+// EverythingApi additions for Phase 0 (trash, links, tags, templates):
+import type {
+  ExpenseSummary, DueBill, ExpenseCategoryDTO, ExpenseTransactionDTO, ExpenseTransactionInputDTO,
+  ExpenseTxFilter, ExpenseBudgetDTO, RecurringBillDTO, RecurringBillInputDTO,
+  RecurringOccurrenceDTO, SavingsTransferResultDTO
+} from '../modules/expenses/service/bridge'
+import type { LinkEndpoint, LinkedItemRef, LinkType } from './links'
+import type {
+  NoteDTO, NoteFilterDTO, NoteInputDTO, ContentAsset, ContentInputDTO, ContentItemDTO, ContentStage
+} from './notesBridge'
+import type { TrashBatch } from './trash'
+import { DEFAULT_FOCUS_SETTINGS, type FocusSettings } from './focus'
+import type { TagEntityType, TagCountEntry, TagRow } from './tags'
+import type { Template, TemplateKind } from './templates'
+export type { TrashBatch, TrashType } from './trash'
+export type { LinkEndpoint, LinkedItemRef, LinkType } from './links'
+export type { TagEntityType, TagCountEntry, TagRow } from './tags'
+export type { Template, TemplateKind } from './templates'
 
 export interface ImportPreview {
   fileName: string
@@ -326,6 +522,68 @@ export interface SearchResults {
   goals: SearchGroup<SavingsGoal>
   transactions: SearchGroup<SavingsTxHit>
   tasks: SearchGroup<Task>
+  // Phase 2/3: notes and content items joined the shared index.
+  notes: SearchGroup<SearchNoteHit>
+  content: SearchGroup<SearchContentHit>
+  // Phase 5: saved snippets (a Tools hub contribution to the shared index).
+  snippets: SearchGroup<SearchSnippetHit>
+  // Phase 1 / 6: expense transactions.
+  expenses: SearchGroup<SearchExpenseHit>
+  // Phase 4 / 6: focus sessions.
+  focus: SearchGroup<SearchFocusHit>
+  // Phase 5 / 6: scratchpads.
+  scratchpads: SearchGroup<SearchScratchpadHit>
+}
+
+export interface SearchScratchpadHit {
+  id: number
+  name: string
+  content: string
+}
+
+export interface SearchFocusHit {
+  id: number
+  projectName: string
+  note: string
+  startedAt: string
+  actualSeconds: number
+  type: string
+}
+
+export interface SearchExpenseHit {
+  id: number
+  payee: string
+  amount: number
+  currency: string
+  date: string
+  type: string
+  note: string
+}
+
+// A note as a search result: the row plus a short plain-text preview.
+export interface SearchNoteHit {
+  id: number
+  title: string
+  updatedAt: string
+  tags: string[]
+  preview: string
+}
+
+// A content item as a search result.
+export interface SearchContentHit {
+  id: number
+  title: string
+  stage: string
+  platform: string
+  targetPublishDate: string | null
+}
+
+// A saved snippet as a search result.
+export interface SearchSnippetHit {
+  id: number
+  title: string
+  tags: string[]
+  preview: string
 }
 
 // ---------- Dashboard ----------
@@ -365,6 +623,7 @@ export interface DashboardData {
   log: LogSummary
   habits: HabitsToday
   tasks: TaskDashboard
+  focus?: import('./focus').FocusDashboardSummary
 }
 
 // ---------- Habits ----------
@@ -566,12 +825,29 @@ export interface ReviewData {
   tasks: TaskReview
   mood: ReviewMood
   journal: ReviewJournal
+  spending?: ReviewExpenses
+  notesCreated?: number
+  focusSeconds?: number
+  contentPublished?: number
   insights: { id: string; text: string }[] // links between tools, only when there is enough data to say something
   prompts: { id: string; text: string }[] // suggested questions for the reflection
 }
 
+export interface ReviewExpenses {
+  totalSpent: number // minor units (cents)
+  previousSpent: number
+  txCount: number
+  topCategories: { id: number; name: string; amount: number }[]
+}
+
 // ---------- Quick capture ----------
-export type CaptureKind = 'note' | 'trade' | 'deposit' | 'habit' | 'task'
+export type CaptureKind = 'note' | 'trade' | 'deposit' | 'habit' | 'task' | 'expense' | 'focus' | 'content' | 'scratchpad'
+
+// The delete batching (Phase 0): every delete IPC returns the batch id of the
+// rows it just trashed, so the UI can Undo it and the Trash page can restore
+// or delete-forever the WHOLE group in one call. Always a string; empty when
+// there is nothing to undo (the row was already in Trash).
+export type DeleteBatch = string
 
 // Stored as three separate settings rows (captureEnabled, captureHotkey, captureKeepRunning), read by src/shared/capture.ts.
 export interface CaptureSettings {
@@ -639,6 +915,13 @@ export interface CalendarDay {
   isToday: boolean
   isFuture: boolean
   entries: LogEntry[] // newest first
+  // Phase 3: content items published that day, and planned for that day.
+  published: { id: number; title: string; platform: string }[]
+  planned: { id: number; title: string; platform: string }[]
+  // Phase 1 / 6: bills due that day.
+  bills: { id: number; name: string; amount: number; currency: string }[]
+  // Phase 4 / 6: focus sessions on that day.
+  focusSessions?: { id: number; projectName: string; seconds: number; type: string }[]
   mood: Mood | null // the day's average mood, as the nearest mood word
   moodAverage: number | null // 1 (rough) to 5 (great)
   trades: Trade[] // entered this day (a trade counts on its entry date, like the P&L curve)

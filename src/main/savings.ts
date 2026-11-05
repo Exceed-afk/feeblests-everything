@@ -5,25 +5,31 @@ import { signedAmount } from '../shared/savings'
 import { isDate, searchWhere } from './util'
 import { emitAutomation } from './automations'
 import { getDb } from './db'
+import { LIVE, newBatchId, nowIso, trashByWhere } from './repo'
+import type { TrashEntry } from '../shared/trash'
+import { indexOne, removeOne } from './searchIndex'
 import type { ParsedQuery } from '../shared/search'
 import type { SavingsGoal, SavingsGoalInput, SavingsTx, SavingsTxHit, SavingsTxInput, SearchGroup, TxKind } from '../shared/types'
 
 interface GoalRow {
   id: number; name: string; target: number | null; notes: string
   balance: number; tx_count: number; created_at: string; updated_at: string
+  deleted_at: string | null
 }
 interface TxRow {
   id: number; goal_id: number; date: string; kind: TxKind; amount: number
-  note: string; created_at: string; updated_at: string
+  note: string; created_at: string; updated_at: string; deleted_at: string | null
 }
 
 // The balance is worked out here, from the transactions, every time.
+// The subqueries count LIVE transactions only, so a trashed deposit never
+// changes a balance and a restored one puts it back (tested).
 const GOAL_SQL = `
   SELECT g.*,
     COALESCE((SELECT SUM(CASE t.kind WHEN 'deposit' THEN t.amount ELSE -t.amount END)
-              FROM savings_transactions t WHERE t.goal_id = g.id), 0) AS balance,
-    (SELECT COUNT(*) FROM savings_transactions t WHERE t.goal_id = g.id) AS tx_count
-  FROM savings_goals g`
+              FROM savings_transactions t WHERE t.goal_id = g.id AND ${LIVE('t')}), 0) AS balance,
+    (SELECT COUNT(*) FROM savings_transactions t WHERE t.goal_id = g.id AND ${LIVE('t')}) AS tx_count
+  FROM savings_goals g WHERE ${LIVE('g')}`
 
 const toGoal = (r: GoalRow): SavingsGoal => ({
   id: r.id, name: r.name, target: r.target, notes: r.notes, balance: round8(r.balance),
@@ -39,7 +45,7 @@ export function listGoals(db: Database.Database): SavingsGoal[] {
 }
 
 function getGoal(db: Database.Database, id: number): SavingsGoal {
-  const row = db.prepare(`${GOAL_SQL} WHERE g.id = ?`).get(id) as GoalRow | undefined
+  const row = db.prepare(`${GOAL_SQL} AND g.id = ?`).get(id) as GoalRow | undefined
   if (!row) throw new Error('Goal not found')
   return toGoal(row)
 }
@@ -67,26 +73,47 @@ export function updateGoal(db: Database.Database, id: number, input: SavingsGoal
   return getGoal(db, id)
 }
 
-// Transactions are removed too (ON DELETE CASCADE in the table definition).
-export function deleteGoal(db: Database.Database, id: number): void {
-  db.prepare('DELETE FROM savings_goals WHERE id = ?').run(id)
+// Transactions are NOT removed: deleting a goal trashes the goal AND all of
+// its transactions under ONE delete batch id, so undo (or a restore from the
+// Trash page) brings the whole group back together. Delete-forever then
+// removes the goal, and the transactions go with it (the table's FK CASCADE).
+// Returns the delete batch id (shared with the goal's transactions) so the
+// UI can undo the whole group at once.
+export function deleteGoal(db: Database.Database, id: number): string {
+  const batch = newBatchId()
+  const result = trashByWhere(db, 'savings_goals', `id = ? AND ${LIVE('savings_goals')}`, [id], batch)
+  if (result === 0) {
+    if (!db.prepare('SELECT 1 FROM savings_goals WHERE id = ?').get(id)) throw new Error('Goal not found')
+  } else {
+    // The same batch id on every transaction of the goal: one action, one undo.
+    db.prepare('UPDATE savings_transactions SET deleted_at = ?, delete_batch_id = ? WHERE goal_id = ? AND deleted_at IS NULL').run(nowIso(), batch, id)
+    removeOne(db, 'goal', id)
+  }
+  const row = db.prepare('SELECT delete_batch_id AS b FROM savings_goals WHERE id = ?').get(id) as { b: string | null }
+  return row.b ?? batch
+}
+
+// Deletes a trashed goal for good; its transactions go with it.
+export function deleteGoalForever(db: Database.Database, id: number): void {
+  const result = db.prepare('DELETE FROM savings_goals WHERE id = ? AND deleted_at IS NOT NULL').run(id)
+  if (result.changes === 0) throw new Error('Goal is not in Trash')
 }
 
 export function listTransactions(db: Database.Database, goalId: number): SavingsTx[] {
-  return (db.prepare('SELECT * FROM savings_transactions WHERE goal_id = ? ORDER BY date DESC, id DESC')
+  return (db.prepare(`SELECT * FROM savings_transactions WHERE goal_id = ? AND ${LIVE('savings_transactions')} ORDER BY date DESC, id DESC`)
     .all(goalId) as TxRow[]).map(toTx)
 }
 
 // Every transaction of every goal, oldest first (the weekly / monthly review adds them up by date).
 export function listAllTransactions(db: Database.Database): SavingsTx[] {
-  return (db.prepare('SELECT * FROM savings_transactions ORDER BY date, id').all() as TxRow[]).map(toTx)
+  return (db.prepare(`SELECT * FROM savings_transactions WHERE ${LIVE('savings_transactions')} ORDER BY date, id`).all() as TxRow[]).map(toTx)
 }
 
 // Every transaction of every goal dated between two days (inclusive), with its goal's name. The calendar uses it.
 export function listTransactionsBetween(db: Database.Database, from: string, to: string): SavingsTxHit[] {
   const rows = db.prepare(
     `SELECT t.*, g.name AS goal_name FROM savings_transactions t JOIN savings_goals g ON g.id = t.goal_id
-     WHERE t.date >= ? AND t.date <= ? ORDER BY t.date, t.id`
+     WHERE t.date >= ? AND t.date <= ? AND ${LIVE('t')} AND ${LIVE('g')} ORDER BY t.date, t.id`
   ).all(from, to) as (TxRow & { goal_name: string })[]
   return rows.map((r) => ({ ...toTx(r), goalName: r.goal_name }))
 }
@@ -98,10 +125,11 @@ function getTx(db: Database.Database, id: number): SavingsTx {
 }
 
 // Balance of a goal, optionally pretending one transaction does not exist.
+// Live transactions only, matching what GOAL_SQL adds up.
 function balanceWithout(db: Database.Database, goalId: number, excludeTxId = 0): number {
   const r = db.prepare(
     `SELECT COALESCE(SUM(CASE kind WHEN 'deposit' THEN amount ELSE -amount END), 0) AS b
-     FROM savings_transactions WHERE goal_id = ? AND id != ?`
+     FROM savings_transactions WHERE goal_id = ? AND id != ? AND ${LIVE('savings_transactions')}`
   ).get(goalId, excludeTxId) as { b: number }
   return round8(r.b)
 }
@@ -129,6 +157,7 @@ export function addTransaction(db: Database.Database, input: SavingsTxInput): Sa
      VALUES (@goalId, @date, @kind, @amount, @note, @now, @now)`
   ).run({ ...t, goalId: input.goalId, now })
   const tx = getTx(db, Number(info.lastInsertRowid))
+  indexOne(db, 'savings_tx', tx.id)
   const goal = getGoal(db, input.goalId)
   // Deposit added (automation event). The goal key in the event key means "first" fires once;
   // the goal-reached variant has its own key below so each message shows once per goal.
@@ -144,26 +173,87 @@ export function addTransaction(db: Database.Database, input: SavingsTxInput): Sa
 
 export function updateTransaction(db: Database.Database, id: number, input: SavingsTxInput): SavingsTx {
   const t = prepareTx(input)
-  const existing = getTx(db, id) // a transaction cannot move to another goal
+  const existing = getTx(db, id)
+  if (existingGoalDeleted(db, existing)) throw new Error('Transaction not found') // a trashed transaction cannot be edited
   const after = round8(balanceWithout(db, existing.goalId, id) + signedAmount(t.kind, t.amount))
   assertNotNegative(after, 'That change would take the balance below 0.')
-  db.prepare('UPDATE savings_transactions SET date=@date, kind=@kind, amount=@amount, note=@note, updated_at=@now WHERE id=@id')
+  const info = db.prepare(`UPDATE savings_transactions SET date=@date, kind=@kind, amount=@amount, note=@note, updated_at=@now WHERE id=@id AND ${LIVE('savings_transactions')}`)
     .run({ ...t, id, now: new Date().toISOString() })
+  if (info.changes === 0) throw new Error('Transaction not found')
+  indexOne(db, 'savings_tx', id)
   return getTx(db, id)
 }
 
-export function deleteTransaction(db: Database.Database, id: number): void {
+// A trashed transaction (usually with its trashed goal) is out of reach.
+function existingGoalDeleted(db: Database.Database, existing: SavingsTx): boolean {
+  return !db.prepare(`SELECT 1 FROM savings_transactions WHERE id = ? AND ${LIVE('savings_transactions')}`).get(existing.id)
+}
+
+// Trashes the transaction (Undo-able): the visible balance comes straight from
+// the live rows, so trashing a deposit must still leave the goal at zero or
+// above - the same no-negative rule as ever. Returns the batch id.
+export function deleteTransaction(db: Database.Database, id: number): string {
   const existing = getTx(db, id)
-  assertNotNegative(balanceWithout(db, existing.goalId, id), 'Deleting this would take the balance below 0.')
-  db.prepare('DELETE FROM savings_transactions WHERE id = ?').run(id)
+  if (existingGoalDeleted(db, existing)) throw new Error('Transaction not found')
+  const after = round8(balanceWithout(db, existing.goalId) - signedAmount(existing.kind, existing.amount))
+  assertNotNegative(after, 'Trashing this would take the balance below 0.')
+  const batch = newBatchId()
+  const result = trashByWhere(db, 'savings_transactions', `id = ? AND ${LIVE('savings_transactions')}`, [id], batch)
+  if (result === 0) throw new Error('Transaction not found')
+  removeOne(db, 'savings_tx', id)
+  const row = db.prepare('SELECT delete_batch_id AS b FROM savings_transactions WHERE id = ?').get(id) as { b: string | null }
+  return row.b ?? batch
+}
+
+// Deletes a trashed transaction for good. A trashed goal cascades here only
+// when the goal itself is deleted forever (FK CASCADE).
+export function deleteTransactionForever(db: Database.Database, id: number): void {
+  const result = db.prepare('DELETE FROM savings_transactions WHERE id = ? AND deleted_at IS NOT NULL').run(id)
+  if (result.changes === 0) throw new Error('Transaction is not in Trash')
+}
+
+// Trash page + undo: lines for the trashed goals and their transactions.
+export function describeTrashed(db: Database.Database): TrashEntry[] {
+  const goals = (db.prepare('SELECT id, delete_batch_id, deleted_at, name FROM savings_goals WHERE deleted_at IS NOT NULL').all() as
+    { id: number; delete_batch_id: string | null; deleted_at: string; name: string }[])
+    .map((r): TrashEntry => ({ type: 'goal', id: r.id, batchId: r.delete_batch_id, trashedAt: r.deleted_at, label: r.name, sublabel: 'Savings goal (and its transactions)' }))
+  const txs = (db.prepare(
+    `SELECT t.id, t.delete_batch_id, t.deleted_at, t.kind, t.amount, t.date, g.name AS goal_name
+     FROM savings_transactions t LEFT JOIN savings_goals g ON g.id = t.goal_id
+     WHERE t.deleted_at IS NOT NULL`
+  ).all() as { id: number; delete_batch_id: string | null; deleted_at: string; kind: string; amount: number; date: string; goal_name: string | null }[])
+    .map((r): TrashEntry => ({
+      type: 'savings_tx', id: r.id, batchId: r.delete_batch_id, trashedAt: r.deleted_at,
+      label: `${r.kind === 'deposit' ? 'Deposit' : 'Withdrawal'} of ${r.amount}`, sublabel: `${r.date}${r.goal_name ? ` · ${r.goal_name}` : ''}`
+    }))
+  return [...goals, ...txs]
+}
+
+// Hydrate live goals / transactions by id (shared-search results do this).
+export function getGoalsByIds(db: Database.Database, ids: number[]): SavingsGoal[] {
+  if (ids.length === 0) return []
+  const marks = ids.map(() => '?').join(',')
+  return (db.prepare(`${GOAL_SQL} AND g.id IN (${marks})`).all(...ids) as GoalRow[])
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id)
+    .map(toGoal)
+}
+
+export function getTransactionsByIds(db: Database.Database, ids: number[]): (SavingsTx & { goalName: string })[] {
+  if (ids.length === 0) return []
+  const marks = ids.map(() => '?').join(',')
+  const rows = db.prepare(
+    `SELECT t.*, g.name AS goal_name FROM savings_transactions t JOIN savings_goals g ON g.id = t.goal_id
+     WHERE t.id IN (${marks}) AND ${LIVE('t')} AND ${LIVE('g')}`
+  ).all(...ids) as (TxRow & { goal_name: string })[]
+  return rows.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id).map((r) => ({ ...toTx(r), goalName: r.goal_name }))
 }
 
 // Universal search over goals: name and notes. Goals have no tags.
 export function searchGoals(db: Database.Database, q: ParsedQuery, limit: number): SearchGroup<SavingsGoal> {
   const w = searchWhere(q, ['g.name', 'g.notes'], null)
-  const items = (db.prepare(`${GOAL_SQL} WHERE ${w.sql} ORDER BY g.created_at, g.id LIMIT ?`)
+  const items = (db.prepare(`${GOAL_SQL} AND ${w.sql} ORDER BY g.created_at, g.id LIMIT ?`)
     .all(...w.params, limit) as GoalRow[]).map(toGoal)
-  const { n } = db.prepare(`SELECT COUNT(*) AS n FROM savings_goals g WHERE ${w.sql}`).get(...w.params) as { n: number }
+  const { n } = db.prepare(`SELECT COUNT(*) AS n FROM savings_goals g WHERE ${LIVE('g')} AND ${w.sql}`).get(...w.params) as { n: number }
   return { items, total: n }
 }
 
@@ -173,8 +263,8 @@ export function searchGoals(db: Database.Database, q: ParsedQuery, limit: number
 export function searchTransactions(db: Database.Database, q: ParsedQuery, limit: number): SearchGroup<SavingsTxHit> {
   const w = searchWhere(q, ['t.note', 't.date', 't.kind'], null)
   const from = 'FROM savings_transactions t JOIN savings_goals g ON g.id = t.goal_id'
-  const rows = db.prepare(`SELECT t.*, g.name AS goal_name ${from} WHERE ${w.sql} ORDER BY t.date DESC, t.id DESC LIMIT ?`)
+  const rows = db.prepare(`SELECT t.*, g.name AS goal_name ${from} WHERE ${w.sql} AND ${LIVE('t')} AND ${LIVE('g')} ORDER BY t.date DESC, t.id DESC LIMIT ?`)
     .all(...w.params, limit) as (TxRow & { goal_name: string })[]
-  const { n } = db.prepare(`SELECT COUNT(*) AS n ${from} WHERE ${w.sql}`).get(...w.params) as { n: number }
+  const { n } = db.prepare(`SELECT COUNT(*) AS n ${from} WHERE ${w.sql} AND ${LIVE('t')} AND ${LIVE('g')}`).get(...w.params) as { n: number }
   return { items: rows.map((r) => ({ ...toTx(r), goalName: r.goal_name })), total: n }
 }
