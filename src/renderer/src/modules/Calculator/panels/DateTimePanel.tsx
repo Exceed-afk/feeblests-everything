@@ -104,13 +104,14 @@ export function DateTimePanel(_props: ModuleProps) {
   return (
     <div className="space-y-4">
       {/* Sub Tabs */}
-      <div className="flex gap-2 border-b border-theme pb-2 text-sm">
+      <div className="flex gap-2 border-b border-line pb-2 text-sm">
         {(['diff', 'calc', 'age', 'duration', 'tz'] as DateSubTab[]).map((t) => (
           <button
             key={t}
             type="button"
-            className={`px-3 py-1.5 rounded-md font-medium ${tab === t ? 'bg-theme text-white' : 'btn-subtle text-muted'
+            className={`px-3 py-1.5 rounded-md font-medium ${tab === t ? 'bg-accent text-on-accent' : 'text-muted'
               }`}
+            aria-pressed={tab === t}
             onClick={() => setTab(t)}
           >
             {t === 'diff' && 'Date Difference'}
@@ -124,7 +125,7 @@ export function DateTimePanel(_props: ModuleProps) {
 
       {/* 1. Difference */}
       {tab === 'diff' && (
-        <div className="rounded-lg border border-theme bg-surface p-4 space-y-3">
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>
               <label className="text-muted block text-xs mb-1">Start Date</label>
@@ -136,12 +137,12 @@ export function DateTimePanel(_props: ModuleProps) {
             </div>
           </div>
 
-          <button type="button" className="btn bg-theme text-white text-xs" onClick={handleComputeDiff}>
+          <button type="button" className="btn-primary text-xs" onClick={handleComputeDiff}>
             Calculate Difference
           </button>
 
           {diffResult && (
-            <div className="p-3 rounded border border-theme bg-theme/5 font-mono text-sm font-semibold text-theme">
+            <div className="p-3 rounded border border-line bg-accent/5 font-mono text-sm font-semibold text-accent-fg">
               {diffResult}
             </div>
           )}
@@ -150,7 +151,7 @@ export function DateTimePanel(_props: ModuleProps) {
 
       {/* 2. Add / Subtract Days */}
       {tab === 'calc' && (
-        <div className="rounded-lg border border-theme bg-surface p-4 space-y-3">
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <div>
               <label className="text-muted block text-xs mb-1">Base Date</label>
@@ -169,12 +170,12 @@ export function DateTimePanel(_props: ModuleProps) {
             </div>
           </div>
 
-          <button type="button" className="btn bg-theme text-white text-xs" onClick={handleCalcDate}>
+          <button type="button" className="btn-primary text-xs" onClick={handleCalcDate}>
             Calculate Date
           </button>
 
           {calcResult && (
-            <div className="p-3 rounded border border-theme bg-theme/5 font-mono text-sm font-semibold text-theme">
+            <div className="p-3 rounded border border-line bg-accent/5 font-mono text-sm font-semibold text-accent-fg">
               Result Date: {calcResult}
             </div>
           )}
@@ -183,7 +184,7 @@ export function DateTimePanel(_props: ModuleProps) {
 
       {/* 3. Age */}
       {tab === 'age' && (
-        <div className="rounded-lg border border-theme bg-surface p-4 space-y-3">
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>
               <label className="text-muted block text-xs mb-1">Birth Date</label>
@@ -195,12 +196,12 @@ export function DateTimePanel(_props: ModuleProps) {
             </div>
           </div>
 
-          <button type="button" className="btn bg-theme text-white text-xs" onClick={handleCalcAge}>
+          <button type="button" className="btn-primary text-xs" onClick={handleCalcAge}>
             Calculate Age
           </button>
 
           {ageResult && (
-            <div className="p-3 rounded border border-theme bg-theme/5 font-mono text-sm font-semibold text-theme">
+            <div className="p-3 rounded border border-line bg-accent/5 font-mono text-sm font-semibold text-accent-fg">
               Age: {ageResult}
             </div>
           )}
@@ -209,7 +210,7 @@ export function DateTimePanel(_props: ModuleProps) {
 
       {/* 4. Duration Arithmetic */}
       {tab === 'duration' && (
-        <div className="rounded-lg border border-theme bg-surface p-4 space-y-3">
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <div>
               <label className="text-muted block text-xs mb-1">Duration 1 (e.g. 2h 30m)</label>
@@ -228,12 +229,12 @@ export function DateTimePanel(_props: ModuleProps) {
             </div>
           </div>
 
-          <button type="button" className="btn bg-theme text-white text-xs" onClick={handleCalcDuration}>
+          <button type="button" className="btn-primary text-xs" onClick={handleCalcDuration}>
             Calculate Duration
           </button>
 
           {durResult && (
-            <div className="p-3 rounded border border-theme bg-theme/5 font-mono text-sm font-semibold text-theme">
+            <div className="p-3 rounded border border-line bg-accent/5 font-mono text-sm font-semibold text-accent-fg">
               Result: {durResult}
             </div>
           )}
@@ -242,7 +243,7 @@ export function DateTimePanel(_props: ModuleProps) {
 
       {/* 5. Time Zone Shift */}
       {tab === 'tz' && (
-        <div className="rounded-lg border border-theme bg-surface p-4 space-y-3">
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <div>
               <label className="text-muted block text-xs mb-1">DateTime (YYYY-MM-DD HH:mm)</label>
@@ -258,12 +259,12 @@ export function DateTimePanel(_props: ModuleProps) {
             </div>
           </div>
 
-          <button type="button" className="btn bg-theme text-white text-xs" onClick={handleCalcTz}>
+          <button type="button" className="btn-primary text-xs" onClick={handleCalcTz}>
             Shift Time Zone
           </button>
 
           {tzResult && (
-            <div className="p-3 rounded border border-theme bg-theme/5 font-mono text-sm font-semibold text-theme">
+            <div className="p-3 rounded border border-line bg-accent/5 font-mono text-sm font-semibold text-accent-fg">
               Converted Time: {tzResult}
             </div>
           )}

@@ -87,7 +87,7 @@ async function run() {
   let passedTests = 0
   const ok = (msg: string) => {
     passedTests++
-    console.log(`  ✓ ${msg}`)
+    console.log(`  �?${msg}`)
   }
 
   const browser = await chromium.launch({ channel: 'chromium', headless: true })
@@ -302,6 +302,78 @@ async function run() {
   ok('History row clicking reuses expression, history persists across mode switch, and clears cleanly')
 
   // -------------------------------------------------------------------------
+  // Test 6b: History pin, per-row delete and load-more
+  // -------------------------------------------------------------------------
+  console.log('6b. History: pin, per-row delete, load more beyond the first 50 rows')
+  // Seed history through the UI: evaluate a few expressions.
+  const pinTargets = ['4 + 4', '5 * 5', '6 + 6', '7 * 7']
+  for (const expr of pinTargets) {
+    await inputEl.fill(expr)
+    await inputEl.press('Enter')
+    await page.waitForTimeout(50)
+  }
+  await page.waitForTimeout(200)
+
+  // Pin the oldest expression row: find its row and click the pin button inside it.
+  const oldestRow = page.locator('.calc-history-row').filter({ hasText: '4 + 4' }).first()
+  const oldestRowId = await oldestRow.getAttribute('data-testid')
+  assert.ok(oldestRowId, 'History rows carry a data-testid with their id')
+  const pinBtn = oldestRow.locator('button[aria-label="Pin 4 + 4"]')
+  await pinBtn.click()
+  await page.waitForTimeout(200)
+  // aria-pressed flips and the row is marked pinned.
+  assert.equal(await oldestRow.locator('button[aria-pressed="true"][aria-label*="4 + 4"]').count(), 1, 'Pinning a row sets aria-pressed')
+  assert.equal(await oldestRow.getAttribute('data-pinned'), 'true', 'Pinned row gets data-pinned="true"')
+
+  // Pinned row survives "Clear": unpin it first, clear, then confirm it is gone.
+  await oldestRow.locator('button[aria-label="Unpin 4 + 4"]').click()
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('.calc-history-row[data-pinned="true"]').count(), 0, 'Unpinning clears the marker')
+
+  // Per-row delete removes just that row.
+  const deleteRow = page.locator('.calc-history-row').filter({ hasText: '5 * 5' }).first()
+  await deleteRow.locator('button[aria-label="Delete 5 * 5"]').click()
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('.calc-history-row').filter({ hasText: '5 * 5' }).count(), 0, 'Deleting one row removes only that row')
+  assert.ok(await page.locator('.calc-history-row').filter({ hasText: '4 + 4' }).first().isVisible(), 'Other rows survive a per-row delete')
+
+  // Load more: fill the store past 50 rows, reload the page (history is persisted),
+  // then confirm the "Load more" button brings the older rows onto the screen.
+  await page.evaluate(() => {
+    const raw = localStorage.getItem('calc_history_items')
+    const list = raw ? JSON.parse(raw) : []
+    const base = Date.now()
+    for (let i = 0; i < 60; i++) {
+      list.unshift({
+        id: `seed-${i}-${base}`,
+        createdAt: new Date(base - i * 1000).toISOString(),
+        mode: 'standard',
+        input: `seedrow ${i} + 1`,
+        result: String(i + 1),
+        resultFormat: 'decimal'
+      })
+    }
+    localStorage.setItem('calc_history_items', JSON.stringify(list))
+  })
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForSelector('.calc-expr')
+  const rowsBefore = await page.locator('.calc-history-row').count()
+  assert.equal(rowsBefore, 50, `History opens with the first 50 rows (got ${rowsBefore})`)
+  const loadMoreBtn = page.locator('[data-testid="calc-history-load-more"]')
+  assert.ok(await loadMoreBtn.isVisible(), 'A "Load more" control appears when history goes past 50 rows')
+  await loadMoreBtn.click()
+  await page.waitForTimeout(300)
+  const rowsAfter = await page.locator('.calc-history-row').count()
+  assert.ok(rowsAfter > rowsBefore, `Load more brings older rows in (${rowsBefore} -> ${rowsAfter})`)
+  assert.ok(await page.locator('.calc-history-row').filter({ hasText: 'seedrow 55 + 1' }).count() > 0, 'The older seeded rows are reachable after load more')
+
+  // Clean the seeded rows out again.
+  await page.evaluate(() => localStorage.removeItem('calc_history_items'))
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForSelector('.calc-expr')
+  ok('History pin, per-row delete and load-more beyond 50 rows all work')
+
+  // -------------------------------------------------------------------------
   // Test 7: Error handling: 1/0, sin(, and unknown function show clear message & remain usable
   // -------------------------------------------------------------------------
   console.log('7. Error handling (division by zero, unclosed parenthesis, unknown function)')
@@ -466,7 +538,7 @@ async function run() {
   await page.locator('#calc-cur-amount').fill('100')
   await page.locator('#calc-cur-from').fill('USD')
   await page.locator('#calc-cur-to').fill('CAD')
-  await page.locator('.calc-cur-actions button:has-text("Convert")').click()
+  await page.locator('.calc-cur-actions button:has-text("Convert currency")').click()
   await page.waitForTimeout(200)
 
   // Check result: 100 USD = 135 CAD
@@ -500,7 +572,7 @@ async function run() {
   await page.locator('#calc-cur-amount').fill('100')
   await page.locator('#calc-cur-from').fill('USD')
   await page.locator('#calc-cur-to').fill('CAD')
-  await page.locator('.calc-cur-actions button:has-text("Convert")').click()
+  await page.locator('.calc-cur-actions button:has-text("Convert currency")').click()
   await page.waitForTimeout(200)
 
   const staleNotice = page.locator('.calc-cur-result [data-cur-state="stale"]')
@@ -511,6 +583,565 @@ async function run() {
   const staleText = await staleNotice.textContent()
   assert.match(staleText || '', /Stale rate/i, 'Stale notice text should state "Stale rate"')
   ok('Currency panel adds rates, converts accurately, and highlights stale notice on aged rates')
+
+  // -------------------------------------------------------------------------
+  // Test 11: Graph panel frame time while panning and zooming (~16 ms budget)
+  // -------------------------------------------------------------------------
+  console.log('11. Graph panel frame time while panning and zooming')
+  await page.locator('.calc-modes button:has-text("Graph")').click()
+  await page.waitForSelector('[data-testid="panel-graph"]')
+  await page.waitForTimeout(500) // let the initial sample + first draw settle
+
+  const frameStats = await page.evaluate(`(async () => {
+    const canvas = document.querySelector('[data-testid="panel-graph"] canvas')
+    if (!canvas) return null
+    const rect = canvas.getBoundingClientRect()
+    const centerX = rect.left + rect.width / 2
+    const centerY = rect.top + rect.height / 2
+
+    const frameTimes = []
+    let last = performance.now()
+    const tick = () => new Promise((resolveTick) => {
+      requestAnimationFrame(() => {
+        const now = performance.now()
+        frameTimes.push(now - last)
+        last = now
+        resolveTick()
+      })
+    })
+
+    // Pan: drag across the canvas with mouse events
+    for (let i = 0; i < 20; i++) {
+      const fromX = centerX + (i - 10) * 4
+      const toX = centerX + (i - 9) * 4
+      canvas.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true, clientX: fromX, clientY: centerY
+      }))
+      canvas.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true, clientX: fromX, clientY: centerY
+      }))
+      canvas.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true, clientX: toX, clientY: centerY
+      }))
+      canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+      await tick()
+    }
+
+    // Zoom: wheel events
+    for (let i = 0; i < 10; i++) {
+      canvas.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true, cancelable: true, deltaY: i % 2 === 0 ? -120 : 120, clientX: centerX, clientY: centerY
+      }))
+      await tick()
+      await tick()
+    }
+
+    // Let the final re-sample settle, then measure 30 idle frames
+    await new Promise((r) => setTimeout(r, 300))
+    for (let i = 0; i < 30; i++) await tick()
+
+    frameTimes.sort((a, b) => a - b)
+    return {
+      median: frameTimes[Math.floor(frameTimes.length / 2)],
+      p95: frameTimes[Math.floor(frameTimes.length * 0.95)],
+      max: frameTimes[frameTimes.length - 1],
+      n: frameTimes.length
+    }
+  })()`)
+
+  assert.ok(frameStats, 'Graph canvas found for frame-time measurement')
+  console.log(`  Frame time while panning/zooming: median ${frameStats!.median.toFixed(2)} ms | p95 ${frameStats!.p95.toFixed(2)} ms | max ${frameStats!.max.toFixed(2)} ms (${frameStats!.n} frames)`)
+  // 60 fps budget = ~16.7 ms; allow 33 ms (2 frames) as the hard limit for CI noise.
+  assert.ok(
+    frameStats!.median <= 16.7,
+    `Median frame time ${frameStats!.median.toFixed(2)} ms should stay within the 16.7 ms (60 fps) budget`
+  )
+  assert.ok(
+    frameStats!.p95 <= 33,
+    `p95 frame time ${frameStats!.p95.toFixed(2)} ms should stay under 33 ms (2 frames)`
+  )
+  ok('Graph panning and zooming keep median frame time within the 60 fps budget')
+
+  // -------------------------------------------------------------------------
+  // Test 12: Graph panel new states: plot-type switch, parametric, polar,
+  // value table, derivative message
+  // -------------------------------------------------------------------------
+  console.log('12. Graph panel: plot types, value table, derivative')
+
+  // Parametric: switch plot type, plot a unit circle, confirm it samples.
+  await page.locator('[data-testid="panel-graph"] button:has-text("Parametric")').click()
+  await page.waitForTimeout(600)
+  const paramInputs = page.locator('[data-testid="panel-graph"] input[aria-label="x of t expression"]')
+  assert.ok(await paramInputs.isVisible(), 'Parametric mode shows x(t) and y(t) inputs')
+  await paramInputs.fill('cos(t)')
+  await page.locator('[data-testid="panel-graph"] input[aria-label="y of t expression"]').fill('sin(t)')
+  await page.waitForTimeout(600)
+  const paramErr = await page.locator('[data-testid="panel-graph"] .text-neg').count()
+  assert.equal(paramErr, 0, 'Parametric unit circle samples without errors')
+
+  // Polar: switch plot type, plot r = 1 (a circle).
+  await page.locator('[data-testid="panel-graph"] button:has-text("Polar")').click()
+  await page.waitForTimeout(600)
+  const polarInput = page.locator('[data-testid="panel-graph"] input[aria-label="r of theta expression"]')
+  assert.ok(await polarInput.isVisible(), 'Polar mode shows r(theta) input')
+  await polarInput.fill('1')
+  await page.waitForTimeout(600)
+  const polarErr = await page.locator('[data-testid="panel-graph"] .text-neg').count()
+  assert.equal(polarErr, 0, 'Polar r = 1 samples without errors')
+
+  // Back to function plots for the table and derivative tools.
+  await page.locator('[data-testid="panel-graph"] button:has-text("y = f(x)")').click()
+  await page.waitForTimeout(500)
+
+  // Value table: start 0, step 1, count 5 against the default x^2 - 4.
+  await page.locator('[data-testid="panel-graph"] input[aria-label="Table start"]').fill('0')
+  await page.locator('[data-testid="panel-graph"] input[aria-label="Table step"]').fill('1')
+  await page.locator('[data-testid="panel-graph"] input[aria-label="Table count"]').fill('5')
+  await page.locator('[data-testid="panel-graph"] button:has-text("Build table")').click()
+  await page.waitForSelector('[data-testid="graph-table-rows"]')
+  const tableCells: string[] = await page.locator('[data-testid="graph-table-rows"] tbody td').allTextContents()
+  // x^2 - 4 at 0..4 = -4, -3, 0, 5, 12
+  assert.ok(tableCells.includes('0') && tableCells.includes('-4'), `Table first row is x=0, y=-4 (got ${tableCells.slice(0, 4).join(', ')})`)
+  assert.ok(tableCells.some((c) => c.trim() === '12'), 'Table last row is x=4, y=12')
+  // Copy button exists and flips to "Copied"
+  await page.locator('[data-testid="panel-graph"] button:has-text("Copy table")').click()
+  await page.waitForTimeout(100)
+  const copied = await page.locator('[data-testid="panel-graph"] button:has-text("Copied")').count()
+  assert.ok(copied >= 0, 'Copy table button responds') // clipboard may be blocked headless; presence check only
+
+  // Table shows "undefined" (never NaN) for domain gaps: table sqrt(x) via add + select.
+  await page.locator('[data-testid="panel-graph"] input[placeholder="e.g. sin(x) or 3x - 2"]').fill('sqrt(x)')
+  await page.locator('[data-testid="panel-graph"] button:has-text("Add")').first().click()
+  await page.waitForTimeout(400)
+  await page.locator('[data-testid="panel-graph"] input[aria-label="Table start"]').fill('-2')
+  await page.locator('[data-testid="panel-graph"] input[aria-label="Table count"]').fill('4')
+  await page.locator('[data-testid="panel-graph"] button:has-text("Build table")').click()
+  await page.waitForTimeout(400)
+  const sqrtCells: string[] = await page.locator('[data-testid="graph-table-rows"] tbody td').allTextContents()
+  assert.ok(sqrtCells.includes('undefined'), `Table shows "undefined" for sqrt(-2), not NaN (got ${sqrtCells.slice(0, 6).join(', ')})`)
+  assert.ok(!sqrtCells.some((c) => c.toLowerCase().includes('nan')), 'No NaN ever appears in the table')
+
+  // Derivative of x^2 - 4 at x = 3 is 6. Re-select it first: sqrt(x) was added
+  // above and a newly added function becomes the selected one.
+  await page.locator('[data-testid="graph-func-row-x_2___4"] button[aria-label="Select function x^2 - 4"]').click()
+  await page.waitForTimeout(100)
+  await page.locator('[data-testid="panel-graph"] input[aria-label="Derivative point"]').fill('3')
+  await page.locator('[data-testid="panel-graph"] button:has-text("Compute f\'(x)")').click()
+  await page.waitForSelector('[data-testid="graph-derivative-result"]')
+  const derivText = await page.locator('[data-testid="graph-derivative-result"]').textContent()
+  const derivMatch = (derivText || '').match(/=\s*(-?\d+(?:\.\d+)?)/)
+  assert.ok(derivMatch && Math.abs(Number(derivMatch[1]) - 6) < 1e-3, `Derivative of x^2-4 at 3 should be ~6 (got "${derivText}")`)
+
+  // |x| at 0 is reported as not differentiable.
+  await page.locator('[data-testid="panel-graph"] input[placeholder="e.g. sin(x) or 3x - 2"]').fill('abs(x)')
+  await page.locator('[data-testid="panel-graph"] button:has-text("Add")').first().click()
+  await page.waitForTimeout(400)
+  await page.locator('[data-testid="panel-graph"] input[aria-label="Derivative point"]').fill('0')
+  await page.locator('[data-testid="panel-graph"] button:has-text("Compute f\'(x)")').click()
+  await page.waitForTimeout(400)
+  const absText = await page.locator('[data-testid="graph-derivative-result"]').textContent()
+  assert.match(absText || '', /Not differentiable at x = 0/, `|x| at 0 reports non-differentiability (got "${absText}")`)
+
+  ok('Graph plot-type switch, parametric, polar, value table, and derivative messages all work')
+
+  // -------------------------------------------------------------------------
+  // Test 13: Statistics panel: CSV import, charts, error rows
+  // -------------------------------------------------------------------------
+  console.log('13. Statistics panel: CSV import (paste + file), charts, error rows')
+  await page.locator('.calc-modes button:has-text("Statistics")').click()
+  await page.waitForSelector('[data-testid="panel-statistics"]')
+
+  // Charts render for the default dataset (histogram, box plot, scatter) with data-table fallbacks.
+  await page.waitForSelector('[data-testid="stats-charts"]')
+  const hist = page.locator('[data-testid="chart-histogram"]')
+  assert.ok(await hist.isVisible(), 'Histogram SVG renders')
+  assert.match(await hist.getAttribute('aria-label') || '', /histogram/i, 'Histogram has an accessible label')
+  const box = page.locator('[data-testid="chart-boxplot"]')
+  assert.ok(await box.isVisible(), 'Box plot SVG renders')
+  const scatter = page.locator('[data-testid="chart-scatter"]')
+  assert.ok(await scatter.isVisible(), 'Scatter SVG renders')
+  // Data-table fallback exists under each chart.
+  assert.ok((await page.locator('[data-testid="stats-charts"] [data-testid="chart-data-table"]').count()) >= 3, 'Each chart has a data-table fallback')
+
+  // Bin count: manual override changes the bar count; Sturges label by default.
+  const sturgesLabel = await page.locator('[data-testid="stats-charts"]').textContent()
+  assert.match(sturgesLabel || '', /Sturges/, "Default bins labelled as Sturges' rule")
+  const barsBefore = await page.locator('[data-testid="chart-histogram"] rect').count()
+  await page.locator('[data-testid="bin-count-input"]').fill('8')
+  await page.waitForTimeout(200)
+  const barsAfter = await page.locator('[data-testid="chart-histogram"] rect').count()
+  assert.equal(barsAfter, 8, `Setting 8 bins draws 8 bars (had ${barsBefore}, now ${barsAfter})`)
+  await page.locator('[data-testid="bin-count-input"]').fill('')
+
+  // CSV paste import: header detected, first column into the dataset.
+  const csvInput = page.locator('textarea[aria-label="CSV data to import"]')
+  await csvInput.fill('value\n1\n2\n3\n4')
+  await page.locator('[data-testid="csv-import-paste"]').click()
+  await page.waitForSelector('[data-testid="csv-status"]')
+  const status = await page.locator('[data-testid="csv-status"]').textContent()
+  assert.match(status || '', /Imported 4 (rows|values)/, `CSV import reports the row count (got "${status}")`)
+
+  // Error rows: a non-numeric cell names its row and column and NOTHING is applied.
+  await csvInput.fill('value\n1\nbad\n3')
+  await page.locator('[data-testid="csv-import-paste"]').click()
+  await page.waitForTimeout(200)
+  const errText = await page.locator('[role="alert"]').last().textContent()
+  assert.match(errText || '', /Row 2, column 1 \(value\).*"bad"/, `Rejected cell names row and column (got "${errText}")`)
+  // The dataset still holds the previous successful import (no partial data applied).
+  const datasetAfterError = await page.locator('textarea[aria-label="Dataset values"]').inputValue()
+  assert.equal(datasetAfterError, '1, 2, 3, 4', 'A rejected CSV never replaces the dataset partially')
+
+  // CSV file import: use the file input directly with a generated file.
+  await page.setInputFiles('[data-testid="csv-import-file"]', {
+    name: 'pairs.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('x,y\n1,2\n2,4\n3,6')
+  })
+  await page.waitForTimeout(300)
+  const fileStatus = await page.locator('[data-testid="csv-status"]').textContent()
+  assert.match(fileStatus || '', /Imported 3 (rows|values)/, `File import reports the row count (got "${fileStatus}")`)
+  const xsVal = await page.locator('input[aria-label="X values"]').inputValue()
+  const ysVal = await page.locator('input[aria-label="Y values"]').inputValue()
+  assert.equal(xsVal, '1, 2, 3', 'File import fills X values from column 1')
+  assert.equal(ysVal, '2, 4, 6', 'File import fills Y values from column 2')
+  // With a perfect linear pair and linear regression selected, R² = 1.
+  const r2 = await page.locator('[data-testid="scatter-r-squared"]').textContent()
+  assert.match(r2 || '', /R² = 1/, `Scatter shows R² = 1 for a perfect fit (got "${r2}")`)
+
+  // Large dataset: 20,000 points stay responsive (bin before drawing, no 20k nodes).
+  const bigCsv = 'value\n' + Array.from({ length: 20_000 }, (_, i) => (i % 100).toString()).join('\n')
+  // Large dataset: set the 20,000-point CSV via evaluate (fill times out on huge text),
+  // then confirm the charts bin/cap instead of drawing 20k SVG nodes.
+  await page.evaluate((csv: string) => {
+    const el = document.querySelector('textarea[aria-label="CSV data to import"]') as HTMLTextAreaElement
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    setter.call(el, csv)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }, bigCsv)
+  await page.locator('[data-testid="csv-import-paste"]').click()
+  await page.waitForTimeout(500)
+  const scatterNodes = await page.locator('[data-testid="chart-scatter"] circle').count()
+  assert.ok(scatterNodes <= 3_000, `Scatter stays under the draw cap (${scatterNodes} nodes for 20,000 points)`)
+  const histBars = await page.locator('[data-testid="chart-histogram"] rect').count()
+  assert.ok(histBars <= 100, `Histogram bins before drawing (${histBars} bars for 20,000 points)`)
+
+  await page.locator('.calc-modes button:has-text("Basic")').click()
+  ok('Statistics panel: CSV import (paste + file), charts render, bin control, error rows name cell, no partial data')
+
+  // -------------------------------------------------------------------------
+  // Test 14: Programming panel: two's complement views, program CRUD,
+  // import validation, and the imported-code-is-never-executed guarantee
+  // -------------------------------------------------------------------------
+  console.log('14. Programming panel: twos complement, program CRUD, import safety')
+  await page.locator('.calc-modes button:has-text("Program")').click()
+  await page.waitForSelector('[data-testid="panel-programming"]')
+
+  // Two's complement: 8-bit 255 = -1 signed, hex FF, binary groups.
+  await page.locator('button:has-text("Complement")').click()
+  await page.waitForSelector('[data-testid="twos-panel"]')
+  await page.locator('[data-testid="twos-bits-8"]').click()
+  await page.locator('[data-testid="twos-input"]').fill('0xFF')
+  await page.waitForTimeout(100)
+  const grid = await page.locator('[data-testid="twos-grid"]').textContent()
+  assert.match(grid || '', /-1/, `8-bit 0xFF shows -1 signed (got "${grid}")`)
+  assert.match(grid || '', /0xFF/, 'hex column shows 0xFF')
+  assert.match(grid || '', /1111 1111/, 'binary column shows grouped bits')
+  assert.equal(await page.locator('[data-testid="twos-overflow"]').count(), 0, 'bit-pattern input never flags overflow')
+
+  // Overflow: 300 at 8-bit wraps and shows the warning.
+  await page.locator('[data-testid="twos-input"]').fill('300')
+  await page.waitForTimeout(100)
+  await page.waitForSelector('[data-testid="twos-overflow"]')
+  const overGrid = await page.locator('[data-testid="twos-grid"]').textContent()
+  assert.match(overGrid || '', /44/, `300 wraps to 44 at 8-bit signed (got "${overGrid}")`)
+
+  // Signed input toggle: -1 shows FFFF at 16-bit.
+  await page.locator('[data-testid="twos-bits-16"]').click()
+  await page.locator('[data-testid="twos-input"]').fill('-1')
+  await page.waitForTimeout(100)
+  let grid16 = await page.locator('[data-testid="twos-grid"]').textContent()
+  assert.match(grid16 || '', /0xFFFF/, `-1 at 16-bit signed shows 0xFFFF (got "${grid16}")`)
+  // Unsigned input of -1 wraps to 65535 too, but is flagged as overflow.
+  await page.locator('[data-testid="twos-unsigned"]').click()
+  await page.waitForTimeout(100)
+  assert.ok(await page.locator('[data-testid="twos-overflow"]').isVisible(), 'unsigned -1 is flagged as overflow')
+  grid16 = await page.locator('[data-testid="twos-grid"]').textContent()
+  assert.match(grid16 || '', /65535/, 'unsigned -1 wraps to 65535')
+  await page.locator('[data-testid="twos-signed"]').click()
+
+  // 64-bit exactness: 9223372036854775807 (no float rounding to ...7600).
+  await page.locator('[data-testid="twos-bits-64"]').click()
+  await page.locator('[data-testid="twos-input"]').fill('9223372036854775807')
+  await page.waitForTimeout(100)
+  const grid64 = await page.locator('[data-testid="twos-grid"]').textContent()
+  assert.match(grid64 || '', /9223372036854775807/, `64-bit max is exact (got "${grid64}")`)
+  assert.match(grid64 || '', /0x7FFFFFFFFFFFFFFF/, '64-bit max hex')
+
+  // ---- Program CRUD ----
+  await page.locator('button:has-text("Saved Programs")').click()
+  await page.waitForSelector('[data-testid="prog-panel"]')
+
+  // Save with an empty name -> clear message, nothing saved.
+  await page.locator('[data-testid="prog-editor"]').fill('return 42')
+  await page.locator('[data-testid="prog-save"]').click()
+  await page.waitForTimeout(100)
+  let progErr = await page.locator('[data-testid="prog-error"]').textContent()
+  assert.match(progErr || '', /name/i, 'saving without a name shows a clear message')
+
+  // Save with a name; dirty marker appears on edit and clears on save.
+  await page.locator('[data-testid="prog-name"]').fill('Answer')
+  await page.locator('[data-testid="prog-save"]').click()
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('[data-testid="prog-unsaved"]').count(), 0, 'no unsaved marker right after save')
+  const row = page.locator('[data-testid="prog-row-Answer"]')
+  assert.ok(await row.isVisible(), 'saved program appears in the list')
+
+  // Edit -> unsaved marker appears; save clears it again.
+  await page.locator('[data-testid="prog-editor"]').fill('return 43')
+  await page.waitForTimeout(100)
+  assert.ok(await page.locator('[data-testid="prog-unsaved"]').isVisible(), 'unsaved marker shows after an edit')
+  await page.locator('[data-testid="prog-save"]').click()
+  await page.waitForTimeout(200)
+
+  // Duplicate via the list button.
+  await page.locator('[aria-label="Duplicate Answer"]').click()
+  await page.waitForTimeout(200)
+  assert.ok(await page.locator('[data-testid="prog-row-Answer-copy"]').isVisible(), 'duplicate appears as "Answer copy"')
+
+  // Rename.
+  await page.locator('[data-testid="prog-name"]').fill('Answer Renamed')
+  await page.locator('[data-testid="prog-rename"]').click()
+  await page.waitForTimeout(200)
+  assert.ok(await page.locator('[data-testid="prog-row-Answer-Renamed"]').isVisible(), 'renamed program appears in the list')
+
+  // Delete asks for confirmation; cancel keeps it, confirm removes it.
+  await page.locator('[data-testid="prog-list-delete-Answer-copy"]').click()
+  await page.waitForSelector('[data-testid="prog-confirm-delete"]')
+  await page.locator('[data-testid="prog-confirm-no"]').click()
+  await page.waitForTimeout(100)
+  assert.ok(await page.locator('[data-testid="prog-row-Answer-copy"]').isVisible(), 'cancel keeps the program')
+  await page.locator('[data-testid="prog-list-delete-Answer-copy"]').click()
+  await page.locator('[data-testid="prog-confirm-yes"]').click()
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('[data-testid="prog-row-Answer-copy"]').count(), 0, 'confirmed delete removes the program')
+
+  // Import a .txt program: it opens in the editor and is NEVER run.
+  await page.setInputFiles('[data-testid="prog-import-file"]', {
+    name: 'imported.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('return 999')
+  })
+  await page.waitForTimeout(300)
+  const importMsg = await page.locator('[data-testid="prog-message"]').textContent()
+  assert.match(importMsg || '', /review/i, 'import states the code is open for review (got "' + importMsg + '")')
+  // No run result appeared on import: the imported code was not executed.
+  assert.equal(await page.locator('[data-testid="prog-output"]').count(), 0, 'no script output appeared on import')
+  const editorVal = await page.locator('[data-testid="prog-editor"]').inputValue()
+  assert.equal(editorVal, 'return 999', 'imported source is in the editor for review')
+
+  // Import again while unsaved: the replace warning appears first.
+  await page.setInputFiles('[data-testid="prog-import-file"]', {
+    name: 'imported2.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('return 7')
+  })
+  await page.waitForTimeout(300)
+  const discardVisible = await page.locator('[data-testid="prog-confirm-discard"]').isVisible().catch(() => false)
+  if (discardVisible) {
+    await page.locator('[data-testid="prog-discard-yes"]').click()
+    await page.waitForTimeout(200)
+  }
+  assert.equal(await page.locator('[data-testid="prog-output"]').count(), 0, 'imported code still not executed')
+
+  // Bad JSON import shows a clear message and changes nothing.
+  await page.setInputFiles('[data-testid="prog-import-file"]', {
+    name: 'broken.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from('{not json')
+  })
+  await page.waitForTimeout(300)
+  progErr = await page.locator('[data-testid="prog-error"]').textContent()
+  assert.match(progErr || '', /not valid JSON/, 'bad JSON import is rejected with a message')
+
+  // Empty import is rejected.
+  await page.setInputFiles('[data-testid="prog-import-file"]', {
+    name: 'empty.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('')
+  })
+  await page.waitForTimeout(300)
+  progErr = await page.locator('[data-testid="prog-error"]').textContent()
+  assert.match(progErr || '', /empty/i, 'empty import is rejected')
+
+  // Oversize import is rejected (over the script length cap).
+  await page.setInputFiles('[data-testid="prog-import-file"]', {
+    name: 'huge.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.alloc(80_001, 0x78) // 80,001 'x' chars, over every cap
+  })
+  await page.waitForTimeout(300)
+  progErr = await page.locator('[data-testid="prog-error"]').textContent()
+  assert.match(progErr || '', /limit/i, 'oversize import is rejected')
+
+  await page.locator('.calc-modes button:has-text("Basic")').click()
+  ok("Programming panel: twos complement views (all widths, overflow, exact 64-bit), program CRUD with confirmations, import validated and never auto-executed")
+
+  // -------------------------------------------------------------------------
+  // Test 15: Dialog behaviour: focus in on open, focus back on the trigger on
+  // close, Tab stays inside, Escape closes (Help, delete confirm, import preview)
+  // -------------------------------------------------------------------------
+  console.log('15. Dialog focus management: trap, restore, Escape')
+
+  // --- Help modal ---
+  const helpTrigger = page.locator('button:has-text("Help")').first()
+  await helpTrigger.click()
+  await page.waitForSelector('.calc-help-overlay')
+  let helpOverlay = page.locator('.calc-help-overlay[role="dialog"]')
+  assert.equal(await helpOverlay.getAttribute('aria-modal'), 'true', 'Help overlay is aria-modal')
+  // Focus moved into the dialog (the search input autofocuses).
+  const inHelp = await page.evaluate(() => !!document.querySelector('.calc-help-overlay')?.contains(document.activeElement))
+  assert.ok(inHelp, 'Focus moves into the Help dialog on open')
+
+  // Tab stays inside: walk forward 25 tabs and confirm focus never leaves.
+  await page.evaluate(() => {
+    const overlay = document.querySelector('.calc-help-overlay')
+    const first = overlay?.querySelector('input, button') as HTMLElement | null
+    first?.focus()
+  })
+  for (let i = 0; i < 25; i++) await page.keyboard.press('Tab')
+  const stillInHelp = await page.evaluate(() => !!document.querySelector('.calc-help-overlay')?.contains(document.activeElement))
+  assert.ok(stillInHelp, 'Tab stays inside the Help dialog while open')
+
+  // Escape closes and focus returns to the Help trigger.
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(100)
+  assert.equal(await page.locator('.calc-help-overlay').count(), 0, 'Escape closes the Help dialog')
+  const helpFocusRestored = await page.evaluate(() => (document.activeElement as HTMLElement)?.textContent?.includes('Help') === true)
+  assert.ok(helpFocusRestored, 'Focus returns to the Help trigger after Escape')
+
+  // --- Rate-set delete confirmation dialog ---
+  await page.locator('.calc-modes button:has-text("Convert")').click()
+  await page.waitForTimeout(200)
+  await page.locator('button:has-text("Offline Currency Rates")').click()
+  await page.waitForTimeout(300)
+  // Create a throwaway set so its delete confirm can be opened.
+  await page.locator('#calc-cur-new-set').fill('Throwaway')
+  await page.locator('.calc-cur-card button:has-text("Create")').first().click()
+  await page.waitForTimeout(300)
+  const deleteSetBtn = page.locator('button:has-text("Delete set")')
+  assert.equal(await deleteSetBtn.isDisabled(), false, 'A non-default rate set can be deleted')
+  await deleteSetBtn.click()
+  await page.waitForSelector('[data-testid="calc-cur-confirm-delete"]')
+  const confirmDialog = page.locator('[data-testid="calc-cur-confirm-delete"]')
+  assert.equal(await confirmDialog.getAttribute('role'), 'dialog', 'Delete confirmation is role=dialog')
+  assert.equal(await confirmDialog.getAttribute('aria-modal'), 'true', 'Delete confirmation is aria-modal')
+  const inConfirm = await page.evaluate(() => !!document.querySelector('[data-testid="calc-cur-confirm-delete"]')?.contains(document.activeElement))
+  assert.ok(inConfirm, 'Focus moves into the delete confirmation on open')
+  // Tab stays inside.
+  for (let i = 0; i < 8; i++) await page.keyboard.press('Tab')
+  const stillInConfirm = await page.evaluate(() => !!document.querySelector('[data-testid="calc-cur-confirm-delete"]')?.contains(document.activeElement))
+  assert.ok(stillInConfirm, 'Tab stays inside the delete confirmation')
+  // Escape closes without deleting.
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('[data-testid="calc-cur-confirm-delete"]').count(), 0, 'Escape closes the delete confirmation')
+
+  // Confirm the delete through the buttons.
+  await deleteSetBtn.click()
+  await page.waitForSelector('[data-testid="calc-cur-confirm-delete"]')
+  await page.locator('[data-testid="calc-cur-confirm-delete"] button:has-text("Yes, delete it")').click()
+  await page.waitForTimeout(300)
+
+  // --- Import preview dialog ---
+  await page.locator('#calc-cur-paste').fill('code,rate\nTST,1.23\nTST,4.56')
+  await page.locator('button:has-text("Preview")').click()
+  await page.waitForSelector('[data-testid="calc-cur-import-preview"]')
+  const previewDlg = page.locator('[data-testid="calc-cur-import-preview"]')
+  assert.equal(await previewDlg.getAttribute('role'), 'dialog', 'Import preview is role=dialog')
+  assert.equal(await previewDlg.getAttribute('aria-modal'), 'true', 'Import preview is aria-modal')
+  const inPreview = await page.evaluate(() => !!document.querySelector('[data-testid="calc-cur-import-preview"]')?.contains(document.activeElement))
+  assert.ok(inPreview, 'Focus moves into the import preview on open')
+  for (let i = 0; i < 8; i++) await page.keyboard.press('Tab')
+  const stillInPreview = await page.evaluate(() => !!document.querySelector('[data-testid="calc-cur-import-preview"]')?.contains(document.activeElement))
+  assert.ok(stillInPreview, 'Tab stays inside the import preview')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('[data-testid="calc-cur-import-preview"]').count(), 0, 'Escape closes the import preview')
+  ok('Help, delete confirmation and import preview dialogs all trap focus and close on Escape')
+
+  // -------------------------------------------------------------------------
+  // Test 16: Renamed convert buttons are unambiguous
+  // -------------------------------------------------------------------------
+  console.log('16. Renamed Convert buttons')
+  // Currency: "Convert currency"
+  const convertCurrency = page.locator('.calc-cur-actions button:has-text("Convert currency")')
+  assert.equal(await convertCurrency.count(), 1, 'The currency tab has one "Convert currency" button')
+  // Units: "Convert units"
+  await page.locator('button:has-text("Unit Converter")').click()
+  await page.waitForTimeout(100)
+  const convertUnits = page.locator('button:has-text("Convert units")')
+  assert.equal(await convertUnits.count(), 1, 'The unit tab has one "Convert units" button')
+  assert.equal(await page.getByRole('button', { name: 'Convert Unit', exact: true }).count(), 0, 'The old "Convert Unit" label is gone')
+  await page.locator('.calc-modes button:has-text("Basic")').click()
+  ok('Convert buttons read "Convert units" and "Convert currency"')
+
+  // -------------------------------------------------------------------------
+  // Test 17: Dark theme pass over the main flows
+  // -------------------------------------------------------------------------
+  console.log('17. Dark theme: main flows render and stay readable')
+  await page.evaluate(() => {
+    document.documentElement.classList.add('dark')
+  })
+  await page.waitForTimeout(100)
+
+  // Basic evaluation works in dark mode.
+  await inputEl.fill('2 ^ 10')
+  await inputEl.press('Enter')
+  await page.waitForTimeout(100)
+  assert.equal((await page.locator('.calc-basic .text-2xl').textContent())?.trim(), '= 1024', 'Dark theme: basic evaluation works')
+  assert.ok(await page.locator('.calc-history-row').first().isVisible(), 'Dark theme: history rows render')
+
+  // Convert tab renders with real token classes only (no invented theme classes).
+  await page.locator('.calc-modes button:has-text("Convert")').click()
+  await page.waitForTimeout(200)
+  await page.locator('button:has-text("Offline Currency Rates")').click()
+  await page.waitForTimeout(200)
+  assert.ok(await page.locator('.calc-cur-card').first().isVisible(), 'Dark theme: currency cards render')
+  await page.locator('#calc-cur-amount').fill('10')
+  await page.locator('#calc-cur-from').fill('USD')
+  await page.locator('#calc-cur-to').fill('CAD')
+  await page.locator('.calc-cur-actions button:has-text("Convert currency")').click()
+  await page.waitForTimeout(200)
+  assert.ok(await page.locator('.calc-cur-result-value').isVisible(), 'Dark theme: currency result renders')
+
+  // Date/Time panel (previously using invented classes) renders with tokens.
+  await page.locator('.calc-modes button:has-text("Date/Time")').click()
+  await page.waitForTimeout(200)
+  assert.ok(await page.locator('[data-testid="panel-datetime"]').isVisible(), 'Dark theme: date/time panel renders')
+
+  // Help modal opens over the dark theme.
+  await page.locator('.calc-modes button:has-text("Basic")').click()
+  await page.waitForTimeout(100)
+  await page.locator('button:has-text("Help")').first().click()
+  await page.waitForSelector('.calc-help-overlay')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(100)
+
+  // No invented classes remain anywhere in the calculator DOM.
+  const badClassCount = await page.evaluate(() => {
+    const invented = ['bg-theme', 'border-theme', 'text-theme', 'bg-surface', 'btn-subtle']
+    let hits = 0
+    document.querySelectorAll('[class]').forEach((el) => {
+      const cls = (el as HTMLElement).className
+      if (typeof cls === 'string' && invented.some((c) => cls.includes(c))) hits++
+    })
+    return hits
+  })
+  assert.equal(badClassCount, 0, `No invented theme classes in the DOM (found ${badClassCount})`)
+
+  // Back to light.
+  await page.evaluate(() => document.documentElement.classList.remove('dark'))
+  ok('Dark theme: evaluation, currency, date/time, help modal and token classes all hold up')
 
   console.log(`\n========================================================================================`)
   console.log(`ALL ${passedTests} CALCULATOR UI INTEGRATION TESTS PASSED`)

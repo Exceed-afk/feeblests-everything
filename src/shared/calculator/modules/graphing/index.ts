@@ -4,6 +4,42 @@ import { Decimal } from '../../numeric'
 import { CALC_LIMITS, limitMessage } from '../../limits'
 import { CalcError } from '../../errors'
 import { toDecimalInput, toStringInput } from '../../inputs'
+import {
+  compileFloatExpression,
+  UnsupportedExpression,
+  type AngleMode
+} from './float-compile'
+
+export { UnsupportedExpression } from './float-compile'
+export type { AngleMode } from './float-compile'
+
+/**
+ * Angle mode for plotting. Callers pass it explicitly (the worker has no
+ * CalculatorEngine instance to read it from); defaults to degrees.
+ */
+function resolveAngleMode(explicit?: AngleMode): AngleMode {
+  return explicit ?? 'deg'
+}
+
+export interface SampleOptions {
+  /** Angle mode for trig functions in the float fast path. Defaults to degrees. */
+  angleMode?: AngleMode
+}
+
+/**
+ * Build the float closure, or null when the expression needs the exact Decimal path.
+ * Any float-path incompatibility (user variables, assignments, functions without a
+ * float twin, literals beyond double range) returns null: never a silently different
+ * result.
+ */
+function floatClosure(ast: import('../../parser').ASTNode, options?: SampleOptions): ((x: number) => number) | null {
+  try {
+    return compileFloatExpression(ast, { angleMode: resolveAngleMode(options?.angleMode) })
+  } catch (err) {
+    if (err instanceof UnsupportedExpression) return null
+    throw err
+  }
+}
 
 /** One plot point budget; sample, roots and extrema all draw from it. */
 function sampleCount(value: unknown, what = 'resolution'): number {
@@ -47,18 +83,66 @@ export interface ExtremaPoint {
   type: 'min' | 'max'
 }
 
+export interface ParametricPoint {
+  t: number
+  x: number | null
+  y: number | null
+}
+
+export interface PolarPoint {
+  theta: number
+  r: number | null
+  x: number | null
+  y: number | null
+}
+
+export interface TableRow {
+  x: number
+  y: number | null
+}
+
+export type DerivativeResult =
+  | { kind: 'ok'; x: number; derivative: number; f: number; central: number; left: number; right: number }
+  | { kind: 'undefined'; x: number; message: string }
+  | { kind: 'notDifferentiable'; x: number; message: string }
+
 /**
- * Evaluates an expression at a specific x value using the pure AST evaluator.
+ * One float-path evaluation: a finite double is the point, NaN/Infinity (or a
+ * throw from a domain error inside the closure) is a dead point, exactly like
+ * evaluateAt returns null.
  */
-export function evaluateAt(ast: import('../../parser').ASTNode, xVal: number): number | null {
+function evalFloat(fn: (x: number) => number, x: number): number | null {
   try {
-    const evaluator = new Evaluator({
-      scope: {
-        x: new Decimal(xVal),
-        t: new Decimal(xVal),
-        theta: new Decimal(xVal)
-      }
-    })
+    const y = fn(x)
+    return Number.isFinite(y) ? y : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Evaluates an expression at a specific x value using the exact Decimal evaluator.
+ * This is the reference path: every number shown to the user (roots, extrema, trace
+ * values) comes from here or is refined with it.
+ */
+export function evaluateAt(
+  ast: import('../../parser').ASTNode,
+  xVal: number,
+  angleMode?: AngleMode
+): number | null {
+  try {
+    const scope: Record<string, Decimal> = {
+      x: new Decimal(xVal),
+      t: new Decimal(xVal),
+      theta: new Decimal(xVal)
+    }
+    // Same convention the CalculatorEngine uses to tell the scientific
+    // registry the mode (0 = deg, 1 = rad, 2 = grad). Only set when the caller
+    // passes one, so existing call sites keep today's behaviour.
+    if (angleMode) {
+      scope.__anglemode = new Decimal(angleMode === 'rad' ? 1 : angleMode === 'grad' ? 2 : 0)
+    }
+    const evaluator = new Evaluator({ scope })
     const res = evaluator.evaluate(ast)
     const num = res.toNumber()
     if (!Number.isFinite(num)) return null
@@ -75,7 +159,8 @@ export function evaluateAt(ast: import('../../parser').ASTNode, xVal: number): n
 export function sampleFunction(
   expr: string,
   range: PlotRange,
-  resolution = 300
+  resolution = 300,
+  options?: SampleOptions
 ): SamplePoint[] {
   const source = toStringInput(expr, 'expression')
   const r = plotRange(range)
@@ -88,11 +173,15 @@ export function sampleFunction(
   const ySpan = r.yMax - r.yMin
   const yThreshold = Math.max(10, ySpan * 3)
 
+  // Plotting-only fast path: float64 closure. Anything the float path cannot
+  // mirror exactly falls back to the exact Decimal evaluator per point.
+  const fastFn = floatClosure(ast, options)
+
   let prevY: number | null = null
 
   for (let i = 0; i <= count; i++) {
     const x = r.xMin + i * dx
-    const y = evaluateAt(ast, x)
+    const y = fastFn ? evalFloat(fastFn, x) : evaluateAt(ast, x, resolveAngleMode(options?.angleMode))
 
     if (y === null) {
       result.push({ x, y: null, discontinuous: true })
@@ -138,7 +227,8 @@ export function findRoots(expr: string, xMin: number, xMax: number, steps = 100)
       if (curY === 0) {
         roots.push(curX)
       } else if (prevY * curY < 0 && Math.abs(curY - prevY) < 100) {
-        // Bisection refine
+        // Bisection refine, always on the exact Decimal evaluator so the
+        // reported root keeps full precision regardless of the sampling path.
         let lo = prevX
         let hi = curX
         for (let iter = 0; iter < 20; iter++) {
@@ -219,4 +309,238 @@ export function findExtrema(expr: string, xMin: number, xMax: number, steps = 10
   }
 
   return extrema
+}
+
+// ---------------------------------------------------------------------------
+// Parametric plots: x(t), y(t)
+// ---------------------------------------------------------------------------
+
+export interface ParametricOptions {
+  angleMode?: AngleMode
+}
+
+/** A [tMin, tMax] interval: tMax must be strictly greater than tMin, both finite. */
+function parametricInterval(tMin: unknown, tMax: unknown): { tMin: number; tMax: number } {
+  const lo = toDecimalInput(tMin, 'tMin').toNumber()
+  const hi = toDecimalInput(tMax, 'tMax').toNumber()
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) throw new CalcError('t range must be finite numbers')
+  if (!(hi > lo)) throw new CalcError('tMax must be greater than tMin')
+  return { tMin: lo, tMax: hi }
+}
+
+/**
+ * Samples a parametric curve x(t), y(t) over [tMin, tMax] at `samples` points
+ * (inclusive of both ends). Points where either coordinate is undefined carry
+ * null so the renderer lifts the pen.
+ */
+export function sampleParametric(
+  xExpr: string,
+  yExpr: string,
+  tMin: unknown,
+  tMax: unknown,
+  samples = 300,
+  options?: ParametricOptions
+): ParametricPoint[] {
+  const xSource = toStringInput(xExpr, 'x(t) expression')
+  const ySource = toStringInput(yExpr, 'y(t) expression')
+  const { tMin: lo, tMax: hi } = parametricInterval(tMin, tMax)
+  const count = sampleCount(samples, 'samples')
+  const xAst = parse(xSource)
+  const yAst = parse(ySource)
+  const angleMode = resolveAngleMode(options?.angleMode)
+
+  const fastX = floatClosure(xAst, { angleMode })
+  const fastY = floatClosure(yAst, { angleMode })
+
+  const dt = (hi - lo) / count
+  const out: ParametricPoint[] = []
+  for (let i = 0; i <= count; i++) {
+    const t = lo + i * dt
+    // Both coordinates go through the same path (fast or exact) so a curve is
+    // never half-sampled in doubles and half in decimals.
+    const x = fastX ? evalFloat(fastX, t) : evaluateAt(xAst, t, angleMode)
+    const y = fastY ? evalFloat(fastY, t) : evaluateAt(yAst, t, angleMode)
+    out.push({ t, x, y })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Polar plots: r(theta)
+// ---------------------------------------------------------------------------
+
+export interface PolarOptions {
+  angleMode?: AngleMode
+}
+
+/**
+ * Samples a polar curve r(theta) over [thetaMin, thetaMax] at `samples` points.
+ * theta is passed to the expression in the CURRENT angle mode (so `theta` in
+ * `r = theta` reads back degrees in DEG mode), while the conversion to screen
+ * x/y always happens in radians internally.
+ */
+export function samplePolar(
+  rExpr: string,
+  thetaMin: unknown,
+  thetaMax: unknown,
+  samples = 300,
+  options?: PolarOptions
+): PolarPoint[] {
+  const source = toStringInput(rExpr, 'r(theta) expression')
+  const { tMin: lo, tMax: hi } = parametricInterval(thetaMin, thetaMax)
+  const count = sampleCount(samples, 'samples')
+  const ast = parse(source)
+  const angleMode = resolveAngleMode(options?.angleMode)
+  const fastFn = floatClosure(ast, { angleMode })
+
+  // The expression sees theta in the user's angle mode; rad(theta) converts it
+  // for the screen mapping. In DEG mode a sampled theta=90 means the expression
+  // evaluates r at "90" (degrees) and the point sits at 90 degrees on screen.
+  const modeToRad = angleMode === 'rad' ? 1 : angleMode === 'grad' ? Math.PI / 200 : Math.PI / 180
+
+  const dTheta = (hi - lo) / count
+  const out: PolarPoint[] = []
+  for (let i = 0; i <= count; i++) {
+    const theta = lo + i * dTheta
+    const r = fastFn ? evalFloat(fastFn, theta) : evaluateAt(ast, theta, angleMode)
+    if (r === null) {
+      out.push({ theta, r: null, x: null, y: null })
+      continue
+    }
+    const rad = theta * modeToRad
+    out.push({ theta, r, x: r * Math.cos(rad), y: r * Math.sin(rad) })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Value table for the selected function
+// ---------------------------------------------------------------------------
+
+export interface TableOptions {
+  angleMode?: AngleMode
+}
+
+/**
+ * Values of the selected function at `count` points starting at `start`,
+ * stepping by `step`. Undefined points are null — the UI renders them as
+ * "undefined", never NaN. Mirrors the sampling paths: float fast path when the
+ * expression supports it, exact Decimal evaluator otherwise.
+ */
+export function buildValueTable(
+  expr: string,
+  start: unknown,
+  step: unknown,
+  count: unknown,
+  options?: TableOptions
+): TableRow[] {
+  const source = toStringInput(expr, 'expression')
+  const startVal = toDecimalInput(start, 'start').toNumber()
+  const stepVal = toDecimalInput(step, 'step').toNumber()
+  if (!Number.isFinite(startVal)) throw new CalcError('start must be a finite number')
+  if (!Number.isFinite(stepVal)) throw new CalcError('step must be a finite number')
+  if (stepVal === 0) throw new CalcError('step cannot be zero')
+  const n = sampleCount(count, 'count')
+  const ast = parse(source)
+  const fastFn = floatClosure(ast, { angleMode: resolveAngleMode(options?.angleMode) })
+
+  const rows: TableRow[] = []
+  for (let i = 0; i < n; i++) {
+    const x = startVal + i * stepVal
+    const y = fastFn ? evalFloat(fastFn, x) : evaluateAt(ast, x, resolveAngleMode(options?.angleMode))
+    rows.push({ x, y })
+  }
+  return rows
+}
+
+// ---------------------------------------------------------------------------
+// Derivative at a point (central difference + one-sided agreement check)
+// ---------------------------------------------------------------------------
+
+export interface DerivativeOptions {
+  angleMode?: AngleMode
+}
+
+/**
+ * Numerical derivative of the selected function at `point`.
+ *
+ * Central difference (f(x+h) - f(x-h)) / 2h is the headline number. The left
+ * and right one-sided slopes (f(x) - f(x-h)) / h and (f(x+h) - f(x)) / h are
+ * also computed; when they disagree beyond a scale-aware tolerance the point is
+ * a corner or cusp (|x| at 0) and the answer is "not differentiable at this
+ * point" instead of a number. When f itself is undefined at the point (or on
+ * either side beyond the reach of the probe), the answer names that instead.
+ *
+ * h starts at 1e-5 and shrinks toward 1e-7 for small |x| so the probe stays
+ * meaningful near the origin.
+ */
+export function derivativeAt(
+  expr: string,
+  point: unknown,
+  options?: DerivativeOptions
+): DerivativeResult {
+  const source = toStringInput(expr, 'expression')
+  const x0 = toDecimalInput(point, 'point').toNumber()
+  if (!Number.isFinite(x0)) throw new CalcError('point must be a finite number')
+  const ast = parse(source)
+  const fastFn = floatClosure(ast, { angleMode: resolveAngleMode(options?.angleMode) })
+
+  const eval1 = (x: number): number | null =>
+    fastFn ? evalFloat(fastFn, x) : evaluateAt(ast, x, resolveAngleMode(options?.angleMode))
+
+  const f0 = eval1(x0)
+  if (f0 === null) {
+    return { kind: 'undefined', x: x0, message: `The function is undefined at x = ${x0}` }
+  }
+
+  const h = Math.max(1e-7, Math.min(1e-5, Math.abs(x0) * 1e-5))
+  const fMinus = eval1(x0 - h)
+  const fPlus = eval1(x0 + h)
+
+  if (fMinus === null || fPlus === null) {
+    return {
+      kind: 'undefined',
+      x: x0,
+      message: `The function is undefined on at least one side of x = ${x0}`
+    }
+  }
+
+  const central = (fPlus - fMinus) / (2 * h)
+  const leftSlope = (f0 - fMinus) / h
+  const rightSlope = (fPlus - f0) / h
+
+  // Scale-aware disagreement test: a corner has left and right slopes that do
+  // not approach each other even as h shrinks. Tolerance grows with the size of
+  // the slopes themselves, so a steep function is not falsely rejected, and
+  // with |left| + |right| so |x| at 0 (slopes -1 and +1) is always caught.
+  const scale = Math.max(1, Math.abs(f0))
+  const slopeScale = Math.max(1, Math.abs(leftSlope), Math.abs(rightSlope))
+  const tol = Math.max(1e-4 * slopeScale * scale, 1e-6)
+  if (Math.abs(rightSlope - leftSlope) > tol) {
+    return {
+      kind: 'notDifferentiable',
+      x: x0,
+      message: `Not differentiable at x = ${x0} (left slope ${leftSlope.toPrecision(6)}, right slope ${rightSlope.toPrecision(6)})`
+    }
+  }
+
+  // One refinement pass with a smaller probe for the reported central value.
+  const h2 = h / 8
+  const fMinus2 = eval1(x0 - h2)
+  const fPlus2 = eval1(x0 + h2)
+  const refined = fMinus2 !== null && fPlus2 !== null ? (fPlus2 - fMinus2) / (2 * h2) : central
+
+  if (!Number.isFinite(refined)) {
+    return { kind: 'undefined', x: x0, message: `The derivative at x = ${x0} is not finite` }
+  }
+
+  return {
+    kind: 'ok',
+    x: x0,
+    derivative: refined,
+    f: f0,
+    central,
+    left: leftSlope,
+    right: rightSlope
+  }
 }

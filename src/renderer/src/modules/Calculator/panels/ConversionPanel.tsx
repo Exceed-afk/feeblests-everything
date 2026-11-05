@@ -146,7 +146,7 @@ export function ConversionPanel({ currencySeed, onCurrencySeedUsed, ...props }: 
           </div>
 
           <button type="button" className="btn-primary text-xs" onClick={handleConvertUnit}>
-            Convert Unit
+            Convert units
           </button>
 
           {unitError && <p className="text-xs text-neg">{unitError}</p>}

@@ -82,15 +82,35 @@ assert.equal(listCalcVariables(db)['tax'], '0.18'); ok()
 deleteCalcVariable(db, 'tax')
 assert.equal(listCalcVariables(db)['tax'], undefined); ok()
 
-// 3. Programs
+// 3. Programs: create, list, update (rename + edit), duplicate-like re-save, delete
 const p1 = saveCalcProgram(db, { name: 'Fibonacci', source: 'return 55' })
 assert.ok(p1.id); ok()
 const programs = listCalcPrograms(db)
 assert.equal(programs.length, 1); ok()
 assert.equal(programs[0].name, 'Fibonacci'); ok()
 
+// Rename + edit through the same save path (id given = update)
+const renamed = saveCalcProgram(db, { id: p1.id, name: 'Fib', source: 'return fib(10)' })
+assert.equal(renamed.id, p1.id); ok()
+assert.equal(renamed.name, 'Fib'); ok()
+assert.equal(renamed.createdAt, p1.createdAt, 'rename keeps the original created_at'); ok()
+const afterRename = listCalcPrograms(db)
+assert.equal(afterRename.length, 1); ok()
+assert.equal(afterRename[0].name, 'Fib'); ok()
+assert.equal(afterRename[0].source, 'return fib(10)'); ok()
+
+// Duplicate: saving without an id inserts a second row with the same source
+const dup = saveCalcProgram(db, { name: 'Fib copy', source: 'return fib(10)' })
+assert.notEqual(dup.id, p1.id); ok()
+assert.equal(listCalcPrograms(db).length, 2); ok()
+// Listing is ordered by name
+assert.deepEqual(listCalcPrograms(db).map((p) => p.name), ['Fib', 'Fib copy']); ok()
+
+deleteCalcProgram(db, dup.id)
 deleteCalcProgram(db, p1.id)
 assert.equal(listCalcPrograms(db).length, 0); ok()
+// Deleting an unknown id is a no-op, not an error
+deleteCalcProgram(db, '999999'); ok()
 
 // 4. Rate Sets, Rates, Overrides, and Transactions
 const sets = listCalcRateSets(db)
@@ -185,6 +205,21 @@ assert.equal(getCalcSetting(db, 'precision'), 16); ok()
 const allSettings = getAllCalcSettings(db)
 assert.equal(allSettings.precision, 16); ok()
 
+// 6. maxHistoryItems pruning: oldest unpinned rows go, pinned rows stay.
+setCalcSetting(db, 'maxHistoryItems', 3)
+clearCalcHistory(db)
+saveCalcHistory(db, { mode: 'standard', input: 'pinned-1', result: '0', resultFormat: 'decimal', pinned: true })
+for (let i = 1; i <= 5; i++) {
+  saveCalcHistory(db, { mode: 'standard', input: `row-${i}`, result: String(i), resultFormat: 'decimal' })
+}
+const pruned = listCalcHistory(db)
+assert.equal(pruned.length, 4, `Pinned row plus 3 unpinned kept (got ${pruned.length})`); ok()
+assert.ok(pruned.some((h) => h.input === 'pinned-1' && h.pinned), 'Pinned row survives pruning'); ok()
+assert.ok(pruned.some((h) => h.input === 'row-3'), 'Newest rows kept'); ok()
+assert.ok(!pruned.some((h) => h.input === 'row-1'), 'Oldest unpinned rows pruned first'); ok()
+setCalcSetting(db, 'maxHistoryItems', 100)
+clearCalcHistory(db)
+
 db.close()
 
 // 6. Backup export, wipe, restore round-trip & backward compatibility
@@ -245,6 +280,12 @@ assert.deepEqual(varsAfter, varsBefore); ok()
 const progsAfter = listCalcPrograms(db2)
 assert.equal(progsAfter.length, progsBefore.length); ok()
 assert.equal(progsAfter[0].name, progsBefore[0].name); ok()
+// Programs round-trip fully: source and timestamps survive export/restore
+assert.equal(progsAfter[0].source, progsBefore[0].source); ok()
+assert.equal(progsAfter[0].createdAt, progsBefore[0].createdAt); ok()
+assert.equal(progsAfter[0].updatedAt, progsBefore[0].updatedAt); ok()
+// The exported backup carries the program section itself
+assert.ok(exported.calculator.programs.length >= 1, 'export includes calc_programs'); ok()
 
 const rateSetsAfter = listCalcRateSets(db2)
 assert.equal(rateSetsAfter.length, rateSetsBefore.length); ok()

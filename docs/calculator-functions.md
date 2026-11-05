@@ -55,6 +55,8 @@ This document is automatically generated from the calculator's centralized funct
 
 | Function | Arity | Description | Examples |
 |---|---|---|---|
+| `stats_boxplot` | 1..999 | Box plot statistics (type-7 quartiles, 1.5×IQR whiskers) as text | `stats_boxplot(2, 4, 4, 4, 5, 5, 7, 9)` |
+| `stats_scatter_r2` | 4..999 | R² of the linear fit through paired x/y arguments (x1, y1, x2, y2, ...) | `stats_scatter_r2(1, 2, 2, 4, 3, 6)` |
 | `normal_pdf` | 1..3 | Normal distribution PDF | `normal_pdf(0, 0, 1)` |
 | `normal_cdf` | 1..3 | Normal distribution CDF | `normal_cdf(1.96, 0, 1)` |
 | `normal_inv` | 1..3 | Normal distribution INV | `normal_inv(0.975, 0, 1)` |

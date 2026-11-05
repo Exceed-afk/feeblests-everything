@@ -152,7 +152,7 @@ export function CASPanel(_props: ModuleProps) {
             <span className="text-xs text-muted">Running...</span>
             <button
               type="button"
-              className="btn text-xs border border-line hover:bg-surface"
+              className="btn text-xs"
               onClick={handleCancel}
             >
               Cancel

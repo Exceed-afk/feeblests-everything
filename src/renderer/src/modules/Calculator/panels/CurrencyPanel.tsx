@@ -49,6 +49,7 @@ import {
   DISPLAY_DECIMALS_OPTIONS
 } from '../../../../../shared/calculator/currencyUi'
 import { defaultStorageAdapter } from '../adapters/storage'
+import { useModalDialog } from '../useModalDialog'
 import type {
   CalcRate,
   CalcRateOverride,
@@ -196,6 +197,9 @@ export function CurrencyPanel({ onClose: _onClose, seed, onSeedUsed }: Props) {
 
   const displayDecimals = settings?.currencyDisplayDecimals ?? DEFAULT_DISPLAY_DECIMALS
   const staleDays = settings?.staleRateDays ?? 7
+
+  const deleteDialog = useModalDialog(!!confirmDeleteId, () => setConfirmDeleteId(null))
+  const previewDialog = useModalDialog(!!preview, () => setPreview(null))
 
   // ---------------------------------------------------------------- loading
   const loadSetData = useCallback(async (setId: string) => {
@@ -692,7 +696,15 @@ export function CurrencyPanel({ onClose: _onClose, seed, onSeedUsed }: Props) {
         </div>
 
         {confirmDeleteId && (
-          <div className="calc-cur-confirm" role="alertdialog" aria-label="Confirm deleting the rate set">
+          <div
+            className="calc-cur-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm deleting the rate set"
+            ref={deleteDialog.overlayRef}
+            onKeyDown={deleteDialog.onKeyDown}
+            data-testid="calc-cur-confirm-delete"
+          >
             <p className="text-xs">
               Delete “{rateSets.find((s) => s.id === confirmDeleteId)?.name}”? Its rates and pair overrides are
               removed too. This cannot be undone.
@@ -813,7 +825,7 @@ export function CurrencyPanel({ onClose: _onClose, seed, onSeedUsed }: Props) {
 
         <div className="calc-cur-actions">
           <button type="button" className="btn btn-primary" onClick={() => void doConvert()}>
-            Convert
+            Convert currency
           </button>
           <span className="text-xs text-muted">
             Saved to your history with the exact rates it used.
@@ -1230,7 +1242,15 @@ export function CurrencyPanel({ onClose: _onClose, seed, onSeedUsed }: Props) {
         </div>
 
         {preview && (
-          <div className="calc-cur-preview" role="region" aria-label="Import preview">
+          <div
+            className="calc-cur-preview"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Import preview"
+            ref={previewDialog.overlayRef}
+            onKeyDown={previewDialog.onKeyDown}
+            data-testid="calc-cur-import-preview"
+          >
             <div className="calc-cur-card-head">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted">Preview</span>
               <span className="text-xs text-muted">

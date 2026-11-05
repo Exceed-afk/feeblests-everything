@@ -5,10 +5,9 @@ import type {
   CalcRate,
   CalcRateOverride,
   CalcRateSet,
-  CalcSettings,
   RateSetImportRow
 } from '../shared/calculator/types'
-import { DEFAULT_CALC_SETTINGS } from '../shared/calculator/types'
+import { DEFAULT_CALC_SETTINGS, type CalcSettings } from '../shared/calculator/types'
 import { validateCurrencyCode } from '../shared/calculator/rates'
 
 export function saveCalcHistory(
@@ -31,6 +30,8 @@ export function saveCalcHistory(
       item.pinned ? 1 : 0
     )
 
+  pruneHistoryToLimit(db)
+
   return {
     id: String(info.lastInsertRowid),
     createdAt: now,
@@ -41,6 +42,30 @@ export function saveCalcHistory(
     rateSnapshot: item.rateSnapshot,
     pinned: item.pinned
   }
+}
+
+/**
+ * Enforce the maxHistoryItems setting: drop the oldest unpinned rows until the table
+ * holds at most the limit. Pinned rows are never pruned, so the table can temporarily
+ * hold more than the limit when everything is pinned.
+ */
+function pruneHistoryToLimit(db: Database.Database): void {
+  let limit: number
+  try {
+    const raw = db.prepare("SELECT value FROM calc_settings WHERE key = 'maxHistoryItems'").get() as
+      | { value: string | number | null }
+      | undefined
+    limit = Math.floor(Number(raw?.value ?? DEFAULT_CALC_SETTINGS.maxHistoryItems))
+  } catch {
+    limit = DEFAULT_CALC_SETTINGS.maxHistoryItems
+  }
+  if (!Number.isFinite(limit) || limit < 1) limit = DEFAULT_CALC_SETTINGS.maxHistoryItems
+  db.prepare(
+    `DELETE FROM calc_history
+     WHERE pinned = 0 AND id NOT IN (
+       SELECT id FROM calc_history WHERE pinned = 0 ORDER BY id DESC LIMIT ?
+     )`
+  ).run(limit)
 }
 
 export function listCalcHistory(db: Database.Database, limit = 100): CalcHistoryItem[] {

@@ -143,11 +143,11 @@ async function runCurrencyStates(theme, width) {
   await reload()
 
   const openCurrencyTab = async () => {
-    await page.getByRole('group', { name: 'Calculator mode' }).getByRole('button', { name: 'Convert' }).click()
+    await page.locator('.calc-modes button:has-text("Convert")').click()
     await page.getByRole('button', { name: 'Offline Currency Rates' }).click()
     await page.waitForTimeout(300)
   }
-  const convertButton = () => page.locator('.calc-cur-card').filter({ hasText: 'Conversion' }).getByRole('button', { name: 'Convert' })
+  const convertButton = () => page.locator('.calc-cur-card').filter({ hasText: 'Conversion' }).getByRole('button', { name: 'Convert currency' })
 
   await openCurrencyTab()
   await shot('empty-state')
@@ -268,6 +268,76 @@ async function runCurrencyStates(theme, width) {
   return { shots, problems }
 }
 
+async function runGraphStates(theme, width) {
+  const shots = []
+  const shot = async (name) => {
+    const file = join(OUT, `${theme}-${width}-graph-${name}.png`)
+    await page.screenshot({ path: file, fullPage: false })
+    shots.push(file)
+  }
+  const problems = []
+
+  const panel = page.locator('[data-testid="panel-graph"]')
+
+  // 1. Function plot is the default state (already open from the mode loop).
+  await page.waitForTimeout(400)
+  await shot('function-default')
+
+  // 2. Parametric state: inputs and a plotted unit circle.
+  await panel.getByRole('button', { name: 'Parametric' }).click()
+  await page.waitForTimeout(600)
+  const xExpr = panel.locator('input[aria-label="x of t expression"]')
+  if (!(await xExpr.isVisible())) problems.push('parametric x(t) input missing')
+  await xExpr.fill('cos(t)')
+  await panel.locator('input[aria-label="y of t expression"]').fill('sin(t)')
+  await page.waitForTimeout(500)
+  await shot('parametric')
+
+  // 3. Polar state with a rose curve.
+  await panel.getByRole('button', { name: 'Polar' }).click()
+  await page.waitForTimeout(600)
+  const rExpr = panel.locator('input[aria-label="r of theta expression"]')
+  if (!(await rExpr.isVisible())) problems.push('polar r(theta) input missing')
+  await rExpr.fill('1 + 0.3theta')
+  await page.waitForTimeout(500)
+  await shot('polar')
+
+  // 4. Value table with a filled result (function plots, x^2 - 4).
+  await panel.getByRole('button', { name: 'y = f(x)' }).click()
+  await page.waitForTimeout(400)
+  await panel.locator('input[aria-label="Table start"]').fill('0')
+  await panel.locator('input[aria-label="Table step"]').fill('0.5')
+  await panel.locator('input[aria-label="Table count"]').fill('6')
+  await panel.getByRole('button', { name: 'Build table' }).click()
+  await page.waitForTimeout(400)
+  const rows = panel.locator('[data-testid="graph-table-rows"] tbody tr')
+  if ((await rows.count()) === 0) problems.push('value table did not build rows')
+  await shot('value-table')
+
+  // 5. Derivative result: x^2 - 4 at 3 gives f'(3) = 6, plus the tangent toggle.
+  await panel.locator('input[aria-label="Derivative point"]').fill('3')
+  await panel.getByRole('button', { name: /Compute f/ }).click()
+  await page.waitForTimeout(400)
+  const deriv = panel.locator('[data-testid="graph-derivative-result"]')
+  if (!(await deriv.isVisible())) problems.push('derivative result missing')
+  const derivText = (await deriv.textContent()) || ''
+  if (!/6/.test(derivText)) problems.push(`derivative of x^2-4 at 3 should mention 6, got "${derivText.slice(0, 40)}"`)
+  await shot('derivative')
+
+  // 6. Non-differentiable message: abs(x) at 0.
+  await panel.locator('input[placeholder="e.g. sin(x) or 3x - 2"]').fill('abs(x)')
+  await panel.getByRole('button', { name: 'Add', exact: true }).first().click()
+  await page.waitForTimeout(400)
+  await panel.locator('input[aria-label="Derivative point"]').fill('0')
+  await panel.getByRole('button', { name: /Compute f/ }).click()
+  await page.waitForTimeout(400)
+  const absText = (await deriv.textContent()) || ''
+  if (!/Not differentiable/.test(absText)) problems.push(`abs(x) at 0 should read "Not differentiable", got "${absText.slice(0, 40)}"`)
+  await shot('derivative-nondifferentiable')
+
+  return { shots, problems }
+}
+
 // Switching theme uses the app's own toggle, so the tokens are the real ones (not just the class).
 for (const theme of ['light', 'dark']) {
   const isDark = await page.evaluate(() => document.documentElement.classList.contains('dark'))
@@ -282,7 +352,7 @@ for (const theme of ['light', 'dark']) {
     await page.waitForTimeout(120)
 
     for (const mode of MODES) {
-      await page.getByRole('button', { name: mode, exact: true }).click()
+      await page.locator('.calc-modes button', { hasText: mode }).first().click()
       await page.waitForTimeout(300)
       const problems = await page.evaluate(overlapProbe)
       const contrast = await page.evaluate(contrastProbe)
@@ -292,7 +362,7 @@ for (const theme of ['light', 'dark']) {
       await page.screenshot({ path: file, fullPage: false })
     }
     // Basic-mode shot with history panel open, to check the two-column layout.
-    await page.getByRole('button', { name: 'Basic', exact: true }).click()
+    await page.locator('.calc-modes button:has-text("Basic")').click()
     await page.getByRole('button', { name: /^History/ }).click()
     await page.waitForTimeout(300)
     report.push({ theme, width, mode: 'Basic+History', problems: await page.evaluate(overlapProbe), contrast: await page.evaluate(contrastProbe) })
@@ -303,6 +373,13 @@ for (const theme of ['light', 'dark']) {
     // Currency states (stale warning, override notice, import preview, validation errors, keyboard edit).
     const currency = await runCurrencyStates(theme, width)
     report.push({ theme, width, mode: 'Currency+states', problems: currency.problems, contrast: {}, shots: currency.shots })
+
+    // Graph states (plot types, value table, derivative) in the same theme/width.
+    await page.locator('.calc-modes button:has-text("Graph")').click()
+    await page.waitForSelector('[data-testid="panel-graph"]')
+    await page.waitForTimeout(400)
+    const graph = await runGraphStates(theme, width)
+    report.push({ theme, width, mode: 'Graph+states', problems: graph.problems, contrast: {}, shots: graph.shots })
   }
 }
 

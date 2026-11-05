@@ -19,10 +19,8 @@ import type {
   CalcRateOverride,
   CalcRateSet,
   CalcRateSnapshot,
-  RateProvider,
   RateSetImportRow,
-  StaleRateInfo,
-  StorageAdapter
+  StaleRateInfo
 } from './types'
 
 // ---------- 1. Currency Code Validation ----------
@@ -109,7 +107,7 @@ export function checkRateStaleness(
   }
 }
 
-// ---------- 3. ManualRateProvider & Core Conversion Logic ----------
+// ---------- 3. Core Conversion Logic ----------
 
 export interface CurrencyConversionQuery {
   amount: string | Decimal
@@ -130,99 +128,6 @@ export interface CurrencyConversionOutput {
   isStale: boolean
   oldestRateAgeDays: number | null
   snapshot: CalcRateSnapshot
-}
-
-export class ManualRateProvider implements RateProvider {
-  constructor(private storage: StorageAdapter) { }
-
-  /**
-   * Resolves the effective rate from `from` to `to` as an exact decimal string.
-   * Priority:
-   * 1. If from === to, rate is '1'.
-   * 2. Direct override (from -> to).
-   * 3. Inverse of direct override (to -> from) if present.
-   * 4. Cross rate via base currency: (rateToBase(to) / rateToBase(from)).
-   * Returns null if any required rate is missing.
-   */
-  async getRate(from: string, to: string, rateSetId?: string): Promise<string | null> {
-    try {
-      const normFrom = validateCurrencyCode(from)
-      const normTo = validateCurrencyCode(to)
-      if (normFrom === normTo) return '1'
-
-      const { targetSet, rates, overrides } = await this.resolveRateSetData(rateSetId)
-      const baseCode = validateCurrencyCode(targetSet.baseCurrency)
-
-      return calculateEffectiveRate({
-        from: normFrom,
-        to: normTo,
-        baseCurrency: baseCode,
-        rates,
-        overrides
-      })?.rateString ?? null
-    } catch {
-      return null
-    }
-  }
-
-  /**
-   * Perform a full conversion with complete metadata snapshot suitable for calc_history.rateSnapshot.
-   */
-  async convert(query: CurrencyConversionQuery): Promise<CurrencyConversionOutput> {
-    const normFrom = validateCurrencyCode(query.from)
-    const normTo = validateCurrencyCode(query.to)
-
-    const amountDec = query.amount instanceof Decimal ? query.amount : new Decimal(String(query.amount).trim())
-    if (!amountDec.isFinite()) {
-      throw new CalcError(`Invalid conversion amount "${String(query.amount)}"`)
-    }
-
-    const { targetSet, rates, overrides } = await this.resolveRateSetData(query.rateSetId)
-    const baseCode = validateCurrencyCode(targetSet.baseCurrency)
-
-    const staleDays = query.staleRateDays ?? 7
-    const today = query.today ?? new Date()
-
-    return performCurrencyConversion({
-      amount: amountDec,
-      from: normFrom,
-      to: normTo,
-      targetSet,
-      rates,
-      overrides,
-      baseCurrency: baseCode,
-      staleRateDays: staleDays,
-      today
-    })
-  }
-
-  private async resolveRateSetData(rateSetId?: string): Promise<{
-    targetSet: CalcRateSet
-    rates: CalcRate[]
-    overrides: CalcRateOverride[]
-  }> {
-    let targetSet: CalcRateSet | undefined
-    if (rateSetId) {
-      const sets = await this.storage.loadRateSets()
-      targetSet = sets.find((s) => s.id === rateSetId)
-      if (!targetSet) {
-        throw new CalcError(`Rate set "${rateSetId}" not found`)
-      }
-    } else {
-      const sets = await this.storage.loadRateSets()
-      targetSet = sets.find((s) => s.isActive) || sets[0]
-      if (!targetSet) {
-        throw new CalcError('No rate set available')
-      }
-    }
-
-    const [rates, overrides] = await Promise.all([
-      this.storage.loadRates(targetSet.id),
-      this.storage.listRateOverrides ? this.storage.listRateOverrides(targetSet.id) : Promise.resolve([])
-    ])
-
-    return { targetSet, rates, overrides }
-  }
 }
 
 export interface EffectiveRateResolution {

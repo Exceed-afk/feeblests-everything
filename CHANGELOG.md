@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.0] - 2026-11-05
+
+### Phase 12: All-in-one calculator
+- **Calculator** (Utilities): an all-in-one local-only mathematical engine on an exact decimal core (decimal.js) with no dynamic code execution anywhere — the parser/evaluator is AST-based, scripts run in a sandboxed interpreter with a step cap and time limit.
+- **Panels**: standard/scientific, statistics (descriptive, regressions, distributions, hypothesis tests, SVG histogram/box/scatter plots, CSV import), finance (TVM solver, amortization, NPV/IRR/XNPV/XIRR, position sizing), conversions (units, bases 2–36, offline currency rate sets with overrides, stale-rate warnings and audit snapshots), 2D graphing (function/parametric/polar, trace, root/extrema finders, value tables, derivative tool), linear algebra and complex numbers, CAS (simplify, differentiate, integrate, limits, solve, Taylor), programming/bitwise (BigInt 64-bit, two's complement view, saved programs with import/export), and date/time arithmetic.
+- **Heavy math runs in Web Workers** (`cas.worker.ts`, `graph.worker.ts`, `script.worker.ts`) behind a shared harness with request-id correlation, time limits (CAS 5 s, graph 2 s, scripts 5 s + 100k steps) and cancel/abort; the UI stays responsive and shows Running…/Cancel.
+- **Storage**: migration 27 adds seven `calc_*` tables (history with pinning + `maxHistoryItems` prune, variables, programs, offline rate sets/rates/overrides, per-tool settings); the renderer reaches them only through `window.api.calculator.*`; in the browser layout harness the same UI falls back to `localStorage`.
+- **Backup**: all seven tables round-trip in the JSON backup (schemaVersion 27); migration-27 columns `pinned` and `rate_snapshot` included.
+- **Theme**: every calculator surface uses theme tokens / `calc-*` semantic classes only, so palettes, dark mode, radius and density apply without calculator-side work.
+- **Docs**: generated function reference (`docs/calculator-functions.md` via `npm run gen:calc-docs`), hardware-calibrated perf baseline (`docs/calculator-performance.md` via `npm run test:calc-perf`), and the Phase 0 host mapping (`docs/calculator-host-mapping.md`).
+- **Tests**: 28-file chain `npm run test:calc` (logic, DB, adapters, boundary, workers harness, fuzz, limits), browser UI suite `npm run test:calc-ui` (patchright Chromium against the `.calch` harness), and the perf suite. All are part of `npm test` except `test:calc-ui` and `test:calc-perf`, which are run explicitly.
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 

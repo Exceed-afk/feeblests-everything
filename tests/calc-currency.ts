@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import {
-  ManualRateProvider,
   calculateEffectiveRate,
   performCurrencyConversion,
   validateCurrencyCode,
@@ -67,7 +66,7 @@ assert.equal(tenDaysCheck.isStale, true)
 assert.equal(tenDaysCheck.daysOld, 10); ok()
 
 // -----------------------------------------------------------------------------
-// 3. ManualRateProvider: Base-relative, Inverse, Cross-rates, and Overrides
+// 3. Effective rates: base-relative, inverse, cross-rates, and overrides
 // -----------------------------------------------------------------------------
 
 async function runAsyncCurrencyTests() {
@@ -106,34 +105,39 @@ async function runAsyncCurrencyTests() {
     updatedAt: '2026-11-03T00:00:00.000Z'
   })
 
-  const provider = new ManualRateProvider(mockStorage)
+  // Effective rates through calculateEffectiveRate (the pure helper the conversion runs on).
+  const eff = async (from: string, to: string) =>
+    calculateEffectiveRate({
+      from,
+      to,
+      baseCurrency: 'USD',
+      rates: await mockStorage.loadRates(testSet.id),
+      overrides: await mockStorage.listRateOverrides(testSet.id)
+    })?.rateString ?? null
 
   // Same currency -> 1
-  const sameRate = await provider.getRate('USD', 'USD', testSet.id)
-  assert.equal(sameRate, '1'); ok()
+  assert.equal(await eff('USD', 'USD'), '1'); ok()
 
   // Base to currency: USD to EUR -> 0.92
-  const usdToEur = await provider.getRate('USD', 'EUR', testSet.id)
-  assert.equal(usdToEur, '0.92'); ok()
+  assert.equal(await eff('USD', 'EUR'), '0.92'); ok()
 
   // Inverse: EUR to USD -> 1 / 0.92
-  const eurToUsd = await provider.getRate('EUR', 'USD', testSet.id)
+  const eurToUsd = await eff('EUR', 'USD')
   const expectedEurToUsd = new Decimal(1).dividedBy(new Decimal('0.92')).toString()
   assert.equal(eurToUsd, expectedEurToUsd); ok()
 
   // Cross-rate: EUR to GBP -> rateToBase(GBP) / rateToBase(EUR) = 0.79 / 0.92
-  const eurToGbp = await provider.getRate('EUR', 'GBP', testSet.id)
+  const eurToGbp = await eff('EUR', 'GBP')
   const expectedEurToGbp = new Decimal('0.79').dividedBy(new Decimal('0.92')).toString()
   assert.equal(eurToGbp, expectedEurToGbp); ok()
 
   // Cross-rate: GBP to JPY -> 150 / 0.79
-  const gbpToJpy = await provider.getRate('GBP', 'JPY', testSet.id)
+  const gbpToJpy = await eff('GBP', 'JPY')
   const expectedGbpToJpy = new Decimal('150.0').dividedBy(new Decimal('0.79')).toString()
   assert.equal(gbpToJpy, expectedGbpToJpy); ok()
 
   // Missing rate -> null
-  const missingRate = await provider.getRate('USD', 'CAD', testSet.id)
-  assert.equal(missingRate, null); ok()
+  assert.equal(await eff('USD', 'CAD'), null); ok()
 
   // Override precedence:
   // Add direct pair override for EUR -> GBP = 0.88 (instead of computed 0.79/0.92 ~ 0.8587)
@@ -145,28 +149,32 @@ async function runAsyncCurrencyTests() {
     updatedAt: '2026-11-04T00:00:00.000Z'
   })
 
-  const eurToGbpOverridden = await provider.getRate('EUR', 'GBP', testSet.id)
-  assert.equal(eurToGbpOverridden, '0.88', 'Direct override takes precedence over computed cross rate'); ok()
+  assert.equal(await eff('EUR', 'GBP'), '0.88', 'Direct override takes precedence over computed cross rate'); ok()
 
   // Inverse of override: GBP -> EUR should use inverse 1 / 0.88
-  const gbpToEurInvOverride = await provider.getRate('GBP', 'EUR', testSet.id)
+  const gbpToEurInvOverride = await eff('GBP', 'EUR')
   const expectedInvOverride = new Decimal(1).dividedBy(new Decimal('0.88')).toString()
   assert.equal(gbpToEurInvOverride, expectedInvOverride, 'Inverse of pair override automatically used'); ok()
 
   // -----------------------------------------------------------------------------
-  // 4. Conversion Execution & Snapshot Details
+  // 4. Conversion Execution & Snapshot Details (performCurrencyConversion)
   // -----------------------------------------------------------------------------
+  const convert = async (amount: string, from: string, to: string, opts: { staleRateDays?: number } = {}) =>
+    performCurrencyConversion({
+      amount: new Decimal(amount),
+      from,
+      to,
+      targetSet: testSet,
+      rates: await mockStorage.loadRates(testSet.id),
+      overrides: await mockStorage.listRateOverrides(testSet.id),
+      baseCurrency: 'USD',
+      staleRateDays: opts.staleRateDays ?? 7,
+      today: '2026-11-04T12:00:00.000Z'
+    })
 
-  // Base currency entries in rate provider are implicit 1 to base
+  // Base currency entries in the conversion are implicit 1 to base
   // USD -> EUR (ratesUsed has EUR)
-  const convResultFresh = await provider.convert({
-    amount: '100',
-    from: 'USD',
-    to: 'EUR',
-    rateSetId: testSet.id,
-    today: '2026-11-04T12:00:00.000Z',
-    staleRateDays: 7
-  })
+  const convResultFresh = await convert('100', 'USD', 'EUR')
   assert.equal(convResultFresh.result, '92')
   assert.equal(convResultFresh.isStale, false)
   assert.equal(convResultFresh.isDirectOverride, false)
@@ -179,52 +187,24 @@ async function runAsyncCurrencyTests() {
   assert.equal(convResultFresh.snapshot.ratesUsed[0].currencyCode, 'EUR'); ok()
 
   // Stale conversion (GBP is 8 days old: Oct 27 to Nov 4; threshold 7)
-  const convResultStale = await provider.convert({
-    amount: '100',
-    from: 'USD',
-    to: 'GBP',
-    rateSetId: testSet.id,
-    today: '2026-11-04T12:00:00.000Z',
-    staleRateDays: 7
-  })
+  const convResultStale = await convert('100', 'USD', 'GBP')
   assert.equal(convResultStale.isStale, true)
   assert.equal(convResultStale.snapshot.oldestDaysOld, 8)
   assert.equal(convResultStale.snapshot.isStale, true); ok()
 
   // Cross conversion between EUR (2d old) and GBP (8d old) reports oldest rate (8d old)
-  const crossStale = await provider.convert({
-    amount: '100',
-    from: 'EUR',
-    to: 'GBP',
-    rateSetId: testSet.id,
-    today: '2026-11-04T12:00:00.000Z',
-    staleRateDays: 7
-  })
+  const crossStale = await convert('100', 'EUR', 'GBP')
   // Note: an override for EUR->GBP was registered above with today's date, so override timestamp applies!
   assert.equal(crossStale.isDirectOverride, true)
   assert.equal(crossStale.isStale, false); ok()
 
   // Cross conversion EUR to JPY (without override): oldest rate is EUR (2d old) vs JPY (1d old) -> 2d old
-  const crossEurJpy = await provider.convert({
-    amount: '10',
-    from: 'EUR',
-    to: 'JPY',
-    rateSetId: testSet.id,
-    today: '2026-11-04T12:00:00.000Z',
-    staleRateDays: 7
-  })
+  const crossEurJpy = await convert('10', 'EUR', 'JPY')
   assert.equal(crossEurJpy.snapshot.oldestDaysOld, 2)
   assert.equal(crossEurJpy.snapshot.ratesUsed.length, 2); ok()
 
   // Cross-rate conversion with override snapshot: EUR to GBP
-  const convOverride = await provider.convert({
-    amount: '50',
-    from: 'EUR',
-    to: 'GBP',
-    rateSetId: testSet.id,
-    today: '2026-11-04T12:00:00.000Z',
-    staleRateDays: 7
-  })
+  const convOverride = await convert('50', 'EUR', 'GBP')
   assert.equal(convOverride.result, '44') // 50 * 0.88 = 44
   assert.equal(convOverride.isDirectOverride, true)
   assert.equal(convOverride.snapshot.isDirectOverride, true)
@@ -233,12 +213,7 @@ async function runAsyncCurrencyTests() {
   // Missing rate throws informative error
   await assert.rejects(
     async () => {
-      await provider.convert({
-        amount: '100',
-        from: 'EUR',
-        to: 'XYZ',
-        rateSetId: testSet.id
-      })
+      await convert('100', 'EUR', 'XYZ')
     },
     /Missing rate/
   ); ok()
@@ -322,7 +297,7 @@ async function runAsyncCurrencyTests() {
   assert.equal(replacedRates.find((r) => r.currencyCode === 'CHF')?.rateToBase, '0.89')
   assert.equal(replacedRates.find((r) => r.currencyCode === 'JPY'), undefined, 'Replace wiped previous rates'); ok()
 
-  console.log(`ok   ${checks} currency logic, rate provider, validation & import/export tests passed`)
+  console.log(`ok   ${checks} currency logic, conversion, validation & import/export tests passed`)
 }
 
 void runAsyncCurrencyTests()

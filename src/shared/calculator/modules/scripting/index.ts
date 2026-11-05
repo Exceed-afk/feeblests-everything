@@ -327,3 +327,11 @@ export function executeScript(
     stepsCount: step
   }
 }
+
+// Re-export the Phase 9 program tooling (two's complement views, program file
+// import/export) so one import site serves the whole module.
+export {
+  WORD_SIZES, twosView, toSigned, parseProgValue,
+  parseProgramFile, serializeProgramFile, programFileLimitBytes,
+  type WordSize, type TwosView, type ExportedProgram, type ProgramFile
+} from './progTools'

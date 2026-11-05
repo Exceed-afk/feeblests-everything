@@ -5,6 +5,20 @@ import { CALC_LIMITS, limitMessage } from '../../limits'
 import { CalcError } from '../../errors'
 import { toDecimalInput, toDecimalArray, toPairedArrays, toProbabilityInput, toIntegerInput, describe } from '../../inputs'
 
+// Chart geometry + CSV import, re-exported so one import site serves both.
+// charts.ts imports linearRegression from here; function declarations hoist,
+// so the index -> charts -> index cycle resolves safely.
+export {
+  histogram, sturgesBinCount, MAX_BIN_COUNT,
+  boxPlot,
+  scatterData, capScatter, SCATTER_DRAW_LIMIT,
+  parseCsv, csvColumn, isNumericCell,
+  registerChartFunctions,
+  type Bin, type Histogram, type BoxPlot, type ScatterData, type ScatterPoint,
+  type CsvTable, type CsvDataset
+} from './charts'
+import { registerChartFunctions } from './charts'
+
 /**
  * One gate for every statistics entry point: accepts an array or a text dataset
  * ("1, 2, 3"), rejects anything else, and enforces the dataset cap (section 11).
@@ -828,3 +842,4 @@ export function registerStatisticsFunctions(): void {
 }
 
 registerStatisticsFunctions()
+registerChartFunctions()

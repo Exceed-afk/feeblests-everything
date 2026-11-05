@@ -1,6 +1,6 @@
 # Feeblest's Everything: Architecture
 
-Last verified: 2026-11-03 (package.json `0.18.0`). Every path and name below was checked against the code on this date.
+Last verified: 2026-11-05 (package.json `0.18.0`). Every path and name below was checked against the code on this date.
 
 > **Important correction to the app's own briefs.** The stack is **React + Electron + SQLite (better-sqlite3)**. There are **no Zustand stores, no Dexie/IndexedDB, and no shadcn/ui components** anywhere in the code (searched the whole repo). This document describes what the code actually does. Where a "store" is named, it means the one hand-rolled settings store, not Zustand.
 
@@ -24,11 +24,12 @@ Last verified: 2026-11-03 (package.json `0.18.0`). Every path and name below was
 
 | Layer | Tech | Purpose |
 |---|---|---|
-| UI | React 18 + TypeScript + Tailwind 3, Lucide icons | One window, 14 module pages, no router |
+| UI | React 18 + TypeScript + Tailwind 3, Lucide icons | One window, 15 module pages, no router |
 | State | React `useState` per page + one settings store (`useSyncExternalStore`) | Page data refetched from SQLite on every load/write; only settings live in memory across pages |
-| Bridge | Electron `contextBridge` (`window.api`, `src/preload/index.ts`) | The only path between UI and data; ~60 typed IPC channels |
-| Logic | Pure rule modules in `src/shared/*.ts` | Streaks, recurrence, palette fuzzy match, appearance — tested with plain `tsx` |
-| Data | better-sqlite3, one file at `userData/data/everything.db` | 34 tables + FTS5 search index, 27 append-only migrations, WAL |
+| Bridge | Electron `contextBridge` (`window.api`, `src/preload/index.ts`) | The only path between UI and data; ~90 typed IPC channels |
+| Logic | Pure rule modules in `src/shared/*.ts` | Streaks, recurrence, palette fuzzy match, appearance, the whole calculator engine — tested with plain `tsx` |
+| Workers | Web Workers in the renderer (`src/renderer/src/modules/Calculator/workers/`: `cas.worker.ts`, `graph.worker.ts`, `script.worker.ts` + `harness.ts`) | Calculator CAS, graph sampling and scripts run off the UI thread with time limits and cancellation |
+| Data | better-sqlite3, one file at `userData/data/everything.db` | 41 tables + FTS5 search index, 27 append-only migrations (schemaVersion 27), WAL |
 
 **Data flow in one paragraph:** every module page calls a promise-style method on `window.api`; the preload script turns it into `ipcRenderer.invoke('channel', payload)`; the matching handler in `src/main/index.ts` calls a query function in `src/main/<module>.ts` with the SQLite handle from `src/main/db.ts`; the result (plain JSON objects, never DB handles) resolves back to the page, which stores it in local `useState` and re-renders. Writes follow the same path in reverse, and pages re-fetch their lists after each write — there is no client-side data cache to keep in sync.
 
@@ -65,7 +66,7 @@ src/
   main/                  Electron main process; owns the database
     index.ts             Window creation, every IPC handler, app lifecycle
     db.ts                SQLite connection, settings get/set, daily backups
-    migrations.ts        16 append-only migrations (user_version)
+    migrations.ts        27 append-only migrations (user_version)
     habits.ts            habits + habit_checkins queries, stats from shared rules
     logbook.ts           logbook_entries; emits the entry-created event
     trades.ts            trades queries and P&L metadata
@@ -76,6 +77,7 @@ src/
     dailyCheck.ts        once-per-local-day checks (streak-broken), dailyCheckState
     dashboard.ts calendar.ts briefing.ts review.ts   one-request aggregators
     search.ts            universal search: calls each module's search function
+    calculator.ts        calc_* tables: history (with pin + maxHistoryItems prune), variables, programs, offline currency rate sets/rates/overrides, per-tool settings
     capture.ts           Quick capture window, global shortcut, tray icon
     trayIcon.ts          tray icon images
     reminders.ts         minute loop -> desktop notifications for habit reminders
@@ -88,21 +90,17 @@ src/
     src/
       App.tsx            shell: active tool state, global keys, palette host
       tools.ts           THE tool registry: id, name, route, icon, Ctrl+1..7
-      modules/           14 page components (Dashboard, Logbook, Trades, ...)
+      modules/           15 page components (Dashboard, Logbook, Trades, ..., Calculator)
       components/        shared pieces (Sidebar, CommandPalette, WeekStrip, ...)
       lib/               settingsStore, theme, navigation, dates, format, errors
       actions.ts         palette "actions" (open capture, toggle theme, ...)
   shared/                Pure logic, no DOM, no Electron; tests run in tsx
-    calculator/          Core math engine: parser, Pratt AST, evaluator, registry, scientific,
-                         statistics (descriptive stats, regression, distributions, hypothesis tests),
-                         finance (TVM, loans/amortization, simple/compound interest, NPV/IRR/XNPV/XIRR,
-                         percentages, trading position sizing & risk-reward),
-                         conversions (units, number bases, offline manual currency rate cross-conversions),
-                         graphing (2D function sampling, adaptive asymptote handling, roots & extrema finders),
-                         linear-algebra & complex (matrices, RREF, det, inv, rank, 2x2 eigenvalues, vectors, Cardano cubic roots, complex rectangular/polar),
-                         cas (algebraic simplification, symbolic differentiation, polynomial integration, limits, linear solve, Taylor series),
-                         scripting (bitwise arbitrary word sizes, sandboxed language with step limits, conditionals, loops, functions),
-                         datetime (calendar date diffs, intervals with month clamping, business days, age, duration arithmetic, time zone shifts)
+    calculator/          Calculator core (framework-free, import-boundary-tested): parser/ (tokenizer,
+                         Pratt parser, ast.ts), evaluator/, registry, numeric/ (decimal.js wrapper),
+                         limits.ts (hard input caps), inputs.ts, rates.ts, errors.ts, types.ts,
+                         currencyUi.ts, plus modules/ for scientific, statistics, finance, conversions
+                         (units, bases, offline currency rates), graphing, linear-algebra, complex, cas,
+                         scripting (sandboxed language), datetime; currencyUi.ts holds the history-record shape
     types.ts             All data shapes incl. the EverythingApi IPC contract
     habits.ts            due-day/streak/rate rules, week math, reminders helpers
     backup.ts            backup file format + validation
@@ -181,7 +179,7 @@ All `ipcMain.handle` calls live in `src/main/index.ts`; all caller wrappers in `
 | backup | `backup:chooseImport` / `applyImport` | – / file chosen earlier | `parseBackup` (validation) / `restoreBackup` after `safetyCopy()` | Settings |
 | intelligence | `intelligence:get` / `set` | feature toggles | settings get/set (`intelligence` key) | Intelligence |
 | assistant | `assistant:get` / `set` / `keyStatus` / `setKey` / `clearKey` / `functions` / `ask` | patch / plain key (encrypted immediately) / question | assistant.ts (key stored as encrypted blob via `safeStorage` in `settings.assistantKeyBlob`) | Assistant page |
-| calculator | `calculator:saveHistory` / `listHistory` / `clearHistory` / `deleteHistoryItem` / `togglePinHistory` / `saveVariable` / `listVariables` / `deleteVariable` / `saveProgram` / `listPrograms` / `deleteProgram` / `saveRateSet` / `listRateSets` / `saveRate` / `listRates` / `getSetting` / `setSetting` / `getAllSettings` | inputs / query parameters | `main/calculator.ts` queries | Calculator tool & history/rate/program adapters |
+| calculator | `calculator:saveHistory` / `listHistory` / `clearHistory` / `deleteHistoryItem` / `togglePinHistory` / `saveVariable` / `listVariables` / `deleteVariable` / `saveProgram` / `listPrograms` / `deleteProgram` / `saveRateSet` / `renameRateSet` / `deleteRateSet` / `selectRateSet` / `listRateSets` / `saveRate` / `updateRate` / `listRates` / `saveRateOverride` / `listRateOverrides` / `deleteRateOverride` / `importRateSet` / `getSetting` / `setSetting` / `getAllSettings` | inputs / query parameters | `main/calculator.ts` queries | Calculator tool & history/rate/program adapters |
 
 ### 4.4 The app shell and module switching
 
@@ -204,7 +202,7 @@ All `ipcMain.handle` calls live in `src/main/index.ts`; all caller wrappers in `
 | Habit reminders | src/main/reminders.ts | Minute loop; desktop notification when a habit is still open at its reminder time; click focuses the app |
 | Tag colour editor | components/TagChip.tsx, AppearanceSettings, lib/tagColors.ts | Saved as the `tagColors` setting; applied by CSS variables |
 
-### 4.6 Startup sequence
+### 4.6 Startup sequence (applyMigrations count is `MIGRATIONS.length` = 27)
 
 ```mermaid
 sequenceDiagram
@@ -213,7 +211,7 @@ sequenceDiagram
     participant Win as Main window
     participant App as React App
     Main->>Main: requestSingleInstanceLock
-    Main->>DB: initDatabase: open, WAL, foreign_keys, applyMigrations 16 + settings migrations, dailyBackup
+    Main->>DB: initDatabase: open, WAL, foreign_keys, applyMigrations (27) + settings migrations, dailyBackup
     Main->>Main: startDailyChecks, reminders loop, capture tray and shortcut, register all ipcMain handlers
     Main->>Win: createWindow, load renderer bundle
     App->>App: bootAppearance paints cached theme from localStorage
@@ -310,9 +308,9 @@ flowchart LR
 
 - **Engine:** better-sqlite3, **file:** `everything.db` inside `userData/data/` (`dataDir()` in `src/main/db.ts`).
 - **Pragmas:** `journal_mode = WAL`, `foreign_keys = ON` (both set in `initDatabase`).
-- **Schema version:** the SQLite `user_version` pragma, equal to `MIGRATIONS.length` = **26**. Before applying migrations the app creates a database copy in `data/before-migrate/` (newest three kept); if backup or migration fails, startup shows an error and stops. `applyMigrations()` in `src/main/migrations.ts` runs pending entries (each wrapped in a transaction), so old databases upgrade in place.
+- **Schema version:** the SQLite `user_version` pragma, equal to `MIGRATIONS.length` = **27**. Before applying migrations the app creates a database copy in `data/before-migrate/` (newest three kept); if backup or migration fails, startup shows an error and stops. `applyMigrations()` in `src/main/migrations.ts` runs pending entries (each wrapped in a transaction), so old databases upgrade in place.
 
-### 6.2 Version history (26 migrations)
+### 6.2 Version history (27 migrations)
 
 | Ver. | What changed | Migration notes |
 |---|---|---|
@@ -630,7 +628,7 @@ Rules a new contributor must follow, as they actually work in the code:
 
 ### Checklist: adding a new module
 
-1. Pure rules → `src/shared/<module>.ts` + `tests/<module>.ts` (add the test to the `npm test` chain in `package.json`).
+1. Pure rules → `src/shared/<module>.ts` (add the test to the `npm test` chain in `package.json`).
 2. Table (if any) → new migration entry in `src/main/migrations.ts`.
 3. Query functions → `src/main/<module>.ts`, `db` as first parameter.
 4. IPC handlers → `src/main/index.ts`.
@@ -646,7 +644,7 @@ Rules a new contributor must follow, as they actually work in the code:
 
 Honest list from reading the code (ranked by severity):
 
-1. **Stale architecture documentation — `docs/database-schema.md`.** It claims "7 migrations"; there are **16**, and it omits the tasks rework (soft delete, position, recurrence rules), habit types/values, organisation columns, the Logbook-link/reminder columns, task completion history, automation-event hiding and the trade close timestamp. Anyone trusting it will write wrong SQL. Fix: regenerate it from `src/main/migrations.ts` (or replace it with this file + a pointer).
+1. **Stale architecture documentation — `docs/database-schema.md`.** It claims "7 migrations"; there are **27**, and it omits the tasks rework (soft delete, position, recurrence rules), habit types/values, organisation columns, the Logbook-link/reminder columns, task completion history, automation-event hiding, the trade close timestamp and the calculator `calc_*` tables (migration 27). Anyone trusting it will write wrong SQL. Fix: regenerate it from `src/main/migrations.ts` (or replace it with this file + a pointer).
 2. **Duplicate computation risk on `habits:list`.** `listHabits` reads *all* check-in rows and recomputes up to 10 years of day-by-day stats for *every* habit on every request (walks in `src/shared/habits.ts`). It's fine for hundreds of habits, but the Tab complete/Search/calendar calls also hit it (Calendar/Capture/palette call `habits:list`). Small fix if it ever grows: compute stats lazily per habit requested, or cache `completionsOf` per db handle.
 3. **Settings debounce can lose a change in a crash window.** `settingsStore.ts` `persist()` waits 200 ms before `settings:set`; app closed within that window keeps the old value on disk (screen shows the new one). Small fix: flush pending settings on `beforeunload`/capture window close.
 4. **Some `window.api.*` calls have no `.catch`.** Most pages wrap their fetches in try/catch (for example `src/renderer/src/modules/Calendar.tsx`), but a few load paths can produce unhandled rejections — e.g. `src/renderer/src/modules/GoalDetail.tsx` (`window.api.savings.listTransactions(...).then(setTxs)` with no rejection handler). Small fix: one tiny `safe(fn, onError)` wrapper in `src/renderer/src/lib/` and use it everywhere.
@@ -682,4 +680,4 @@ Planned/described elsewhere but **not in the code today** — do not build on th
 - **Better-sqlite3 / SQLite file** — a single-file relational database owned by the main process; `everything.db` in the user data folder.
 - **Index** — a lookup structure on table columns (e.g. `idx_logbook_date`) that keeps date-range queries fast.
 - **Migration** — a numbered SQL change in `src/main/migrations.ts` applied once, tracked by SQLite's `user_version`.
-- **Schema version** — `MIGRATIONS.length` (15 today); recorded inside backup files so imports can be validated.
+- **Schema version** — `MIGRATIONS.length` (27 today); recorded inside backup files so imports can be validated.

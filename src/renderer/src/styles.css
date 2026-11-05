@@ -248,6 +248,11 @@ input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--accent)); 
   .calc-main { min-width: 0; align-content: start; }
   .calc-main > * { align-self: start; }
   .calc-history { min-width: 0; max-height: 420px; }
+  /* A row is the recall button plus its pin/delete actions; pinned rows carry a marker. */
+  .calc-history-row { display: flex; align-items: flex-start; gap: .25rem; }
+  .calc-history-row[data-pinned='true'] .calc-history-main { border-color: rgb(var(--accent-fg) / .55); }
+  .calc-history-main { min-width: 0; flex: 1 1 auto; }
+  .calc-history-row-actions { display: flex; flex-direction: column; gap: .125rem; }
   /* Empty state: centred in the panel so it does not look like a broken list. */
   .calc-history-empty { display: flex; flex-direction: column; justify-content: center; min-height: 9rem; padding: .5rem; text-align: center; }
   .calc-kbd {

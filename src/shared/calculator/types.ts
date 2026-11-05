@@ -134,7 +134,3 @@ export interface StorageAdapter {
   setSetting<K extends keyof CalcSettings>(key: K, value: CalcSettings[K]): Promise<void>
   getAllSettings(): Promise<CalcSettings>
 }
-
-export interface RateProvider {
-  getRate(from: string, to: string, rateSetId?: string): Promise<string | null>
-}

@@ -30,3 +30,12 @@
 
   See the existing entries in `src/renderer/src/tools.ts` for the exact pattern.
   The `validateTools(TOOLS)` call at the bottom will reject any mistakes at start-up.
+
+- **Calculator (Phase 12)**: the all-in-one calculator is the biggest module; follow its layout:
+  - **Files**: pure engine → `src/shared/calculator/` (parser/, evaluator/, numeric/, modules/, limits.ts, registry.ts…); UI → `src/renderer/src/modules/Calculator/` (CalculatorTool.tsx entry, panels/, workers/); SQL → `src/main/calculator.ts`; IPC handlers → `src/main/index.ts` (`calculator:*` channels); schema → migration 27's seven `calc_*` tables.
+  - **Core boundary rule**: `src/shared/calculator/` must not import electron, react, `window`, or the db — enforced by `tests/calc-boundary.ts`. Heavy math (CAS, graph sampling, scripts) never crosses IPC; it runs in the Web Workers spawned by `workers/harness.ts`.
+  - **Tests**: `npm run test:calc` (28-file logic/DB/adapters/limits/fuzz chain), `npm run test:calc-ui` (patchright Chromium against the `.calch` browser harness — build it first with `npx vite build --config vite.calch.config.ts`), `npm run test:calc-perf` (hardware-calibrated timing suite; updates `docs/calculator-performance.md`).
+  - **Limits**: every user input class has a hard cap in `src/shared/calculator/limits.ts` — do not bypass or raise caps from callers; covered by `tests/calc-limits.ts`.
+  - **Worker harness**: all three workers are spawned/correlated/terminated by `src/renderer/src/modules/Calculator/workers/harness.ts`; never spawn a bare `Worker` elsewhere in the calculator.
+  - **Never edit an existing migration** in `src/main/migrations.ts` — append a new one; `user_version` tracks what has run.
+  - **Regenerating docs**: `npm run gen:calc-docs` rebuilds `docs/calculator-functions.md` from the registry (do not hand-edit it).

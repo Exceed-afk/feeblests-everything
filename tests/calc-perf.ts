@@ -197,11 +197,11 @@ benchmark('Linear Algebra: 50x50 matrix inverse', () => {
 // ---------------------------------------------------------------------------
 benchmark('Graph sampling: default plot (sin(x) over [-10, 10], 300 points)', () => {
   sampleFunction('sin(x)', { xMin: -10, xMax: 10, yMin: -2, yMax: 2 }, 300)
-})
+}, { targetMs: 5, maxAllowedMs: 5 })
 
 benchmark('Graph sampling: wide range with asymptote (tan(x) over [-50, 50], 3,000 points)', () => {
   sampleFunction('tan(x)', { xMin: -50, xMax: 50, yMin: -20, yMax: 20 }, 3000)
-})
+}, { targetMs: 50, maxAllowedMs: 50 })
 
 // ---------------------------------------------------------------------------
 // 6. A 360-row amortization schedule (30-year monthly loan)

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, Suspense, useRef } from 'react'
-import { History, HelpCircle, Copy, Check, X } from 'lucide-react'
+import { History, HelpCircle, Copy, Check, X, Pin, PinOff, Trash2, ChevronDown } from 'lucide-react'
 import type { ModuleProps } from '../../lib/navigation'
 import {
   CalculatorEngine,
@@ -10,6 +10,7 @@ import {
   readCurrencyHistoryItem
 } from '../../../../shared/calculator'
 import { defaultStorageAdapter } from './adapters/storage'
+import { useModalDialog } from './useModalDialog'
 import { CurrencyPanel } from './panels/CurrencyPanel'
 import {
   Statistics as StatisticsPanel,
@@ -56,6 +57,8 @@ export function Calculator(props: ModuleProps) {
   const [format, setFormat] = useState<OutputFormat>('decimal')
   const [angleMode, setAngleMode] = useState<'deg' | 'rad' | 'grad'>('deg')
   const [history, setHistory] = useState<CalcHistoryItem[]>([])
+  const [historyLimit, setHistoryLimit] = useState(50)
+  const [historyTotal, setHistoryTotal] = useState(0)
   const [showHistory, setShowHistory] = useState(true)
   const [showHelp, setShowHelp] = useState(false)
   const [helpSearch, setHelpSearch] = useState('')
@@ -98,14 +101,35 @@ export function Calculator(props: ModuleProps) {
     inputRef.current?.focus()
   }
 
-  const loadHistory = useCallback(async () => {
-    const items = await defaultStorageAdapter.loadHistory(50)
+  const loadHistory = useCallback(async (limit = historyLimit) => {
+    const items = await defaultStorageAdapter.loadHistory(limit)
     setHistory(items)
+    // The adapter returns exactly `limit` rows when more exist; a shorter page means
+    // everything stored is on screen and the "Load more" control can be hidden.
+    setHistoryTotal(items.length < limit ? items.length : limit + 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     void loadHistory()
   }, [loadHistory])
+
+  const loadMoreHistory = async () => {
+    const next = historyLimit + 50
+    setHistoryLimit(next)
+    await loadHistory(next)
+  }
+
+  const togglePin = async (item: CalcHistoryItem) => {
+    await defaultStorageAdapter.togglePinHistory(item.id)
+    setHistory((prev) => prev.map((i) => (i.id === item.id ? { ...i, pinned: !i.pinned } : i)))
+  }
+
+  const deleteHistoryItem = async (item: CalcHistoryItem) => {
+    await defaultStorageAdapter.deleteHistoryItem(item.id)
+    setHistory((prev) => prev.filter((i) => i.id !== item.id))
+    setHistoryTotal((t) => Math.max(0, t - 1))
+  }
 
   const handleAngleModeChange = (mode: 'deg' | 'rad' | 'grad') => {
     setAngleMode(mode)
@@ -124,7 +148,9 @@ export function Calculator(props: ModuleProps) {
       setResult(res.formatted)
 
       const saved = await defaultStorageAdapter.saveHistory({
-        mode: mode === 'scientific' ? 'scientific' : 'standard',
+        // Standard for the shared keypad in both basic and scientific mode; the
+        // scientific keypad only adds function keys, so the row reads the same.
+        mode: 'standard',
         input: expression,
         result: res.formatted,
         resultFormat: format
@@ -144,6 +170,7 @@ export function Calculator(props: ModuleProps) {
       setResult(item.result)
       return
     }
+    // Panel rows with their own engine (statistics/finance/…) save through the panel.
     setExpression(item.input)
     setResult(item.result)
   }
@@ -172,6 +199,8 @@ export function Calculator(props: ModuleProps) {
 
   // Scientific mode adds the common function keys above the digits.
   const scientificKeys = ['sin', 'cos', 'tan', 'ln', 'log10', 'sqrt', 'fact', 'pi']
+
+  const helpDialog = useModalDialog(showHelp, () => setShowHelp(false))
 
   return (
     <div className="page page-lg calculator-module">
@@ -224,7 +253,7 @@ export function Calculator(props: ModuleProps) {
               <option value="engineering">Engineering</option>
             </select>
 
-            <button type="button" className="btn btn-sm" onClick={() => setShowHelp(true)}>
+            <button type="button" className="btn btn-sm" onClick={() => setShowHelp(true)} ref={helpDialog.triggerRef}>
               <HelpCircle aria-hidden="true" className="calc-ico" />
               <span className="calc-btn-label">Help / Reference</span>
               <span className="calc-btn-label-short">Help</span>
@@ -260,7 +289,7 @@ export function Calculator(props: ModuleProps) {
       ) : mode === 'graph' ? (
         <div className="mt-4" data-testid="panel-graph">
           <Suspense fallback={<p className="text-sm text-muted">Loading 2D graphing engine…</p>}>
-            <GraphPanel {...props} />
+            <GraphPanel {...props} angleMode={angleMode} />
           </Suspense>
         </div>
       ) : mode === 'matrix' ? (
@@ -465,25 +494,67 @@ export function Calculator(props: ModuleProps) {
               </div>
             ) : (
               history.map((item) => (
-                <button
-                  type="button"
+                <div
                   key={item.id}
-                  className="w-full text-left p-2 rounded border border-line hover:bg-fg/5 cursor-pointer text-xs"
-                  onClick={() => openHistoryItem(item)}
+                  className="calc-history-row"
+                  data-pinned={item.pinned === true}
+                  data-testid={`calc-history-row-${item.id}`}
                 >
-                  <div className="text-muted font-mono break-all">{item.input}</div>
-                  <div className="font-semibold font-mono mt-0.5 text-right text-fg break-all">
-                    = {item.result}
-                  </div>
-                  {item.mode === 'currency' && (
-                    <div className="calc-cur-history-tags">
-                      <span className="badge badge-muted">currency</span>
-                      {readCurrencyHistoryItem(item)?.override && <span className="badge badge-open">override</span>}
-                      {readCurrencyHistoryItem(item)?.stale && <span className="badge badge-neg">stale rate</span>}
+                  <button
+                    type="button"
+                    className="calc-history-main w-full text-left p-2 rounded border border-line hover:bg-fg/5 cursor-pointer text-xs"
+                    onClick={() => openHistoryItem(item)}
+                  >
+                    <div className="text-muted font-mono break-all">{item.input}</div>
+                    <div className="font-semibold font-mono mt-0.5 text-right text-fg break-all">
+                      = {item.result}
                     </div>
-                  )}
-                </button>
+                    {item.mode === 'currency' && (
+                      <div className="calc-cur-history-tags">
+                        <span className="badge badge-muted">currency</span>
+                        {readCurrencyHistoryItem(item)?.override && <span className="badge badge-open">override</span>}
+                        {readCurrencyHistoryItem(item)?.stale && <span className="badge badge-neg">stale rate</span>}
+                      </div>
+                    )}
+                  </button>
+                  <div className="calc-history-row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-icon"
+                      aria-label={item.pinned ? `Unpin ${item.input}` : `Pin ${item.input}`}
+                      aria-pressed={item.pinned === true}
+                      data-testid={`calc-history-pin-${item.id}`}
+                      onClick={() => void togglePin(item)}
+                    >
+                      {item.pinned ? (
+                        <PinOff aria-hidden="true" className="calc-ico text-accent-fg" />
+                      ) : (
+                        <Pin aria-hidden="true" className="calc-ico" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-icon"
+                      aria-label={`Delete ${item.input}`}
+                      data-testid={`calc-history-delete-${item.id}`}
+                      onClick={() => void deleteHistoryItem(item)}
+                    >
+                      <Trash2 aria-hidden="true" className="calc-ico" />
+                    </button>
+                  </div>
+                </div>
               ))
+            )}
+            {history.length > 0 && historyTotal > history.length && (
+              <button
+                type="button"
+                className="btn btn-sm w-full"
+                data-testid="calc-history-load-more"
+                onClick={() => void loadMoreHistory()}
+              >
+                <ChevronDown aria-hidden="true" className="calc-ico" />
+                Load more
+              </button>
             )}
           </div>
         </aside>
@@ -492,7 +563,15 @@ export function Calculator(props: ModuleProps) {
       )}
       {/* Function Reference / Help Modal */}
       {showHelp && (
-        <div className="calc-help-overlay fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Function reference and help">
+        <div
+          className="calc-help-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Function reference and help"
+          tabIndex={-1}
+          ref={helpDialog.overlayRef}
+          onKeyDown={helpDialog.onKeyDown}
+        >
           <div className="w-full max-w-2xl max-h-[80vh] rounded-lg border border-line bg-card shadow-card flex flex-col overflow-hidden">
             <div className="flex items-center justify-between gap-2 p-4 border-b border-line">
               <div className="flex items-center gap-2 min-w-0">
@@ -503,6 +582,7 @@ export function Calculator(props: ModuleProps) {
                 type="button"
                 className="btn btn-icon"
                 aria-label="Close help"
+                data-testid="calc-help-close"
                 onClick={() => setShowHelp(false)}
               >
                 <X aria-hidden="true" className="calc-ico" />

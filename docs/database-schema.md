@@ -1,8 +1,16 @@
-# Database Schema (7 Migrations)
+# Database Schema (7 Migrations documented; 27 exist)
 
 The application uses SQLite with BetterSQLite3. The schema evolves through
-7 additive migrations — never edit an old migration, only add new ones at
+additive migrations — never edit an old migration, only add new ones at
 the end. `user_version` pragma tracks how many have run.
+
+> **This file is stale as a full listing**: it documents migrations 1–7 in detail
+> only. Migrations 8–26 (task rework, habit types/organisation, links, tags,
+> templates, search index, expenses, notes, content, focus, tools hub) are
+> summarised in `docs/architecture.md` §6.2. Migration 27 (the calculator
+> `calc_*` tables) is documented in full at the bottom of this file because it
+> is the newest addition. See `src/main/migrations.ts` for the authoritative
+> source.
 
 ---
 
@@ -212,3 +220,85 @@ tasks    (1)───────(*) tasks (via parent_task_id)
 - **All dates are local YYYY-MM-DD** (UTC arithmetic in habits code)
 - **Migrations are additive only** — old data is never corrupted
 - **`user_version` pragma** tracks migration progress for safe upgrades
+---
+
+## Migration 27: All-in-one Calculator (calc_* tables)
+
+Added by Phase 12. Seven tables, all owned by `src/main/calculator.ts`:
+
+```sql
+CREATE TABLE calc_history (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at    TEXT NOT NULL,
+  mode          TEXT NOT NULL DEFAULT 'standard',
+  input         TEXT NOT NULL,
+  result        TEXT NOT NULL,
+  result_format TEXT NOT NULL DEFAULT 'decimal',
+  rate_snapshot TEXT,              -- JSON string of the exact rates used (currency conversions)
+  pinned        INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1))
+);
+CREATE INDEX idx_calc_history_created ON calc_history(created_at);
+
+CREATE TABLE calc_variables (
+  name       TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE calc_programs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  source     TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE calc_rate_sets (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  base_currency TEXT NOT NULL,
+  is_active     INTEGER NOT NULL DEFAULT 0,
+  updated_at    TEXT NOT NULL
+);
+-- seeded: ('default', 'Default Rates', 'USD', 1, '2026-11-04T00:00:00.000Z')
+
+CREATE TABLE calc_rates (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  rate_set_id   TEXT NOT NULL REFERENCES calc_rate_sets(id) ON DELETE CASCADE,
+  currency_code TEXT NOT NULL,
+  name          TEXT,
+  rate_to_base  TEXT NOT NULL,
+  note          TEXT,
+  updated_at    TEXT NOT NULL,
+  UNIQUE (rate_set_id, currency_code)
+);
+
+CREATE TABLE calc_rate_overrides (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  rate_set_id TEXT NOT NULL REFERENCES calc_rate_sets(id) ON DELETE CASCADE,
+  from_code   TEXT NOT NULL,
+  to_code     TEXT NOT NULL,
+  rate        TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  UNIQUE (rate_set_id, from_code, to_code)
+);
+
+CREATE TABLE calc_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL                 -- JSON (precision, angleMode, baseCurrency, ...)
+);
+```
+
+Notes:
+
+- `calc_history.mode` distinguishes standard / scientific / currency / … entries;
+  `pinned` rows survive the `maxHistoryItems` prune, which runs on every save.
+- `rate_snapshot` is a JSON string holding the exact rates used for a currency
+  conversion, so old history stays reproducible when rates change.
+- `calc_rates.rate_to_base` and `calc_rate_overrides.rate` are TEXT holding
+  exact decimal strings (never floats).
+- All seven tables round-trip through the JSON backup (`src/main/backup.ts`,
+  validated against `schemaVersion` = `MIGRATIONS.length` = 27 in
+  `src/shared/backup.ts`).
+- The calculator does **not** participate in soft delete (`deleted_at`) or the
+  `search_index` FTS table — its rows are hard-deleted and are not universal-search text.

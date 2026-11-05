@@ -10,6 +10,11 @@ export interface ConversionExtraProps {
   onCurrencySeedUsed?: () => void
 }
 
+/** Props the graph panel accepts on top of ModuleProps (the app's angle mode). */
+export interface GraphExtraProps {
+  angleMode: 'deg' | 'rad' | 'grad'
+}
+
 const panel = <M, K extends keyof M>(
   load: () => Promise<M>,
   pick: K,
@@ -29,10 +34,18 @@ const conversionPanel = lazy(async () => {
   return { default: component as ComponentType<PanelProps & ConversionExtraProps> }
 })
 
+// The graph panel additionally accepts the app's angle mode (polar plots).
+const graphPanel = lazy(async () => {
+  const mod = await import('./panels/GraphPanel')
+  const component = mod.GraphPanel as unknown
+  if (typeof component !== 'function') throw new Error('The calculator panel "graph" could not be loaded.')
+  return { default: component as ComponentType<PanelProps & GraphExtraProps> }
+})
+
 export const Statistics = panel(() => import('./panels/StatisticsPanel'), 'StatisticsPanel', 'statistics')
 export const Finance = panel(() => import('./panels/FinancePanel'), 'FinancePanel', 'finance')
 export const Conversion = conversionPanel
-export const Graph = panel(() => import('./panels/GraphPanel'), 'GraphPanel', 'graph')
+export const Graph = graphPanel
 export const Matrix = panel(() => import('./panels/MatrixPanel'), 'MatrixPanel', 'matrix')
 export const CAS = panel(() => import('./panels/CASPanel'), 'CASPanel', 'cas')
 export const Programming = panel(() => import('./panels/ProgrammingPanel'), 'ProgrammingPanel', 'programming')

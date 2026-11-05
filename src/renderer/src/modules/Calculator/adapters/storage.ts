@@ -45,7 +45,19 @@ export class LocalStorageCalculatorAdapter implements StorageAdapter {
       createdAt: new Date().toISOString()
     }
     list.unshift(newItem)
-    this.write(this.historyKey, list.slice(0, 200))
+    // Enforce maxHistoryItems from the settings store: keep the newest rows first
+    // (pinned stay pinned at the top) and drop the oldest unpinned overflow.
+    const settings = this.read<CalcSettings>(this.settingsKey, DEFAULT_CALC_SETTINGS)
+    const max = Math.max(1, Math.floor(settings.maxHistoryItems ?? DEFAULT_CALC_SETTINGS.maxHistoryItems))
+    const kept: CalcHistoryItem[] = []
+    let count = 0
+    for (const row of list) {
+      if (row.pinned || count < max) {
+        kept.push(row)
+        if (!row.pinned) count++
+      }
+    }
+    this.write(this.historyKey, kept)
     return newItem
   }
 
