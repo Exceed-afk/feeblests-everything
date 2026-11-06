@@ -26,6 +26,7 @@ export interface EvaluationContext {
   angleMode?: 'deg' | 'rad' | 'grad'
   ans?: Decimal
   currency?: CurrencyContext
+  customFunctions?: Record<string, (args: Decimal[]) => Decimal>
 }
 
 export class EvaluationError extends CalcError {
@@ -54,6 +55,7 @@ export class Evaluator {
   private angleMode: 'deg' | 'rad' | 'grad'
   private ans: Decimal
   private currency: CurrencyContext | null
+  private customFunctions: Map<string, (args: Decimal[]) => Decimal> | null
   // Counted on every recursive step; checked before the JS stack is anywhere near its
   // limit, so a deep tree fails with our own error instead of "Maximum call stack size".
   // The parser already caps real nesting at 200; this is the backstop for a hand-built AST.
@@ -64,6 +66,9 @@ export class Evaluator {
     this.angleMode = context.angleMode || 'deg'
     this.ans = context.ans || new Decimal(0)
     this.currency = context.currency ?? null
+    this.customFunctions = context.customFunctions
+      ? new Map(Object.entries(context.customFunctions).map(([k, v]) => [k.toLowerCase(), v]))
+      : null
   }
 
   /** Replace the offline rates used by `100 USD to EUR` expressions. */
@@ -267,6 +272,21 @@ export class Evaluator {
       }
 
       case 'FunctionCall': {
+        const lowerName = node.name.toLowerCase()
+        const custom = this.customFunctions?.get(lowerName)
+        if (custom) {
+          const evaluatedArgs = node.args.map((arg) => this.evaluate(arg))
+          try {
+            return assertMagnitude(custom(evaluatedArgs), node.pos)
+          } catch (err) {
+            if (err instanceof EvaluationError) throw err
+            throw new EvaluationError(
+              err instanceof Error ? err.message : `Error executing ${node.name}`,
+              node.pos
+            )
+          }
+        }
+
         const fn = registry.getFunction(node.name)
         if (!fn) {
           throw new EvaluationError(`Undefined function "${node.name}"`, node.pos)

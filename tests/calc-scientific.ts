@@ -27,6 +27,10 @@ assert.equal(engine.calculate('cos(200)').formatted, '-1')
 
 // Logs and Exponentials
 assert.equal(engine.calculate('ln(e)').formatted, '1')
+assert.equal(engine.calculate('log(100)').formatted, '2')
+assert.equal(engine.calculate('log(1000)').formatted, '3')
+assert.equal(engine.calculate('log(2, 8)').formatted, '3')
+assert.equal(engine.calculate('log(10, 10000)').formatted, '4')
 assert.equal(engine.calculate('log10(100)').formatted, '2')
 assert.equal(engine.calculate('log10(1000)').formatted, '3')
 assert.equal(engine.calculate('log2(8)').formatted, '3')

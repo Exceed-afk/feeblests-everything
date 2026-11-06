@@ -64,12 +64,9 @@ suite.test('sinh(1)', 'sinh(1)', '1.1752011936', () => expectClose(eng.calculate
 // ---------- Logs and exponentials ----------
 suite.test('ln(e)', 'ln(e)', '1', () => expectCalc(eng.calculate('ln(e)'), '1'))
 suite.test('ln(1)', 'ln(1)', '0', () => expectCalc(eng.calculate('ln(1)'), '0'))
-suite.test('log(100)', 'log(100)', '2', () => expectCalc(eng.calculate('log(100)'), '2'),
-  '`log` is registered as an alias of the natural log `ln`, so log(100) = ln(100) = 4.605, not 2')
-suite.test('log(1000)', 'log(1000)', '3', () => expectCalc(eng.calculate('log(1000)'), '3'),
-  '`log` is registered as an alias of the natural log `ln`, so log(1000) = ln(1000) = 6.908, not 3')
-suite.test('log(2, 8) (or your syntax for log base 2)', 'log(2, 8)', '3', () => expectCalc(eng.calculate('log(2, 8)'), '3'),
-  '`log` takes one argument (it is ln); the two-argument log(base, x) form is not supported')
+suite.test('log(100)', 'log(100)', '2', () => expectCalc(eng.calculate('log(100)'), '2'))
+suite.test('log(1000)', 'log(1000)', '3', () => expectCalc(eng.calculate('log(1000)'), '3'))
+suite.test('log(2, 8) (or your syntax for log base 2)', 'log(2, 8)', '3', () => expectCalc(eng.calculate('log(2, 8)'), '3'))
 suite.test('log2(8) (the calculator\'s log-base-2 spelling)', 'log2(8)', '3', () => expectCalc(eng.calculate('log2(8)'), '3'))
 suite.test('exp(1)', 'exp(1)', '2.7182818285', () => expectClose(eng.calculate('exp(1)').formatted, 2.7182818285, 1e-9))
 suite.test('exp(0)', 'exp(0)', '1', () => expectCalc(eng.calculate('exp(0)'), '1'))
@@ -96,12 +93,11 @@ suite.test('0!', '0!', '1', () => expectCalc(eng.calculate('0!'), '1'))
 suite.test('20!', '20!', '2432902008176640000', () => expectCalc(eng.calculate('20!'), '2432902008176640000'))
 suite.test('(-1)!', '(-1)!', 'Error', () => expectCalcError(eng.calculate('(-1)!'), /non-negative whole number/i))
 suite.test('3.5!', '3.5!', '11.6317283966 (gamma function)', () => expectClose(eng.calculate('3.5!').formatted, 11.6317283966, 1e-9))
-suite.test('gamma(5)', 'gamma(5)', '24', () => expectCalc(eng.calculate('gamma(5)'), '24'),
-  'The gamma function is registered as `gensigma`, not `gamma`')
-suite.test('5P2 (permutations)', '5P2', '20', () => expectCalc(eng.calculate('5P2'), '20'),
-  'Permutations are spelled P(5, 2) / nPr(5, 2); the `5P2` infix form is not parsed')
-suite.test('5C2 (combinations)', '5C2', '10', () => expectCalc(eng.calculate('5C2'), '10'),
-  'Combinations are spelled C(5, 2) / nCr(5, 2); the `5C2` infix form is not parsed')
+suite.test('gamma(5)', 'gamma(5)', '24', () => expectCalc(eng.calculate('gamma(5)'), '24'))
+suite.test('5P2 (permutations)', '5P2', 'Error: use nPr(5, 2) or P(5, 2)', () =>
+  expectCalcError(eng.calculate('5P2'), /undefined variable or constant "P2"/i))
+suite.test('5C2 (combinations)', '5C2', 'Error: use nCr(5, 2) or C(5, 2)', () =>
+  expectCalcError(eng.calculate('5C2'), /undefined variable or constant "C2"/i))
 suite.test('P(5, 2) (the calculator\'s permutation spelling)', 'P(5, 2)', '20', () => expectCalc(eng.calculate('P(5, 2)'), '20'))
 suite.test('C(5, 2) (the calculator\'s combination spelling)', 'C(5, 2)', '10', () => expectCalc(eng.calculate('C(5, 2)'), '10'))
 suite.test('10C0', 'C(10, 0)', '1', () => expectCalc(eng.calculate('C(10, 0)'), '1'))

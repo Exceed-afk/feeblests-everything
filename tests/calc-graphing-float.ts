@@ -76,6 +76,8 @@ const EXPRESSIONS: Array<{ expr: string; modes?: Array<'deg' | 'rad' | 'grad'>; 
   { expr: 'cosh(x)' },
   { expr: 'tanh(x)' },
   { expr: 'ln(x)', modes: ['rad'] },
+  { expr: 'log(x)', modes: ['rad'] },
+  { expr: 'log(2, x)', modes: ['rad'] },
   { expr: 'log10(x)', modes: ['rad'] },
   { expr: 'log2(x)', modes: ['rad'] },
   { expr: 'exp(x)', modes: ['rad'] },
@@ -194,3 +196,26 @@ assert.ok(approxRoots.some((r) => Math.abs(r + Math.SQRT2) < 0.2), 'fast path fi
 
 console.log(`ok   sampleFunction fast/fallback end-to-end checks passed`)
 console.log(`ok   calc-graphing-float.ts: ${checks} checks passed`)
+
+
+// Verify that float and Decimal paths agree for log, ln, log10, and log2
+{
+  const testInputs = [0.1, 0.5, 1, 2, 8, 10, 100, 256, 1000]
+  const funcs = ['ln', 'log', 'log10', 'log2'] as const
+  const evalr = new Evaluator()
+  for (const fn of funcs) {
+    const ast = parse(`${fn}(x)`)
+    const compiled = compileFloatExpression(ast, { angleMode: 'rad' })
+    for (const x of testInputs) {
+      const floatVal = compiled(x)
+      const decAst = parse(`${fn}(${x})`)
+      const decVal = evalr.evaluate(decAst).toNumber()
+      assert.ok(
+        Math.abs(floatVal - decVal) < 1e-9,
+        `Float and Decimal disagree for ${fn}(${x}): float=${floatVal}, decimal=${decVal}`
+      )
+      ok()
+    }
+  }
+}
+console.log('ok   float vs Decimal agreement for log, ln, log10, log2 verified')

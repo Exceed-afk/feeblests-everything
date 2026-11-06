@@ -43,10 +43,13 @@ suite.test('Delete f: using it gives a clear "unknown function" message', 'delet
   // defined must still be a clear error rather than a crash.
   return expectError(() => executeScript('return f(3)'), /undefined function|unknown/i)
 })
-suite.todo('Define h(a, b) = a * b: h(3, 4) = 12 and h(3) is an arity error', 'fn h(a, b)', '12 and an arity error', 'Script functions take exactly one parameter (fn name(param))')
+suite.test('Define h(a, b) = a * b: h(3, 4) = 12 and h(3) is an arity error', 'fn h(a, b)', '12 and an arity error', () => {
+  const res = executeScript('fn h(a, b) {\n return a * b\n}\nreturn h(3, 4)')
+  expectText(res.returnValue, '12')
+  return expectError(() => executeScript('fn h(a, b) {\n return a * b\n}\nreturn h(3)'), /expects 2 arguments|arity/i)
+})
 suite.test('Recursion without an end condition stops with an error', 'f(n) = n * f(n - 1)', 'Stopped by a step or call limit, not a hang', () =>
-  expectError(() => executeScript('fn f(n) {\n return n * f(n - 1)\n}\nreturn f(5)', { maxSteps: 500 }), /step limit|stack|undefined function/i),
-  'It stops safely, but with "Undefined function f" rather than a recursion/step-limit message, because a body cannot see its own function')
+  expectError(() => executeScript('fn f(n) {\n return n * f(n - 1)\n}\nreturn f(5)', { maxSteps: 500 }), /recursion depth exceeded|step limit/i))
 suite.skip('Functions persist after restarting the app', 'restart', 'Functions restored', 'Needs a real app restart')
 
 // ---------- Scripts and saved programs ----------

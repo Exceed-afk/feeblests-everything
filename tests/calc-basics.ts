@@ -124,6 +124,18 @@ function testCombinatoricsAliasesAndGamma() {
   // Negative whole numbers are poles of gamma: an error, not a number.
   assert.match(eng.calculate('(-1)!').error!, /non-negative whole number/)
   assert.match(eng.calculate('fact(-3)').error!, /non-negative whole number/)
+
+  // Gamma function tests: gamma(5) = 24, gamma(0.5) = sqrt(pi)
+  assert.equal(eng.calculate('gamma(5)').formatted, '24')
+  const gHalf = Number(eng.calculate('gamma(0.5)').formatted)
+  const sqrtPi = Math.sqrt(Math.PI)
+  assert.ok(Math.abs(gHalf - sqrtPi) < 1e-9, `gamma(0.5) = ${gHalf} vs sqrt(pi) = ${sqrtPi}`)
+  // Old alias gensigma still works
+  assert.equal(eng.calculate('gensigma(5)').formatted, '24')
+  // gamma(0) and negative integers give a clear error
+  assert.match(eng.calculate('gamma(0)').error!, /non-positive integer/i)
+  assert.match(eng.calculate('gamma(-1)').error!, /non-positive integer/i)
+  assert.match(eng.calculate('gamma(-5)').error!, /non-positive integer/i)
 }
 
 function testYRoot() {

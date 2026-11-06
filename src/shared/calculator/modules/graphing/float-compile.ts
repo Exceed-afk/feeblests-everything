@@ -98,6 +98,19 @@ const FLOAT_FUNCTIONS: Record<string, { minArgs: number; maxArgs: number; impl: 
   cosh: { minArgs: 1, maxArgs: 1, impl: Math.cosh },
   tanh: { minArgs: 1, maxArgs: 1, impl: Math.tanh },
   ln: { minArgs: 1, maxArgs: 1, impl: (x) => (x <= 0 ? NaN : Math.log(x)) },
+  log: {
+    minArgs: 1,
+    maxArgs: 2,
+    impl: (arg1, arg2) => {
+      if (arg2 === undefined) {
+        return arg1 <= 0 ? NaN : Math.log10(arg1)
+      }
+      const base = arg1
+      const value = arg2
+      if (base <= 0 || base === 1 || value <= 0) return NaN
+      return Math.log(value) / Math.log(base)
+    }
+  },
   log10: { minArgs: 1, maxArgs: 1, impl: (x) => (x <= 0 ? NaN : Math.log10(x)) },
   log2: { minArgs: 1, maxArgs: 1, impl: (x) => (x <= 0 ? NaN : Math.log2(x)) },
   exp: { minArgs: 1, maxArgs: 1, impl: Math.exp }

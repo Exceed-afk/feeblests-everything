@@ -32,7 +32,8 @@ const rows: Array<{ case: string; input: string; conventions: string; actual: st
     })()
   },
   { case: 'Percent: 200 * 50%', input: '200 * 50%', conventions: '100 (percent is a fraction)', actual: show('200 * 50%') },
-  { case: 'Percent: 200 + 10%', input: '200 + 10%', conventions: '220 (percent of 200) or 200.1 (percent is 0.1)', actual: show('200 + 10%') }
+  { case: 'Percent: 200 + 10%', input: '200 + 10%', conventions: '220 (percent of 200) or 200.1 (percent is 0.1)', actual: show('200 + 10%') },
+  { case: '5P2 and 5C2 infix', input: '5P2, 5C2', conventions: 'decided: not supported (use nPr(5,2), nCr(5,2), P(5,2), C(5,2))', actual: `${show('5P2')} / ${show('5C2')}` }
 ]
 
 console.log('\n=== Ambiguous cases: what the calculator does today ===')

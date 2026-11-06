@@ -115,4 +115,76 @@ return double(21)
 const resFunc = executeScript(scriptFunc)
 assert.equal(resFunc.returnValue, '42'); ok()
 
+// Custom function calling another function
+const scriptNested = `
+fn f(x) {
+  return x + 10
+}
+fn g(x) {
+  return f(x) * 2
+}
+return g(5)
+`
+assert.equal(executeScript(scriptNested).returnValue, '30'); ok()
+
+// Redefining a function
+const scriptRedefine = `
+fn f(x) {
+  return x + 1
+}
+fn g(x) {
+  return f(x) * 2
+}
+fn f(x) {
+  return x + 10
+}
+return g(5)
+`
+assert.equal(executeScript(scriptRedefine).returnValue, '30'); ok()
+
+// Multi-parameter function h(a, b) = a + b
+const scriptMultiParam = `
+fn h(a, b) {
+  return a + b
+}
+return h(12, 34)
+`
+assert.equal(executeScript(scriptMultiParam).returnValue, '46'); ok()
+
+// Arity error for multi-parameter function
+assert.throws(
+  () => executeScript('fn h(a, b) {\n return a + b\n}\nreturn h(3)'),
+  /expects 2 arguments/i
+); ok()
+
+// Endless recursion stops with "Maximum recursion depth exceeded"
+const scriptRecursion = `
+fn rec(n) {
+  return rec(n + 1)
+}
+return rec(1)
+`
+assert.throws(
+  () => executeScript(scriptRecursion),
+  /Maximum recursion depth exceeded/i
+); ok()
+
+// Nested-call infinite loop hits the step limit
+const scriptNestedLoop = `
+fn inf(n) {
+  while 1 == 1 {
+    n = n + 1
+  }
+  return n
+}
+fn caller(y) {
+  return inf(y)
+}
+return caller(0)
+`
+assert.throws(
+  () => executeScript(scriptNestedLoop, { maxSteps: 300 }),
+  /Step limit exceeded/i
+); ok()
+
 console.log(`ok   ${checks} programming & scripting tests passed`)

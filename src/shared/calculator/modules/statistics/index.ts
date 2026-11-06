@@ -968,10 +968,11 @@ export function registerStatisticsFunctions(): void {
   })
 
   registry.registerFunction({
-    name: 'gensigma',
+    name: 'gamma',
+    aliases: ['gensigma'],
     category: 'stats',
     description: 'Gamma function Γ(x)',
-    examples: ['gensigma(5)'],
+    examples: ['gamma(5)', 'gamma(0.5)'],
     minArity: 1,
     maxArity: 1,
     impl: ([x]) => toDec(gammaFn(x.toNumber()))

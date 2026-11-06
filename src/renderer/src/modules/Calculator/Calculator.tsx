@@ -708,6 +708,38 @@ export function Calculator(props: ModuleProps) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {/* Conventions and Syntax Guide */}
+              {!helpSearch && (
+                <div className="p-3 rounded border border-line bg-bg text-xs space-y-2 mb-2">
+                  <h3 className="font-semibold text-accent-fg">Conventions &amp; Syntax Rules</h3>
+                  <ul className="list-disc pl-4 space-y-1 text-muted">
+                    <li>
+                      <strong className="text-fg">Exponentiation (^):</strong> Right-associative: <code className="font-mono text-fg">2^3^2 = 2^(3^2) = 512</code>.
+                    </li>
+                    <li>
+                      <strong className="text-fg">Unary minus precedence:</strong> Lower than exponentiation: <code className="font-mono text-fg">-2^2 = -(2^2) = -4</code>. Use parentheses for negative base: <code className="font-mono text-fg">(-2)^2 = 4</code>.
+                    </li>
+                    <li>
+                      <strong className="text-fg">Modulo sign convention:</strong> Sign follows the dividend: <code className="font-mono text-fg">mod(-7, 3) = -1</code> and <code className="font-mono text-fg">mod(7, -3) = 1</code>.
+                    </li>
+                    <li>
+                      <strong className="text-fg">Rounding rule:</strong> Half away from zero: <code className="font-mono text-fg">round(2.5) = 3</code>, <code className="font-mono text-fg">round(-2.5) = -3</code>, <code className="font-mono text-fg">round(0.5) = 1</code>, <code className="font-mono text-fg">round(-0.5) = -1</code>.
+                    </li>
+                    <li>
+                      <strong className="text-fg">Logarithms:</strong> <code className="font-mono text-fg">log(x)</code> is base 10; <code className="font-mono text-fg">log(base, value)</code> supports any base (e.g. <code className="font-mono text-fg">log(2, 8) = 3</code>); <code className="font-mono text-fg">ln(x)</code> is natural log; <code className="font-mono text-fg">log10(x)</code> and <code className="font-mono text-fg">log2(x)</code> are dedicated helpers.
+                    </li>
+                    <li>
+                      <strong className="text-fg">Percent in addition/subtraction:</strong> Calculates percentage of base: <code className="font-mono text-fg">200 + 10% = 220</code> and <code className="font-mono text-fg">200 - 10% = 180</code>; with multiplication/division percent is a fraction: <code className="font-mono text-fg">200 * 50% = 100</code>.
+                    </li>
+                    <li>
+                      <strong className="text-fg">Quartile method:</strong> Type 7 linear interpolation (inclusive, identical to Excel&#39;s <code className="font-mono text-fg">QUARTILE.INC</code> and NumPy&#39;s default).
+                    </li>
+                    <li>
+                      <strong className="text-fg">Permutations &amp; Combinations:</strong> Prefix function syntax: <code className="font-mono text-fg">nPr(n, r)</code> / <code className="font-mono text-fg">P(n, r)</code> and <code className="font-mono text-fg">nCr(n, r)</code> / <code className="font-mono text-fg">C(n, r)</code>.
+                    </li>
+                  </ul>
+                </div>
+              )}
               {allRegistryItems
                 .filter(
                   (fn) =>

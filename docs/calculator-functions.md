@@ -22,7 +22,7 @@ This document is automatically generated from the calculator's centralized funct
 | `abs` | 1 | Absolute value | `abs(-5)`, `abs(3.14)` |
 | `sqrt` | 1 | Square root | `sqrt(16)`, `sqrt(2)` |
 | `cbrt` | 1 | Cube root | `cbrt(27)`, `cbrt(-8)` |
-| `round` | 1..2 | Round to nearest integer or specified decimal places | `round(3.7)`, `round(3.14159, 2)` |
+| `round` | 1..2 | Round to nearest integer or specified decimal places (half away from zero: round(2.5) = 3, round(-2.5) = -3) | `round(2.5)`, `round(-2.5)`, `round(3.14159, 2)` |
 | `floor` | 1 | Round down to nearest integer | `floor(3.9)`, `floor(-2.1)` |
 | `ceil` | 1 | Round up to nearest integer | `ceil(3.1)`, `ceil(-2.9)` |
 | `min` | 1..99 | Smallest of arguments | `min(3, 5, 1)`, `min(-2, 4)` |
@@ -45,16 +45,17 @@ This document is automatically generated from the calculator's centralized funct
 | `cosh` | 1 | Hyperbolic cosine | `cosh(0)`, `cosh(1)` |
 | `tanh` | 1 | Hyperbolic tangent | `tanh(0)`, `tanh(1)` |
 | `ln` | 1 | Natural logarithm (base e) | `ln(e)`, `ln(1)` |
+| `log` | 1..2 | Logarithm: log(x) is base 10; log(base, value) is custom base | `log(100)`, `log(2, 8)` |
 | `log10` | 1 | Common logarithm (base 10) | `log10(100)`, `log10(1000)` |
 | `log2` | 1 | Binary logarithm (base 2) | `log2(8)`, `log2(1024)` |
 | `exp` | 1 | Exponential e^x | `exp(1)`, `exp(0)` |
 | `fact` | 1 | Factorial of non-negative integer | `fact(5)`, `fact(0)` |
-| `mod` | 2 | Remainder after division a mod b (sign follows a) | `mod(10, 3)`, `mod(-10, 3)` |
+| `mod` | 2 | Remainder after division a mod b (sign follows dividend: mod(-7, 3) = -1) | `mod(10, 3)`, `mod(-7, 3)` |
 | `yroot` | 2 | The y-th root of x (yRoot(x, y)) | `yRoot(8, 3)`, `yRoot(16, 4)` |
 | `gcd` | 2 | Greatest common divisor | `gcd(24, 36)`, `gcd(17, 13)` |
 | `lcm` | 2 | Least common multiple | `lcm(4, 6)`, `lcm(12, 18)` |
-| `nPr` | 2 | Permutations P(n, r) | `nPr(5, 2)`, `nPr(10, 3)` |
-| `nCr` | 2 | Combinations C(n, r) | `nCr(5, 2)`, `nCr(10, 3)` |
+| `nPr` | 2 | Permutations P(n, r) or nPr(n, r) | `nPr(5, 2)`, `P(5, 2)`, `nPr(10, 3)` |
+| `nCr` | 2 | Combinations C(n, r) or nCr(n, r) | `nCr(5, 2)`, `C(5, 2)`, `nCr(10, 3)` |
 | `isprime` | 1 | True (1) when n is a prime number, otherwise false (0) | `isprime(7)`, `isprime(60)` |
 | `primefactors` | 1 | Prime factorisation of n, shown as 2 x 2 x 3 x 5 | `primefactors(60)` |
 
@@ -87,7 +88,7 @@ This document is automatically generated from the calculator's centralized funct
 | `stdev` | 2..999 | Sample standard deviation | `stdev(2, 4, 4, 4, 5, 5, 7, 9)` |
 | `stdevp` | 1..999 | Population standard deviation | `stdevp(2, 4, 4, 4, 5, 5, 7, 9)` |
 | `median` | 1..999 | Median of values | `median(1, 3, 2)` |
-| `gensigma` | 1 | Gamma function Γ(x) | `gensigma(5)` |
+| `gamma` | 1 | Gamma function Γ(x) | `gamma(5)`, `gamma(0.5)` |
 
 ### Financial Calculations
 

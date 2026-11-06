@@ -79,6 +79,12 @@ export interface ScriptContext {
   /** Callers may LOWER the step cap, never raise it above CALC_LIMITS.scriptSteps. */
   maxSteps?: number
   initialScope?: Record<string, string>
+  /** @internal Internal step counter ref shared across nested function and block calls */
+  _stepRef?: { count: number; max: number }
+  /** @internal Current call stack depth for custom function calls */
+  _recursionDepth?: number
+  /** @internal Custom functions passed down to child executions */
+  _customFuncs?: Record<string, CustomFunc>
 }
 
 export interface ScriptExecutionResult {
@@ -88,7 +94,7 @@ export interface ScriptExecutionResult {
 }
 
 interface CustomFunc {
-  param: string
+  params: string[]
   body: string[]
 }
 
@@ -120,7 +126,9 @@ export function executeScript(
   const requested = context.maxSteps === undefined ? CALC_LIMITS.scriptSteps : Number(context.maxSteps)
   if (!Number.isFinite(requested)) throw new CalcError('maxSteps must be a number')
   const maxSteps = Math.min(CALC_LIMITS.scriptSteps, Math.max(1, Math.floor(requested)))
-  let step = 0
+
+  const stepRef = context._stepRef ?? { count: 0, max: maxSteps }
+  const recursionDepth = context._recursionDepth ?? 0
 
   if (typeof source !== 'string') throw new CalcError('Script must be text')
   source = text
@@ -134,32 +142,49 @@ export function executeScript(
     }
   }
 
-  const funcs: Record<string, CustomFunc> = {}
+  const funcs: Record<string, CustomFunc> = { ...(context._customFuncs || {}) }
 
   const evalExpr = (exprStr: string): Decimal => {
-    // Check if expression is a function call to a custom script function e.g. double(21)
-    const fnMatch = exprStr.trim().match(/^([a-zA-Z_]\w*)\s*\((.*)\)$/)
-    if (fnMatch) {
-      const fnName = fnMatch[1].toLowerCase()
-      if (funcs[fnName]) {
-        const argVal = evalExpr(fnMatch[2])
-        const customFn = funcs[fnName]
+    const trimmed = exprStr.trim()
+    if (!trimmed) throw new CalcError('Empty expression in statement')
+
+    const customFunctions: Record<string, (args: Decimal[]) => Decimal> = {}
+    for (const [fnName, customFn] of Object.entries(funcs)) {
+      customFunctions[fnName] = (args: Decimal[]) => {
+        if (args.length !== customFn.params.length) {
+          throw new CalcError(
+            `Function "${fnName}" expects ${customFn.params.length} arguments, received ${args.length}`
+          )
+        }
+        if (recursionDepth + 1 > CALC_LIMITS.scriptRecursionDepth) {
+          throw new CalcError('Maximum recursion depth exceeded')
+        }
+        const fnScope: Record<string, string> = {
+          ...Object.fromEntries(Object.entries(scope).map(([k, v]) => [k, v.toString()]))
+        }
+        for (let i = 0; i < customFn.params.length; i++) {
+          fnScope[customFn.params[i]] = args[i].toString()
+        }
         const childContext: ScriptContext = {
-          maxSteps: maxSteps - step,
-          initialScope: {
-            ...Object.fromEntries(Object.entries(scope).map(([k, v]) => [k, v.toString()])),
-            [customFn.param]: argVal.toString()
-          }
+          maxSteps: stepRef.max,
+          initialScope: fnScope,
+          _stepRef: stepRef,
+          _recursionDepth: recursionDepth + 1,
+          _customFuncs: funcs
         }
         const childRes = executeScript(customFn.body.join('\n'), childContext)
-        step += childRes.stepsCount
         return new Decimal(childRes.returnValue || '0')
       }
     }
 
-    const ast = parse(exprStr)
-    const evaluator = new Evaluator({ scope })
-    return evaluator.evaluate(ast)
+    try {
+      const ast = parse(exprStr)
+      const evaluator = new Evaluator({ scope, customFunctions })
+      return evaluator.evaluate(ast)
+    } catch (err) {
+      if (err instanceof CalcError) throw err
+      throw new CalcError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const evalCondition = (condStr: string): boolean => {
@@ -196,25 +221,44 @@ export function executeScript(
   let pc = 0
   let returnVal: string = '0'
 
-  while (pc < rawLines.length) {
-    if (++step > maxSteps) {
-      throw new CalcError(`Step limit exceeded (${maxSteps} steps): possible infinite loop detected`)
+  const incrementStep = () => {
+    stepRef.count++
+    if (stepRef.count > stepRef.max) {
+      throw new CalcError(`Step limit exceeded (${stepRef.max} steps): possible infinite loop detected`)
     }
+  }
+
+  while (pc < rawLines.length) {
+    incrementStep()
 
     const line = rawLines[pc]
 
-    // Function declaration: fn name(x) { ... }
-    const fnDecl = line.match(/^fn\s+([a-zA-Z_]\w*)\s*\(([a-zA-Z_]\w*)\)\s*\{?$/)
+    // Function declaration: fn name(param1, param2, ...) { ... }
+    const fnDecl = line.match(/^fn\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{?$/)
     if (fnDecl) {
       const fnName = fnDecl[1].toLowerCase()
-      const param = fnDecl[2].toLowerCase()
+      const rawParams = fnDecl[2].trim()
+      const params = rawParams.length === 0
+        ? []
+        : rawParams.split(',').map((p) => p.trim().toLowerCase())
+      for (const p of params) {
+        if (!/^[a-zA-Z_]\w*$/.test(p)) {
+          throw new CalcError(`Syntax error: invalid parameter name "${p}" in function "${fnName}"`)
+        }
+      }
       const body: string[] = []
       pc++
-      while (pc < rawLines.length && rawLines[pc] !== '}') {
+      let depth = 1
+      while (pc < rawLines.length) {
+        if (rawLines[pc].includes('{')) depth++
+        if (rawLines[pc] === '}' || rawLines[pc].startsWith('}')) {
+          depth--
+          if (depth === 0) break
+        }
         body.push(rawLines[pc])
         pc++
       }
-      funcs[fnName] = { param, body }
+      funcs[fnName] = { params, body }
       pc++
       continue
     }
@@ -227,10 +271,11 @@ export function executeScript(
     }
 
     // If / else statement: if cond {
-    if (line.startsWith('if ')) {
-      const condMatch = line.match(/^if\s+(.+)\s*\{?$/)
-      if (!condMatch) throw new CalcError(`Syntax error in if statement: "${line}"`)
-      const cond = evalCondition(condMatch[1].replace('{', '').trim())
+    if (line.startsWith('if ') || line === 'if' || line.startsWith('if{')) {
+      const condMatch = line.match(/^if\s*(.+?)\s*\{?$/)
+      const rawCond = condMatch ? condMatch[1].replace('{', '').trim() : ''
+      if (!rawCond) throw new CalcError(`Syntax error on line "${line}": condition required in if statement`)
+      const cond = evalCondition(rawCond)
 
       const ifBody: string[] = []
       const elseBody: string[] = []
@@ -255,10 +300,12 @@ export function executeScript(
       const blockToRun = cond ? ifBody : elseBody
       if (blockToRun.length > 0) {
         const subRes = executeScript(blockToRun.join('\n'), {
-          maxSteps: maxSteps - step,
-          initialScope: Object.fromEntries(Object.entries(scope).map(([k, v]) => [k, v.toString()]))
+          maxSteps: stepRef.max,
+          initialScope: Object.fromEntries(Object.entries(scope).map(([k, v]) => [k, v.toString()])),
+          _stepRef: stepRef,
+          _recursionDepth: recursionDepth,
+          _customFuncs: funcs
         })
-        step += subRes.stepsCount
         for (const [k, v] of Object.entries(subRes.scope)) {
           scope[k.toLowerCase()] = new Decimal(v)
         }
@@ -272,10 +319,11 @@ export function executeScript(
     }
 
     // While loop: while cond {
-    if (line.startsWith('while ')) {
-      const condMatch = line.match(/^while\s+(.+)\s*\{?$/)
-      if (!condMatch) throw new CalcError(`Syntax error in while loop: "${line}"`)
-      const condStr = condMatch[1].replace('{', '').trim()
+    if (line.startsWith('while ') || line === 'while' || line.startsWith('while{')) {
+      const condMatch = line.match(/^while\s*(.+?)\s*\{?$/)
+      const rawCond = condMatch ? condMatch[1].replace('{', '').trim() : ''
+      if (!rawCond) throw new CalcError(`Syntax error on line "${line}": condition required in while loop`)
+      const condStr = rawCond
 
       const body: string[] = []
       pc++
@@ -285,14 +333,14 @@ export function executeScript(
       }
 
       while (evalCondition(condStr)) {
-        if (++step > maxSteps) {
-          throw new CalcError(`Step limit exceeded (${maxSteps} steps): possible infinite loop in while`)
-        }
+        incrementStep()
         const subRes = executeScript(body.join('\n'), {
-          maxSteps: maxSteps - step,
-          initialScope: Object.fromEntries(Object.entries(scope).map(([k, v]) => [k, v.toString()]))
+          maxSteps: stepRef.max,
+          initialScope: Object.fromEntries(Object.entries(scope).map(([k, v]) => [k, v.toString()])),
+          _stepRef: stepRef,
+          _recursionDepth: recursionDepth,
+          _customFuncs: funcs
         })
-        step += subRes.stepsCount
         for (const [k, v] of Object.entries(subRes.scope)) {
           scope[k.toLowerCase()] = new Decimal(v)
         }
@@ -307,7 +355,9 @@ export function executeScript(
 
     // Assignment: var = expr
     if (line.includes('=')) {
-      const [varName, expr] = line.split('=').map((s) => s.trim())
+      const eqIdx = line.indexOf('=')
+      const varName = line.slice(0, eqIdx).trim()
+      const expr = line.slice(eqIdx + 1).trim()
       scope[varName.toLowerCase()] = evalExpr(expr)
       pc++
       continue
@@ -324,7 +374,7 @@ export function executeScript(
   return {
     returnValue: returnVal,
     scope: finalScope,
-    stepsCount: step
+    stepsCount: stepRef.count
   }
 }
 

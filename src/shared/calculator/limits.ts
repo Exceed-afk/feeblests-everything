@@ -38,6 +38,8 @@ export const CALC_LIMITS = {
   scriptLength: 20_000,
   /** Statements/iterations a script may execute. Callers cannot raise this. */
   scriptSteps: 100_000,
+  /** Deepest recursion stack a custom script function may reach. */
+  scriptRecursionDepth: 100,
   /** Characters in a CAS expression (larger than plain expressions: it is edited as text). */
   casExpressionLength: 20_000,
   /** Points requested for one graph plot. */
@@ -66,6 +68,7 @@ const LABELS: Record<CalcLimitName, string> = {
   vectorLength: 'vector length',
   scriptLength: 'script length',
   scriptSteps: 'script steps',
+  scriptRecursionDepth: 'recursion depth',
   casExpressionLength: 'expression length',
   graphSampleCount: 'graph sample count',
   exponentLimit: 'number magnitude',

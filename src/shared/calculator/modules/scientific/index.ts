@@ -293,7 +293,6 @@ export function registerScientificFunctions(): void {
   // Logarithms and exponentials
   registry.registerFunction({
     name: 'ln',
-    aliases: ['log'],
     category: 'scientific',
     description: 'Natural logarithm (base e)',
     examples: ['ln(e)', 'ln(1)'],
@@ -302,6 +301,29 @@ export function registerScientificFunctions(): void {
     impl: ([x]) => {
       if (!x.isPositive()) throw new Error('Logarithm of non-positive number')
       return x.ln()
+    }
+  })
+
+  registry.registerFunction({
+    name: 'log',
+    category: 'scientific',
+    description: 'Logarithm: log(x) is base 10; log(base, value) is custom base',
+    examples: ['log(100)', 'log(2, 8)'],
+    minArity: 1,
+    maxArity: 2,
+    impl: ([arg1, arg2]) => {
+      if (arg2 === undefined) {
+        // log(x): common logarithm (base 10)
+        if (!arg1.isPositive()) throw new Error('Logarithm of non-positive number')
+        return arg1.log(10)
+      }
+      // log(base, value): custom base
+      const base = arg1
+      const value = arg2
+      if (!base.isPositive()) throw new Error('Logarithm base must be positive')
+      if (base.equals(1)) throw new Error('Logarithm base cannot be 1')
+      if (!value.isPositive()) throw new Error('Logarithm of non-positive number')
+      return value.ln().dividedBy(base.ln())
     }
   })
 
@@ -354,13 +376,13 @@ export function registerScientificFunctions(): void {
   })
 
   // Remainder after division. Sign follows the dividend (the same rule as JS % and
-  // most calculators): mod(-10, 3) = -1 and mod(10, -3) = 1. The result has the sign
-  // of a, never of b. b = 0 is an error.
+  // most calculators): mod(-10, 3) = -1, mod(-7, 3) = -1, and mod(10, -3) = 1.
+  // The result has the sign of dividend a, never of divisor b. b = 0 is an error.
   registry.registerFunction({
     name: 'mod',
     category: 'scientific',
-    description: 'Remainder after division a mod b (sign follows a)',
-    examples: ['mod(10, 3)', 'mod(-10, 3)'],
+    description: 'Remainder after division a mod b (sign follows dividend: mod(-7, 3) = -1)',
+    examples: ['mod(10, 3)', 'mod(-7, 3)'],
     minArity: 2,
     maxArity: 2,
     impl: ([a, b]) => {
@@ -436,8 +458,8 @@ export function registerScientificFunctions(): void {
     name: 'nPr',
     aliases: ['perm', 'P'],
     category: 'scientific',
-    description: 'Permutations P(n, r)',
-    examples: ['nPr(5, 2)', 'nPr(10, 3)'],
+    description: 'Permutations P(n, r) or nPr(n, r)',
+    examples: ['nPr(5, 2)', 'P(5, 2)', 'nPr(10, 3)'],
     minArity: 2,
     maxArity: 2,
     impl: ([n, r]) => permutations(n, r)
@@ -447,8 +469,8 @@ export function registerScientificFunctions(): void {
     name: 'nCr',
     aliases: ['comb', 'C'],
     category: 'scientific',
-    description: 'Combinations C(n, r)',
-    examples: ['nCr(5, 2)', 'nCr(10, 3)'],
+    description: 'Combinations C(n, r) or nCr(n, r)',
+    examples: ['nCr(5, 2)', 'C(5, 2)', 'nCr(10, 3)'],
     minArity: 2,
     maxArity: 2,
     impl: ([n, r]) => combinations(n, r)

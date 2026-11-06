@@ -403,8 +403,20 @@ export function differentiateExpr(e: CasExpr, varName: string): CasExpr {
         case 'exp':
           return { type: 'mul', left: e, right: gPrime }
         case 'ln':
-        case 'log':
           return { type: 'mul', left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: e.arg }, right: gPrime }
+        case 'log':
+        case 'log10': {
+          // d/dx log10(u) = u' / (u * ln(10))
+          const ln10: CasExpr = { type: 'num', val: new Decimal(Math.log(10)) }
+          const denom: CasExpr = { type: 'mul', left: e.arg, right: ln10 }
+          return { type: 'mul', left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: denom }, right: gPrime }
+        }
+        case 'log2': {
+          // d/dx log2(u) = u' / (u * ln(2))
+          const ln2: CasExpr = { type: 'num', val: new Decimal(Math.log(2)) }
+          const denom: CasExpr = { type: 'mul', left: e.arg, right: ln2 }
+          return { type: 'mul', left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: denom }, right: gPrime }
+        }
         case 'sinh':
           return { type: 'mul', left: { type: 'func', name: 'cosh', arg: e.arg }, right: gPrime }
         case 'cosh':

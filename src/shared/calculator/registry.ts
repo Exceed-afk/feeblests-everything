@@ -142,8 +142,8 @@ registry.registerFunction({
 registry.registerFunction({
   name: 'round',
   category: 'core',
-  description: 'Round to nearest integer or specified decimal places',
-  examples: ['round(3.7)', 'round(3.14159, 2)'],
+  description: 'Round to nearest integer or specified decimal places (half away from zero: round(2.5) = 3, round(-2.5) = -3)',
+  examples: ['round(2.5)', 'round(-2.5)', 'round(3.14159, 2)'],
   minArity: 1,
   maxArity: 2,
   impl: ([a, places]) => {
