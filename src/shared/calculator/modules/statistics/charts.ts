@@ -6,7 +6,7 @@
 import { Decimal, registry } from '../../index'
 // Direct import from the statistics module: linearRegression is a hoisted
 // function declaration, so the (index -> charts -> index) re-export cycle is safe.
-import { linearRegression } from './index'
+import { linearRegression, quadraticRegression } from './index'
 import { CALC_LIMITS, limitMessage } from '../../limits'
 import { CalcError } from '../../errors'
 import { toDecimalInput, describe } from '../../inputs'
@@ -416,6 +416,20 @@ export function registerChartFunctions(): void {
       const xs = numericList(args.filter((_, i) => i % 2 === 0), 'x')
       const ys = numericList(args.filter((_, i) => i % 2 === 1), 'y')
       return linearRegression(xs.map((x) => new Decimal(x)), ys.map((y) => new Decimal(y))).rSquared
+    }
+  })
+  registry.registerFunction({
+    name: 'stats_quadratic_r2',
+    category: 'stats',
+    description: 'R² of the least-squares parabola y = ax² + bx + c through paired x/y arguments (x1, y1, x2, y2, ...)',
+    examples: ['stats_quadratic_r2(0, 1, 1, 0, 2, 3)'],
+    minArity: 6,
+    maxArity: 999,
+    impl: (args) => {
+      if (args.length % 2 !== 0) throw new CalcError('stats_quadratic_r2 needs pairs of x/y arguments')
+      const xs = numericList(args.filter((_, i) => i % 2 === 0), 'x')
+      const ys = numericList(args.filter((_, i) => i % 2 === 1), 'y')
+      return quadraticRegression(xs.map((x) => new Decimal(x)), ys.map((y) => new Decimal(y))).rSquared
     }
   })
 }

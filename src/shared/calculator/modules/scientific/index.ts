@@ -1,5 +1,7 @@
 import { Decimal, registry } from '../../index'
 import { CalcError } from '../../errors'
+import { CALC_LIMITS, limitMessage } from '../../limits'
+import { gammaFn } from '../statistics'
 
 /** Largest factorial that stays printable: 9,999! is about 35,660 digits. */
 const MAX_FACTORIAL = 9_999
@@ -24,7 +26,17 @@ function log10FactorialApprox(n: number): number {
 }
 
 export function factorial(x: Decimal): Decimal {
-  if (!x.isInteger() || x.isNegative()) throw new CalcError('Factorial requires a non-negative whole number')
+  // Non-whole factorials use the gamma function: x! = Γ(x + 1), so 3.5! = Γ(4.5) =
+  // 11.6317283966 (the same answer Google's calculator gives). Negative whole numbers
+  // are poles of gamma and stay an error.
+  if (!x.isInteger()) {
+    const g = x.toNumber() + 1
+    if (!Number.isFinite(g) || g > 171) {
+      throw new CalcError(`Factorial is limited to arguments whose gamma fits (got ${x.toString()})`)
+    }
+    return new Decimal(gammaFn(g))
+  }
+  if (x.isNegative()) throw new CalcError('Factorial requires a non-negative whole number')
   const n = x.toNumber()
   if (n > MAX_FACTORIAL) {
     throw new CalcError(`Factorial is limited to ${MAX_FACTORIAL.toLocaleString('en-US')}! (got ${x.toString()})`)
@@ -89,6 +101,30 @@ export function registerScientificFunctions(): void {
     return 'deg'
   }
 
+  const checkTanSecPole = (angle: Decimal, mode: 'deg' | 'rad' | 'grad', fnName: string) => {
+    if (mode === 'deg') {
+      const m = angle.abs().modulo(180)
+      if (m.equals(90)) throw new CalcError(`${fnName} is undefined at this angle`)
+    } else if (mode === 'grad') {
+      const m = angle.abs().modulo(200)
+      if (m.equals(100)) throw new CalcError(`${fnName} is undefined at this angle`)
+    } else {
+      if (angle.cos().abs().lt('1e-15')) throw new CalcError(`${fnName} is undefined at this angle`)
+    }
+  }
+
+  const checkCotCscPole = (angle: Decimal, mode: 'deg' | 'rad' | 'grad', fnName: string) => {
+    if (mode === 'deg') {
+      const m = angle.abs().modulo(180)
+      if (m.isZero()) throw new CalcError(`${fnName} is undefined at this angle`)
+    } else if (mode === 'grad') {
+      const m = angle.abs().modulo(200)
+      if (m.isZero()) throw new CalcError(`${fnName} is undefined at this angle`)
+    } else {
+      if (angle.sin().abs().lt('1e-15')) throw new CalcError(`${fnName} is undefined at this angle`)
+    }
+  }
+
   // Trigonometry
   registry.registerFunction({
     name: 'sin',
@@ -127,8 +163,54 @@ export function registerScientificFunctions(): void {
     maxArity: 1,
     impl: ([x], scope) => {
       const mode = getAngleMode(scope)
+      checkTanSecPole(x, mode, 'tan')
       const rad = toRad(x, mode)
       return rad.tan()
+    }
+  })
+
+  registry.registerFunction({
+    name: 'cot',
+    category: 'scientific',
+    description: 'Cotangent of angle',
+    examples: ['cot(45)', 'cot(90)'],
+    minArity: 1,
+    maxArity: 1,
+    impl: ([x], scope) => {
+      const mode = getAngleMode(scope)
+      checkCotCscPole(x, mode, 'cot')
+      const rad = toRad(x, mode)
+      return rad.cos().dividedBy(rad.sin())
+    }
+  })
+
+  registry.registerFunction({
+    name: 'sec',
+    category: 'scientific',
+    description: 'Secant of angle',
+    examples: ['sec(0)', 'sec(60)'],
+    minArity: 1,
+    maxArity: 1,
+    impl: ([x], scope) => {
+      const mode = getAngleMode(scope)
+      checkTanSecPole(x, mode, 'sec')
+      const rad = toRad(x, mode)
+      return new Decimal(1).dividedBy(rad.cos())
+    }
+  })
+
+  registry.registerFunction({
+    name: 'csc',
+    category: 'scientific',
+    description: 'Cosecant of angle',
+    examples: ['csc(90)', 'csc(30)'],
+    minArity: 1,
+    maxArity: 1,
+    impl: ([x], scope) => {
+      const mode = getAngleMode(scope)
+      checkCotCscPole(x, mode, 'csc')
+      const rad = toRad(x, mode)
+      return new Decimal(1).dividedBy(rad.sin())
     }
   })
 
@@ -271,6 +353,43 @@ export function registerScientificFunctions(): void {
     impl: ([x]) => factorial(x)
   })
 
+  // Remainder after division. Sign follows the dividend (the same rule as JS % and
+  // most calculators): mod(-10, 3) = -1 and mod(10, -3) = 1. The result has the sign
+  // of a, never of b. b = 0 is an error.
+  registry.registerFunction({
+    name: 'mod',
+    category: 'scientific',
+    description: 'Remainder after division a mod b (sign follows a)',
+    examples: ['mod(10, 3)', 'mod(-10, 3)'],
+    minArity: 2,
+    maxArity: 2,
+    impl: ([a, b]) => {
+      if (b.isZero()) throw new CalcError('Division by zero in mod')
+      return a.modulo(b)
+    }
+  })
+
+  // The y-th root of x: yRoot(8, 3) = 2. y = 0 is an error; a negative x with an even y
+  // has no real root and is an error too (an odd y keeps the sign, like cbrt(-8) = -2).
+  registry.registerFunction({
+    name: 'yroot',
+    aliases: ['yRoot'],
+    category: 'scientific',
+    description: 'The y-th root of x (yRoot(x, y))',
+    examples: ['yRoot(8, 3)', 'yRoot(16, 4)'],
+    minArity: 2,
+    maxArity: 2,
+    impl: ([x, y]) => {
+      if (y.isZero()) throw new CalcError('The 0-th root is undefined')
+      if (x.isNegative() && y.modulo(2).isZero()) {
+        throw new CalcError('A negative number has no real even root')
+      }
+      return x.isNegative()
+        ? x.abs().pow(new Decimal(1).dividedBy(y)).neg()
+        : x.pow(new Decimal(1).dividedBy(y))
+    }
+  })
+
   registry.registerFunction({
     name: 'gcd',
     category: 'scientific',
@@ -315,7 +434,7 @@ export function registerScientificFunctions(): void {
 
   registry.registerFunction({
     name: 'nPr',
-    aliases: ['perm'],
+    aliases: ['perm', 'P'],
     category: 'scientific',
     description: 'Permutations P(n, r)',
     examples: ['nPr(5, 2)', 'nPr(10, 3)'],
@@ -326,7 +445,7 @@ export function registerScientificFunctions(): void {
 
   registry.registerFunction({
     name: 'nCr',
-    aliases: ['comb'],
+    aliases: ['comb', 'C'],
     category: 'scientific',
     description: 'Combinations C(n, r)',
     examples: ['nCr(5, 2)', 'nCr(10, 3)'],
@@ -334,6 +453,73 @@ export function registerScientificFunctions(): void {
     maxArity: 2,
     impl: ([n, r]) => combinations(n, r)
   })
+
+  // --- Prime tools: whole numbers 2 and up only, capped so a huge n cannot freeze the app ---
+  const requirePrimeInput = (x: Decimal, fnName: string): number => {
+    if (!x.isInteger()) throw new CalcError(`${fnName} requires a whole number`)
+    if (x.lt(2)) throw new CalcError(`${fnName} requires a whole number of 2 or more (got ${x.toString()})`)
+    if (x.gt(CALC_LIMITS.primeNumberLimit)) {
+      throw new CalcError(limitMessage('primeNumberLimit', `(got ${x.toString()})`))
+    }
+    return x.toNumber()
+  }
+
+  registry.registerFunction({
+    name: 'isprime',
+    category: 'scientific',
+    description: 'True (1) when n is a prime number, otherwise false (0)',
+    examples: ['isprime(7)', 'isprime(60)'],
+    minArity: 1,
+    maxArity: 1,
+    impl: ([x]) => {
+      const n = requirePrimeInput(x, 'isprime')
+      return isPrimeNumber(n) ? new Decimal(1) : new Decimal(0)
+    }
+  })
+
+  registry.registerFunction({
+    name: 'primefactors',
+    category: 'scientific',
+    description: 'Prime factorisation of n, shown as 2 x 2 x 3 x 5',
+    examples: ['primefactors(60)'],
+    minArity: 1,
+    maxArity: 1,
+    // The numeric value is the product (60); the display shows the factor list.
+    impl: ([x]) => {
+      const n = requirePrimeInput(x, 'primefactors')
+      return new Decimal(primeFactorsOf(n).reduce((a, b) => a * b, 1))
+    },
+    format: (value) => primeFactorsString(value.toNumber())
+  })
+}
+
+/** Whole-number primality by trial division up to sqrt(n). */
+export function isPrimeNumber(n: number): boolean {
+  if (!Number.isInteger(n) || n < 2) return false
+  if (n % 2 === 0) return n === 2
+  for (let d = 3; d * d <= n; d += 2) {
+    if (n % d === 0) return false
+  }
+  return true
+}
+
+/** Repeated prime factors of n, e.g. [2, 2, 3, 5] for 60. n >= 2. */
+export function primeFactorsOf(n: number): number[] {
+  const factors: number[] = []
+  let rest = n
+  for (let d = 2; d * d <= rest; d += d === 2 ? 1 : 2) {
+    while (rest % d === 0) {
+      factors.push(d)
+      rest = Math.floor(rest / d)
+    }
+  }
+  if (rest > 1) factors.push(rest)
+  return factors
+}
+
+/** Prime factors rendered like `2 x 2 x 3 x 5`. */
+export function primeFactorsString(n: number): string {
+  return primeFactorsOf(n).join(' x ')
 }
 
 registerScientificFunctions()

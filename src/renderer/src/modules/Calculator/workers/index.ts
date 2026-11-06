@@ -9,6 +9,8 @@ import type {
   GraphPolarPayload,
   GraphTablePayload,
   GraphDerivativePayload,
+  GraphIntersectionsPayload,
+  GraphIntersectionsResult,
   GraphParametricResult,
   GraphPolarResult,
   GraphTableResult
@@ -104,6 +106,16 @@ export function runGraphValueTable(
   })
 }
 
+export function runGraphIntersections(
+  payload: GraphIntersectionsPayload,
+  options?: { timeoutMs?: number; signal?: AbortSignal }
+): Promise<GraphIntersectionsResult> {
+  return graphWorkerHarness.run<GraphIntersectionsResult, GraphIntersectionsPayload>('intersections', payload, {
+    timeoutMs: options?.timeoutMs ?? GRAPH_DEFAULT_TIMEOUT_MS,
+    signal: options?.signal
+  })
+}
+
 export function runGraphDerivative(
   payload: GraphDerivativePayload,
   options?: { timeoutMs?: number; signal?: AbortSignal }
@@ -129,6 +141,8 @@ export type {
   GraphPolarPayload,
   GraphTablePayload,
   GraphDerivativePayload,
+  GraphIntersectionsPayload,
+  GraphIntersectionsResult,
   GraphParametricResult,
   GraphPolarResult,
   GraphTableResult

@@ -4,6 +4,7 @@ import {
   computeStats,
   parseDataset,
   linearRegression,
+  quadraticRegression,
   logarithmicRegression,
   exponentialRegression,
   powerRegression,
@@ -21,7 +22,7 @@ import {
 import type { Decimal } from '../../../../../shared/calculator/numeric'
 import { HistogramChart, BoxPlotChart, ScatterChart } from './statCharts'
 
-export type RegressionChoice = 'none' | 'linear' | 'exponential' | 'logarithmic' | 'power'
+export type RegressionChoice = 'none' | 'linear' | 'quadratic' | 'exponential' | 'logarithmic' | 'power'
 
 interface Props {
   onClose?: () => void
@@ -59,6 +60,7 @@ export function StatisticsPanel(_props: Props & ModuleProps) {
         let r: RegressionResult
         switch (regChoice) {
           case 'linear': r = linearRegression(xs, ys); break
+          case 'quadratic': r = quadraticRegression(xs, ys); break
           case 'exponential': r = exponentialRegression(xs, ys); break
           case 'logarithmic': r = logarithmicRegression(xs, ys); break
           case 'power': r = powerRegression(xs, ys); break
@@ -96,9 +98,27 @@ export function StatisticsPanel(_props: Props & ModuleProps) {
           : data.regression
             ? { ...data.regression, rSquared: data.regression.rSquared } // r² is computed on all data, not the capped view
             : undefined
-      return { data: { ...data, points: capped.points }, note: capped.note, error: null, reg: effectiveReg }
+      // Quadratic: draw the fitted parabola across the x range of the data.
+      let curve: { points: { x: number; y: number }[]; label: string } | undefined
+      if (regChoice === 'quadratic' && data.points.length >= 3) {
+        try {
+          const fit = quadraticRegression(xs, ys)
+          const lo = Math.min(...data.points.map((p) => p.x))
+          const hi = Math.max(...data.points.map((p) => p.x))
+          const steps = 60
+          const points: { x: number; y: number }[] = []
+          for (let i = 0; i <= steps; i++) {
+            const x = lo + ((hi - lo) * i) / steps
+            points.push({ x, y: fit.predict(x).toNumber() })
+          }
+          curve = { points, label: `quadratic fit ${fit.formula}, R² = ${fit.rSquared.toPrecision(6)}` }
+        } catch {
+          curve = undefined // not enough distinct x values: points only, the Analyse button explains why
+        }
+      }
+      return { data: { ...data, points: capped.points }, note: capped.note, error: null, reg: effectiveReg, curve }
     } catch (e) {
-      return { data: null, note: null, error: e instanceof Error ? e.message : 'Invalid paired data' }
+      return { data: null, note: null, error: e instanceof Error ? e.message : 'Invalid paired data', reg: undefined, curve: undefined }
     }
   }, [xsRaw, ysRaw, regChoice])
 
@@ -219,6 +239,7 @@ export function StatisticsPanel(_props: Props & ModuleProps) {
           <select className="field text-sm" value={regChoice} onChange={(e) => setRegChoice(e.target.value as RegressionChoice)}>
             <option value="none">None</option>
             <option value="linear">Linear</option>
+            <option value="quadratic">Quadratic</option>
             <option value="exponential">Exponential</option>
             <option value="logarithmic">Logarithmic</option>
             <option value="power">Power</option>
@@ -306,6 +327,7 @@ export function StatisticsPanel(_props: Props & ModuleProps) {
                 <ScatterChart
                   points={scatter.data.points}
                   regression={regChoice === 'linear' ? scatter.reg : undefined}
+                  curve={regChoice === 'quadratic' ? scatter.curve : undefined}
                   title="Scatter plot"
                   note={scatter.note ?? (scatter.data.points.length > SCATTER_DRAW_LIMIT ? `Draw cap ${SCATTER_DRAW_LIMIT.toLocaleString('en-US')} points.` : null)}
                 />
@@ -328,6 +350,11 @@ export function StatisticsPanel(_props: Props & ModuleProps) {
         <div className="rounded-lg border border-line bg-card p-4 text-sm space-y-1">
           <div className="font-semibold">{reg.model} regression</div>
           <div className="font-mono">{reg.formula}</div>
+          {reg.model === 'quadratic' && (
+            <div className="font-mono text-xs text-muted" data-testid="quadratic-coefficients">
+              a = {fmt(reg.coefficients[0])} · b = {fmt(reg.coefficients[1])} · c = {fmt(reg.coefficients[2])}
+            </div>
+          )}
           <div>r = <span className="font-mono">{fmt(reg.r)}</span></div>
           <div>R² = <span className="font-mono">{fmt(reg.rSquared)}</span></div>
         </div>

@@ -3,12 +3,27 @@ import { Decimal } from './numeric'
 export interface RegisteredFunction {
   name: string
   aliases?: string[]
-  category: 'core' | 'scientific' | 'stats' | 'finance' | 'conversion' | 'matrix' | 'cas' | 'programming' | 'date'
+  category:
+    | 'core'
+    | 'scientific'
+    | 'stats'
+    | 'finance'
+    | 'conversion'
+    | 'matrix'
+    | 'cas'
+    | 'programming'
+    | 'date'
   description: string
   examples: string[]
   minArity: number
   maxArity: number
   impl: (args: Decimal[], scope?: Record<string, Decimal>) => Decimal
+  /**
+   * Optional display hook for results whose numeric value and friendly display differ
+   * (e.g. primefactors shows `2 x 2 x 3 x 5`). Receives the impl result and returns the
+   * formatted string used by the engine's top-level result.
+   */
+  format?: (value: Decimal) => string
 }
 
 export interface RegisteredConstant {

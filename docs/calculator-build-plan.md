@@ -252,7 +252,7 @@ Each phase ends with a usable calculator. Do not start a phase until the previou
 **Acceptance:** results are correct across month ends, leap years, and daylight saving changes.
 
 ### Phase 11: Interface polish
-- Rendered math output (KaTeX) for results and history.
+- Rendered math output (KaTeX) for results and history. **Done 2026-11-06** for CAS results (`katex` 0.19.1, bundled locally, `trust: false`, plain-text fallback); history rows still show plain text.
 - Mode switcher or tabs: Basic, Scientific, Statistics, Finance, Graph, Matrix, CAS, Convert, Programming, Date.
 - Autocomplete and function search from the function registry, plus built-in help with examples.
 - Keyboard-first use: shortcuts, command palette integration if the host has one, full keyboard navigation.

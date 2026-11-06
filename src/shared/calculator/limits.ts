@@ -45,7 +45,14 @@ export const CALC_LIMITS = {
   /** Decimal exponent magnitude of any intermediate number (|x| < 10^exponentLimit). */
   exponentLimit: 100_000,
   /** Decimal places accepted by rounding helpers. */
-  maxRoundingPlaces: 1000
+  maxRoundingPlaces: 1000,
+  /**
+   * Largest whole number accepted by isprime / primefactors. Trial division runs in
+   * O(sqrt(n)) decimal-precision steps, so 10^10 is about 100,000 divisions (a few
+   * milliseconds) while anything near 2^53 would take minutes. Prime factorisation of
+   * semiprimes near the cap is the slowest accepted case by design.
+   */
+  primeNumberLimit: 10_000_000_000
 } as const
 
 export type CalcLimitName = keyof typeof CALC_LIMITS
@@ -62,7 +69,8 @@ const LABELS: Record<CalcLimitName, string> = {
   casExpressionLength: 'expression length',
   graphSampleCount: 'graph sample count',
   exponentLimit: 'number magnitude',
-  maxRoundingPlaces: 'decimal places'
+  maxRoundingPlaces: 'decimal places',
+  primeNumberLimit: 'prime number'
 }
 
 export function limitMessage(limit: CalcLimitName, detail?: string): string {

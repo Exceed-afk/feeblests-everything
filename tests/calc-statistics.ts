@@ -3,6 +3,7 @@ import {
   computeStats,
   percentile,
   linearRegression,
+  quadraticRegression,
   logarithmicRegression,
   exponentialRegression,
   powerRegression,
@@ -63,7 +64,7 @@ assert.deepEqual(computeStats([1, 1, 2, 2, 3].map(dec)).mode.map((m) => m.toNumb
 assert.deepEqual(computeStats([1, 2, 3].map(dec)).mode, []); ok()
 // Single value
 const one = computeStats([7].map(dec))
-close(one.mean, 7); close(one.median, 7); close(one.stdDevSample, 0); ok()
+close(one.mean, 7); close(one.median, 7); assert.throws(() => one.stdDevSample, /needs at least 2 values/); ok()
 
 // Percentiles
 close(percentile(data, 50), 4.5); ok()
@@ -111,6 +112,45 @@ const pwYs = pwXs.map((x) => x.times(x).times(4))
 const powReg = powerRegression(pwXs, pwYs)
 close(powReg.coefficients[0], 4, 1e-9); ok()
 close(powReg.coefficients[1], 2, 1e-9); ok()
+
+// ---------- Quadratic regression ----------
+// Points exactly on y = 2x^2 - 3x + 1: a = 2, b = -3, c = 1, R^2 = 1.
+const qx = [-2, -1, 0, 1, 2, 3].map(dec)
+const qy = qx.map((x) => x.times(x).times(2).minus(x.times(3)).plus(1))
+const quad = quadraticRegression(qx, qy)
+assert.equal(quad.model, 'quadratic'); ok()
+close(quad.coefficients[0], 2, 1e-9, 'quad a'); ok()
+close(quad.coefficients[1], -3, 1e-9, 'quad b'); ok()
+close(quad.coefficients[2], 1, 1e-9, 'quad c'); ok()
+close(quad.rSquared, 1, 1e-9, 'quad r²'); ok()
+close(quad.predict(4), 2 * 16 - 3 * 4 + 1, 1e-9, 'quad predict'); ok()
+assert.ok(quad.formula.includes('x^2'), 'quadratic formula names x^2'); ok()
+
+// Noisy case: y = x^2 + noise. The fit must be close to the true curve and
+// R^2 must be a real number in [0, 1] (never NaN).
+const nqx = [0, 1, 2, 3, 4, 5].map(dec)
+const nqy = [0.1, 1.2, 3.9, 9.1, 15.8, 25.2].map(dec)
+const noisy = quadraticRegression(nqx, nqy)
+close(noisy.coefficients[0], 1, 0.05, 'noisy a'); ok()
+assert.ok(noisy.rSquared.gt(0.99) && noisy.rSquared.lte(1), `noisy R² in (0.99, 1], got ${noisy.rSquared}`); ok()
+assert.ok(noisy.predict(6).isFinite(), 'noisy prediction is finite'); ok()
+
+// Large-x case: years like 2020. The raw normal equations lose precision here;
+// shifting x by its mean must still recover the exact coefficients.
+const yx = [2018, 2019, 2020, 2021, 2022].map(dec)
+const yy = yx.map((x) => x.minus(2020).times(x.minus(2020)).times(0.5).plus(x.minus(2020)).plus(3))
+const years = quadraticRegression(yx, yy)
+// 0.5(x-2020)^2 + (x-2020) + 3 = 0.5x^2 - 2019x + 2038183
+close(years.coefficients[0], 0.5, 1e-9, 'large-x a'); ok()
+close(years.coefficients[1], -2019, 1e-9, 'large-x b'); ok()
+close(years.coefficients[2], 2038183, 1e-9, 'large-x c'); ok()
+close(years.rSquared, 1, 1e-9, 'large-x r²'); ok()
+close(years.predict(2023), 0.5 * 9 + 3 + 3, 1e-9, 'large-x predict'); ok()
+
+// Rejections: fewer than 3 points, and fewer than 3 different x values.
+assert.throws(() => quadraticRegression([dec(1), dec(2)], [dec(1), dec(2)]), /at least 3 points/); ok()
+assert.throws(() => quadraticRegression([dec(1), dec(1), dec(2)], [dec(1), dec(2), dec(3)]), /3 different x values/); ok()
+assert.throws(() => quadraticRegression([dec(1), dec(2), dec(3)], [dec(1), dec(2)]), /same length/); ok()
 
 assert.throws(() => linearRegression([dec(1)], [dec(1)])); ok()
 assert.throws(() => linearRegression([dec(2), dec(2)], [dec(1), dec(2)])); ok()

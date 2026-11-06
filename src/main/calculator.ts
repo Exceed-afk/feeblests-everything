@@ -10,6 +10,18 @@ import type {
 import { DEFAULT_CALC_SETTINGS, type CalcSettings } from '../shared/calculator/types'
 import { validateCurrencyCode } from '../shared/calculator/rates'
 
+function validatePositiveRate(rateStr: unknown, what = 'Rate'): string {
+  if (typeof rateStr !== 'string' && typeof rateStr !== 'number') {
+    throw new Error(`${what} must be a positive number`)
+  }
+  const s = String(rateStr).trim()
+  const n = Number(s)
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`${what} must be a positive number (got "${s}")`)
+  }
+  return s
+}
+
 export function saveCalcHistory(
   db: Database.Database,
   item: Omit<CalcHistoryItem, 'id' | 'createdAt'>
@@ -309,6 +321,7 @@ export function saveCalcRate(
 ): CalcRate {
   const now = new Date().toISOString()
   const currCode = rate.currencyCode.toUpperCase()
+  const rateVal = validatePositiveRate(rate.rateToBase, 'Rate')
   const info = db
     .prepare(
       `INSERT INTO calc_rates (rate_set_id, currency_code, name, rate_to_base, note, updated_at)
@@ -316,14 +329,14 @@ export function saveCalcRate(
        ON CONFLICT(rate_set_id, currency_code) DO UPDATE SET
          name = excluded.name, rate_to_base = excluded.rate_to_base, note = excluded.note, updated_at = excluded.updated_at`
     )
-    .run(rate.rateSetId, currCode, rate.name || '', rate.rateToBase, rate.note || '', now)
+    .run(rate.rateSetId, currCode, rate.name || '', rateVal, rate.note || '', now)
 
   return {
     id: String(info.lastInsertRowid),
     rateSetId: rate.rateSetId,
     currencyCode: currCode,
     name: rate.name,
-    rateToBase: rate.rateToBase,
+    rateToBase: rateVal,
     note: rate.note,
     updatedAt: now
   }
@@ -362,6 +375,7 @@ export function updateCalcRate(
   note?: string,
   name?: string
 ): CalcRate {
+  const rateVal = validatePositiveRate(rateToBase, 'Rate')
   const row = db
     .prepare('SELECT id, rate_set_id, currency_code, name, rate_to_base, note FROM calc_rates WHERE id = ?')
     .get(parseInt(id, 10)) as {
@@ -383,14 +397,14 @@ export function updateCalcRate(
 
   db.prepare(
     'UPDATE calc_rates SET rate_to_base = ?, name = ?, note = ?, updated_at = ? WHERE id = ?'
-  ).run(rateToBase, updatedName, updatedNote, now, parseInt(id, 10))
+  ).run(rateVal, updatedName, updatedNote, now, parseInt(id, 10))
 
   return {
     id: String(row.id),
     rateSetId: row.rate_set_id,
     currencyCode: row.currency_code,
     name: updatedName,
-    rateToBase,
+    rateToBase: rateVal,
     note: updatedNote,
     updatedAt: now
   }
@@ -405,6 +419,7 @@ export function saveCalcRateOverride(
   if (from === to) {
     throw new Error('From and To currency codes cannot be identical in rate override')
   }
+  const rateVal = validatePositiveRate(override.rate, 'Override rate')
 
   const now = new Date().toISOString()
   const info = db
@@ -414,7 +429,7 @@ export function saveCalcRateOverride(
        ON CONFLICT(rate_set_id, from_code, to_code) DO UPDATE SET
          rate = excluded.rate, updated_at = excluded.updated_at`
     )
-    .run(override.rateSetId, from, to, override.rate, now)
+    .run(override.rateSetId, from, to, rateVal, now)
 
   const id = override.id || String(info.lastInsertRowid)
   return {
@@ -422,7 +437,7 @@ export function saveCalcRateOverride(
     rateSetId: override.rateSetId,
     fromCode: from,
     toCode: to,
-    rate: override.rate,
+    rate: rateVal,
     updatedAt: now
   }
 }
@@ -485,6 +500,7 @@ export function importCalcRateSet(
     )
 
     for (const row of rows) {
+      validatePositiveRate(row.rate, `Row ${row.code} rate`)
       insertStmt.run(
         rateSetId,
         row.code,

@@ -106,7 +106,8 @@ export function computeStats(values: readonly Decimal[]): DatasetStats {
     varSum = varSum.plus(diff.times(diff))
   }
   const variance = varSum.dividedBy(n)
-  const varianceSample = n > 1 ? varSum.dividedBy(n - 1) : new Decimal(0)
+  const varSample = n > 1 ? varSum.dividedBy(n - 1) : null
+  const sdSample = varSample ? varSample.sqrt() : null
 
   // Quartiles (linear interpolation method, 'inclusive' / type 7)
   const percentile = (p: number): Decimal => {
@@ -132,9 +133,15 @@ export function computeStats(values: readonly Decimal[]): DatasetStats {
     max: arr[n - 1],
     range: arr[n - 1].minus(arr[0]),
     variance,
-    varianceSample,
+    get varianceSample(): Decimal {
+      if (varSample === null) throw new CalcError('Sample variance needs at least 2 values')
+      return varSample
+    },
     stdDev: variance.sqrt(),
-    stdDevSample: varianceSample.sqrt(),
+    get stdDevSample(): Decimal {
+      if (sdSample === null) throw new CalcError('Sample standard deviation needs at least 2 values')
+      return sdSample
+    },
     q1,
     q3,
     iqr: q3.minus(q1)
@@ -169,6 +176,12 @@ export interface RegressionResult {
   rSquared: Decimal
   // Description for display
   formula: string
+  /**
+   * The fitted value at x. Present on every model so callers can draw the curve
+   * without re-deriving the formula. Never returns NaN or Infinity: a point the
+   * model cannot evaluate throws a CalcError instead.
+   */
+  predict: (x: Decimal | number | string) => Decimal
 }
 
 export function linearRegression(xs: readonly Decimal[], ys: readonly Decimal[]): RegressionResult {
@@ -199,7 +212,108 @@ export function linearRegression(xs: readonly Decimal[], ys: readonly Decimal[])
     coefficients: [intercept, slope],
     r,
     rSquared,
-    formula: `y = ${slope.toString()}x + ${intercept.toString()}`
+    formula: `y = ${slope.toString()}x + ${intercept.toString()}`,
+    predict: (x) => {
+      const v = toDecimalInput(x, 'x')
+      return assertFinite(intercept.plus(slope.times(v)), 'linear prediction')
+    }
+  }
+}
+
+/** Every regression result must be a real number: NaN / Infinity never reach the UI. */
+function assertFinite(value: Decimal, what: string): Decimal {
+  if (!value.isFinite()) throw new CalcError(`${what} is not a finite number`)
+  return value
+}
+
+/**
+ * Least-squares fit of y = ax^2 + bx + c.
+ *
+ * Numerical care: the raw normal equations in x are badly conditioned once x is
+ * large (years like 2020 make sum(x^4) about 1.7e13 while the useful signal is
+ * in the last digits). x is therefore shifted by its mean first, the fit is done
+ * in u = x - mean, and the coefficients are converted back:
+ *   a = A,  b = B - 2*A*mean,  c = C - B*mean + A*mean^2
+ *
+ * Needs at least 3 points and at least 3 different x values (otherwise the
+ * quadratic is not determined). R^2 is the coefficient of determination of the
+ * fitted curve, 1 - SSres/SStot, and is 1 for points exactly on a parabola.
+ */
+export function quadraticRegression(xs: readonly Decimal[], ys: readonly Decimal[]): RegressionResult {
+  const [x, y] = toPairedArrays(xs, ys, 'x', 'y')
+  if (x.length > CALC_LIMITS.datasetSize) throw new CalcError(limitMessage('datasetSize', 'values'))
+  if (x.length < 3) throw new CalcError('Quadratic regression needs at least 3 points (got ' + x.length + ')')
+  const distinct = new Set(x.map((v) => v.toString())).size
+  if (distinct < 3) {
+    throw new CalcError(`Quadratic regression needs at least 3 different x values (got ${distinct})`)
+  }
+  const n = x.length
+  const meanX = x.reduce((a, b) => a.plus(b), new Decimal(0)).dividedBy(n)
+  const u = x.map((v) => v.minus(meanX))
+
+  // Normal equations in the shifted variable u: sum(u^k * y) = sum(u^k * f(u)).
+  const s0 = new Decimal(n)
+  const s1 = u.reduce((a, b) => a.plus(b), new Decimal(0))
+  const s2 = u.reduce((a, b) => a.plus(b.times(b)), new Decimal(0))
+  const s3 = u.reduce((a, b) => a.plus(b.times(b).times(b)), new Decimal(0))
+  const s4 = u.reduce((a, b) => a.plus(b.times(b).times(b).times(b)), new Decimal(0))
+  const t0 = y.reduce((a, b) => a.plus(b), new Decimal(0))
+  const t1 = u.reduce((a, b, i) => a.plus(b.times(y[i])), new Decimal(0))
+  const t2 = u.reduce((a, b, i) => a.plus(b.times(b).times(y[i])), new Decimal(0))
+
+  // 3x3 system solved by Cramer's rule. The determinant is zero exactly when the
+  // x values do not determine a parabola (all equal, or only two distinct values).
+  const det = (m: Decimal[][]): Decimal =>
+    m[0][0].times(m[1][1].times(m[2][2]).minus(m[1][2].times(m[2][1])))
+      .minus(m[0][1].times(m[1][0].times(m[2][2]).minus(m[1][2].times(m[2][0]))))
+      .plus(m[0][2].times(m[1][0].times(m[2][1]).minus(m[1][1].times(m[2][0]))))
+
+  const matrix: Decimal[][] = [
+    [s4, s3, s2],
+    [s3, s2, s1],
+    [s2, s1, s0]
+  ]
+  const d = det(matrix)
+  if (d.isZero()) throw new CalcError('Cannot fit a parabola: the x values do not determine one')
+  const replace = (col: number, values: Decimal[]): Decimal[][] =>
+    matrix.map((row, r) => row.map((v, c) => (c === col ? values[r] : v)))
+  const A = det(replace(0, [t2, t1, t0])).dividedBy(d)
+  const B = det(replace(1, [t2, t1, t0])).dividedBy(d)
+  const C = det(replace(2, [t2, t1, t0])).dividedBy(d)
+
+  // Back to the original variable: f(x) = A(x-m)^2 + B(x-m) + C.
+  const a = A
+  const b = B.minus(A.times(meanX).times(2))
+  const c = C.minus(B.times(meanX)).plus(A.times(meanX).times(meanX))
+
+  const predict = (value: Decimal | number | string): Decimal => {
+    const v = toDecimalInput(value, 'x')
+    return assertFinite(a.times(v).times(v).plus(b.times(v)).plus(c), 'quadratic prediction')
+  }
+
+  // R^2 = 1 - SSres/SStot, computed on the original data.
+  const meanY = t0.dividedBy(n)
+  let ssRes = new Decimal(0)
+  let ssTot = new Decimal(0)
+  for (let i = 0; i < n; i++) {
+    const fitted = predict(x[i])
+    const res = y[i].minus(fitted)
+    const dev = y[i].minus(meanY)
+    ssRes = ssRes.plus(res.times(res))
+    ssTot = ssTot.plus(dev.times(dev))
+  }
+  // A flat dataset (every y equal) has no variance to explain: the fit is exact
+  // when the residuals are zero, and R^2 is reported as 0 otherwise (never NaN).
+  const rSquared = ssTot.isZero() ? (ssRes.isZero() ? new Decimal(1) : new Decimal(0)) : new Decimal(1).minus(ssRes.dividedBy(ssTot))
+  const r = rSquared.isNegative() ? new Decimal(0) : rSquared.sqrt()
+
+  return {
+    model: 'quadratic',
+    coefficients: [a, b, c],
+    r,
+    rSquared,
+    formula: `y = ${a.toString()}x^2 + ${b.toString()}x + ${c.toString()}`,
+    predict
   }
 }
 
@@ -227,7 +341,12 @@ export function logarithmicRegression(xs: readonly Decimal[], ys: readonly Decim
     coefficients: [intercept, slope],
     r: base.r,
     rSquared: base.rSquared,
-    formula: `y = ${slope.toString()} ln(x) + ${intercept.toString()}`
+    formula: `y = ${slope.toString()} ln(x) + ${intercept.toString()}`,
+    predict: (x) => {
+      const v = toDecimalInput(x, 'x')
+      if (!v.isPositive()) throw new CalcError('Logarithmic prediction needs a positive x value')
+      return assertFinite(intercept.plus(slope.times(v.ln())), 'logarithmic prediction')
+    }
   }
 }
 
@@ -244,7 +363,11 @@ export function exponentialRegression(xs: readonly Decimal[], ys: readonly Decim
     coefficients: [a, b],
     r: base.r,
     rSquared: base.rSquared,
-    formula: `y = ${a.toString()} * e^(${b.toString()}x)`
+    formula: `y = ${a.toString()} * e^(${b.toString()}x)`,
+    predict: (x) => {
+      const v = toDecimalInput(x, 'x')
+      return assertFinite(a.times(b.times(v).exp()), 'exponential prediction')
+    }
   }
 }
 
@@ -263,7 +386,12 @@ export function powerRegression(xs: readonly Decimal[], ys: readonly Decimal[]):
     coefficients: [a, b],
     r: base.r,
     rSquared: base.rSquared,
-    formula: `y = ${a.toString()} * x^(${b.toString()})`
+    formula: `y = ${a.toString()} * x^(${b.toString()})`,
+    predict: (x) => {
+      const v = toDecimalInput(x, 'x')
+      if (!v.isPositive()) throw new CalcError('Power prediction needs a positive x value')
+      return assertFinite(a.times(v.pow(b)), 'power prediction')
+    }
   }
 }
 
@@ -663,8 +791,11 @@ export function tTestOneSample(sample: number[], mu = 0): TestResult {
   let ss = 0
   for (const x of xs) ss += (x - mean) ** 2
   const s = Math.sqrt(ss / (n - 1))
+  if (s === 0) {
+    throw new CalcError('Cannot perform t-test: sample variance is zero (all values are identical)')
+  }
   const se = s / Math.sqrt(n)
-  const t = se === 0 ? 0 : (mean - mean0) / se
+  const t = (mean - mean0) / se
   const pValue = 2 * (1 - studentT.cdf(Math.abs(t), n - 1))
   return { statistic: t, pValue, df: n - 1 }
 }
@@ -683,6 +814,9 @@ export function tTestTwoSample(a: number[], b: number[], equalVariance = false):
   for (const x of ys) ss2 += (x - m2) ** 2
   const v1 = ss1 / (n1 - 1)
   const v2 = ss2 / (n2 - 1)
+  if (v1 === 0 && v2 === 0) {
+    throw new CalcError('Cannot perform t-test: sample variance is zero in both samples (all values are identical)')
+  }
   let df: number
   let se: number
   if (equalVariance) {
@@ -695,7 +829,10 @@ export function tTestTwoSample(a: number[], b: number[], equalVariance = false):
     const den = (v1 / n1) ** 2 / (n1 - 1) + (v2 / n2) ** 2 / (n2 - 1)
     df = den === 0 ? n1 + n2 - 2 : num / den
   }
-  const t = se === 0 ? 0 : (m1 - m2) / se
+  if (se === 0) {
+    throw new CalcError('Cannot perform t-test: standard error is zero')
+  }
+  const t = (m1 - m2) / se
   const pValue = 2 * (1 - studentT.cdf(Math.abs(t), df))
   return { statistic: t, pValue, df }
 }

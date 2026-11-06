@@ -35,6 +35,9 @@ This document is automatically generated from the calculator's centralized funct
 | `sin` | 1 | Sine of angle | `sin(90)`, `sin(pi/2)` |
 | `cos` | 1 | Cosine of angle | `cos(0)`, `cos(pi)` |
 | `tan` | 1 | Tangent of angle | `tan(45)`, `tan(0)` |
+| `cot` | 1 | Cotangent of angle | `cot(45)`, `cot(90)` |
+| `sec` | 1 | Secant of angle | `sec(0)`, `sec(60)` |
+| `csc` | 1 | Cosecant of angle | `csc(90)`, `csc(30)` |
 | `asin` | 1 | Inverse sine | `asin(1)`, `asin(0.5)` |
 | `acos` | 1 | Inverse cosine | `acos(1)`, `acos(0)` |
 | `atan` | 1 | Inverse tangent | `atan(1)`, `atan(0)` |
@@ -46,10 +49,14 @@ This document is automatically generated from the calculator's centralized funct
 | `log2` | 1 | Binary logarithm (base 2) | `log2(8)`, `log2(1024)` |
 | `exp` | 1 | Exponential e^x | `exp(1)`, `exp(0)` |
 | `fact` | 1 | Factorial of non-negative integer | `fact(5)`, `fact(0)` |
+| `mod` | 2 | Remainder after division a mod b (sign follows a) | `mod(10, 3)`, `mod(-10, 3)` |
+| `yroot` | 2 | The y-th root of x (yRoot(x, y)) | `yRoot(8, 3)`, `yRoot(16, 4)` |
 | `gcd` | 2 | Greatest common divisor | `gcd(24, 36)`, `gcd(17, 13)` |
 | `lcm` | 2 | Least common multiple | `lcm(4, 6)`, `lcm(12, 18)` |
 | `nPr` | 2 | Permutations P(n, r) | `nPr(5, 2)`, `nPr(10, 3)` |
 | `nCr` | 2 | Combinations C(n, r) | `nCr(5, 2)`, `nCr(10, 3)` |
+| `isprime` | 1 | True (1) when n is a prime number, otherwise false (0) | `isprime(7)`, `isprime(60)` |
+| `primefactors` | 1 | Prime factorisation of n, shown as 2 x 2 x 3 x 5 | `primefactors(60)` |
 
 ### Statistics & Probability
 
@@ -57,6 +64,7 @@ This document is automatically generated from the calculator's centralized funct
 |---|---|---|---|
 | `stats_boxplot` | 1..999 | Box plot statistics (type-7 quartiles, 1.5×IQR whiskers) as text | `stats_boxplot(2, 4, 4, 4, 5, 5, 7, 9)` |
 | `stats_scatter_r2` | 4..999 | R² of the linear fit through paired x/y arguments (x1, y1, x2, y2, ...) | `stats_scatter_r2(1, 2, 2, 4, 3, 6)` |
+| `stats_quadratic_r2` | 6..999 | R² of the least-squares parabola y = ax² + bx + c through paired x/y arguments (x1, y1, x2, y2, ...) | `stats_quadratic_r2(0, 1, 1, 0, 2, 3)` |
 | `normal_pdf` | 1..3 | Normal distribution PDF | `normal_pdf(0, 0, 1)` |
 | `normal_cdf` | 1..3 | Normal distribution CDF | `normal_cdf(1.96, 0, 1)` |
 | `normal_inv` | 1..3 | Normal distribution INV | `normal_inv(0.975, 0, 1)` |

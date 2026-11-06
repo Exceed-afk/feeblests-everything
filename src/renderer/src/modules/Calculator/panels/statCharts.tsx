@@ -183,12 +183,14 @@ export function BoxPlotChart({ stats, title }: BoxPlotChartProps) {
 export interface ScatterChartProps {
   points: { x: number; y: number }[]
   regression?: { slope: number; intercept: number; rSquared: number }
+  /** A fitted curve drawn as a polyline (quadratic regression). */
+  curve?: { points: { x: number; y: number }[]; label: string }
   title: string
   note?: string | null
 }
 
 /** Scatter with optional least-squares line. Points are capped before reaching this component. */
-export function ScatterChart({ points, regression, title, note }: ScatterChartProps) {
+export function ScatterChart({ points, regression, curve, title, note }: ScatterChartProps) {
   const W = 420
   const H = 240
   const PAD = 28
@@ -206,7 +208,7 @@ export function ScatterChart({ points, regression, title, note }: ScatterChartPr
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
         role="img"
-        aria-label={`${title}: scatter plot of ${points.length} points${regression ? `, linear regression y = ${regression.slope}x + ${regression.intercept}, R² = ${regression.rSquared}` : ''}`}
+        aria-label={`${title}: scatter plot of ${points.length} points${regression ? `, linear regression y = ${regression.slope}x + ${regression.intercept}, R² = ${regression.rSquared}` : ''}${curve ? `, ${curve.label}` : ''}`}
         data-testid="chart-scatter"
       >
         <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} className={AXIS} strokeWidth="1" />
@@ -216,6 +218,15 @@ export function ScatterChart({ points, regression, title, note }: ScatterChartPr
             x1={px(minX)} y1={py(regression.slope * minX + regression.intercept)}
             x2={px(maxX)} y2={py(regression.slope * maxX + regression.intercept)}
             className={AXIS} strokeWidth="1.5" strokeDasharray="4 3"
+          />
+        )}
+        {curve && curve.points.length > 1 && (
+          <polyline
+            points={curve.points.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')}
+            fill="none"
+            className={AXIS}
+            strokeWidth="1.5"
+            data-testid="chart-scatter-curve"
           />
         )}
         {points.map((p, i) => (

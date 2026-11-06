@@ -5,9 +5,11 @@ import {
   type ASTNode,
   type AssignmentNode,
   type BinaryOpNode,
+  type CurrencyConversionNode,
   type FunctionCallNode,
   type IdentifierNode,
   type NumberNode,
+  type PercentSuffixNode,
   type UnaryOpNode
 } from './ast'
 
@@ -83,28 +85,82 @@ export class Parser {
     }
   }
 
+  /** Postfix suffixes: `n!` (factorial) and `n%` (Google-style percent). Repeatable: `50%%`. */
   private parseExpressionInner(rbp: number): ASTNode {
     let left = this.parsePrefix()
 
-    // Handle implicit multiplication when followed immediately by '(' or an IDENTIFIER or NUMBER
-    while (rbp < this.getInfixPrecedence() || this.canImplicitMultiply()) {
-      if (this.canImplicitMultiply()) {
-        const next = this.peek()
-        const right = this.parseExpression(PRECEDENCE.PRODUCT)
-        left = {
-          type: 'BinaryOp',
-          operator: '*',
-          left,
-          right,
-          pos: next.pos
-        } as BinaryOpNode
+    // Currency conversion: `100 USD to EUR` / `100 usd in eur`. Only recognised
+    // after a value and a 3-5 character code, so `to` and `in` stay ordinary
+    // identifiers everywhere else (functions, variables, implicit multiplication).
+    if (this.isCurrencyConversionAhead()) {
+      left = this.parseCurrencyConversion(left)
+    }
+
+    for (;;) {
+      // Postfix suffixes bind tighter than every infix operator: `1 + 2!` is 1 + (2!),
+      // and `(1 + 2)!` reaches here through the parenthesis branch instead.
+      if (this.peek().type === 'BANG' || this.peek().type === 'PERCENT_SUFFIX') {
+        left = this.applyPostfix(left)
         continue
       }
 
-      left = this.parseInfix(left)
-    }
+      // Handle implicit multiplication when followed immediately by '(' or an IDENTIFIER or NUMBER
+      if (rbp < this.getInfixPrecedence() || this.canImplicitMultiply()) {
+        if (this.canImplicitMultiply()) {
+          const next = this.peek()
+          const right = this.parseExpression(PRECEDENCE.PRODUCT)
+          left = {
+            type: 'BinaryOp',
+            operator: '*',
+            left,
+            right,
+            pos: next.pos
+          } as BinaryOpNode
+          continue
+        }
 
-    return left
+        left = this.parseInfix(left)
+        continue
+      }
+
+      return left
+    }
+  }
+
+  /** True when the next three tokens are CODE `to`|`in` CODE. */
+  private isCurrencyConversionAhead(): boolean {
+    const a = this.tokens[this.cursor]
+    const b = this.tokens[this.cursor + 1]
+    const c = this.tokens[this.cursor + 2]
+    if (!a || !b || !c) return false
+    if (a.type !== 'IDENTIFIER' || b.type !== 'IDENTIFIER' || c.type !== 'IDENTIFIER') return false
+    if (!/^[A-Za-z0-9]{3,5}$/.test(a.value)) return false
+    const keyword = b.value.toLowerCase()
+    if (keyword !== 'to' && keyword !== 'in') return false
+    return /^[A-Za-z0-9]{3,5}$/.test(c.value)
+  }
+
+  /** Consume CODE `to`|`in` CODE and wrap the value in a CurrencyConversion node. */
+  private parseCurrencyConversion(amount: ASTNode): ASTNode {
+    const from = this.advance()
+    this.advance() // the keyword
+    const to = this.advance()
+    return {
+      type: 'CurrencyConversion',
+      amount,
+      from: from.value.toUpperCase(),
+      to: to.value.toUpperCase(),
+      pos: from.pos
+    } as CurrencyConversionNode
+  }
+
+  /** Consume one postfix suffix (`n!` factorial or `n%` percent) after a value. */
+  private applyPostfix(node: ASTNode): ASTNode {
+    const tok = this.advance()
+    if (tok.type === 'BANG') {
+      return { type: 'FunctionCall', name: 'fact', args: [node], pos: tok.pos } as FunctionCallNode
+    }
+    return { type: 'PercentSuffix', operand: node, pos: tok.pos } as PercentSuffixNode
   }
 
   private canImplicitMultiply(): boolean {

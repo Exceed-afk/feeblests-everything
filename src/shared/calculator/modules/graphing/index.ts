@@ -312,6 +312,153 @@ export function findExtrema(expr: string, xMin: number, xMax: number, steps = 10
 }
 
 // ---------------------------------------------------------------------------
+// Intersections of two functions: f(x) = g(x)
+// ---------------------------------------------------------------------------
+
+export interface IntersectionPoint {
+  x: number
+  y: number
+  /**
+   * 'crossing' when the difference changes sign (a real crossing),
+   * 'touching' when the curves meet without crossing (a tangency, found with the
+   * extrema finder). Both are real intersections; the label is for the UI.
+   */
+  kind: 'crossing' | 'touching'
+}
+
+export interface IntersectionOptions {
+  angleMode?: AngleMode
+  /** Scan points across the visible x range. Defaults to 400, capped by graphSampleCount. */
+  steps?: number
+}
+
+/**
+ * Where two graphed functions meet, over the visible x range.
+ *
+ * Method: h(x) = f(x) - g(x) is scanned for sign changes, each one is refined by
+ * bisection on the exact evaluator, and the result is kept only when
+ * |f(x) - g(x)| is tiny there. That last check is what rejects the fake
+ * "intersections" a sign change produces at a discontinuity (tan(x) vs 0 at
+ * 90 degrees, 1/x vs 0 at 0): the difference flips sign across the pole but is
+ * never small at any point in between.
+ *
+ * Touching without crossing (x^2 vs 0 at x = 0) has no sign change, so it is
+ * found with the existing extrema finder on h(x): a local extremum whose value
+ * is ~0 is a tangency. It is reported with kind 'touching'.
+ *
+ * Results closer together than the scan step are merged, so one intersection is
+ * never listed twice.
+ */
+export function findIntersections(
+  fExpr: string,
+  gExpr: string,
+  xMin: number,
+  xMax: number,
+  options: IntersectionOptions = {}
+): IntersectionPoint[] {
+  const fSource = toStringInput(fExpr, 'f(x) expression')
+  const gSource = toStringInput(gExpr, 'g(x) expression')
+  const lo = toDecimalInput(xMin, 'xMin').toNumber()
+  const hi = toDecimalInput(xMax, 'xMax').toNumber()
+  if (!(hi > lo)) throw new CalcError('xMax must be greater than xMin')
+  const count = sampleCount(options.steps ?? 400, 'steps')
+  const angleMode = resolveAngleMode(options.angleMode)
+  const fAst = parse(fSource)
+  const gAst = parse(gSource)
+
+  const fAt = (x: number): number | null => evaluateAt(fAst, x, angleMode)
+  const gAt = (x: number): number | null => evaluateAt(gAst, x, angleMode)
+  /** h(x) = f(x) - g(x); null when either side is undefined at x. */
+  const hAt = (x: number): number | null => {
+    const f = fAt(x)
+    const g = gAt(x)
+    if (f === null || g === null) return null
+    const h = f - g
+    return Number.isFinite(h) ? h : null
+  }
+
+  const dx = (hi - lo) / count
+  // "Tiny" is relative to the size of the two functions at the point, so a
+  // crossing of two large curves is not rejected for a rounding-sized gap.
+  const isTiny = (x: number): boolean => {
+    const f = fAt(x)
+    const g = gAt(x)
+    if (f === null || g === null) return false
+    const scale = Math.max(1, Math.abs(f), Math.abs(g))
+    return Math.abs(f - g) <= 1e-6 * scale
+  }
+
+  const found: IntersectionPoint[] = []
+  const push = (x: number, kind: 'crossing' | 'touching') => {
+    if (!Number.isFinite(x) || x < lo - dx || x > hi + dx) return
+    // Merge duplicates: one intersection is never listed twice. A tangency found
+    // by the extrema pass wins over the same point found as a crossing, because
+    // a scan point landing exactly on the touching point looks like a sign change.
+    const existing = found.find((p) => Math.abs(p.x - x) <= dx)
+    if (existing) {
+      if (kind === 'touching') existing.kind = 'touching'
+      return
+    }
+    const y = fAt(x)
+    if (y === null || !Number.isFinite(y)) return
+    found.push({ x, y, kind })
+  }
+
+  // 1. Sign changes of h, refined by bisection on the exact evaluator.
+  let prevX = lo
+  let prevH = hAt(prevX)
+  for (let i = 1; i <= count; i++) {
+    const curX = lo + i * dx
+    const curH = hAt(curX)
+    if (curH !== null && prevH !== null) {
+      if (curH === 0) {
+        if (isTiny(curX)) push(curX, 'crossing')
+      } else if (prevH * curH < 0) {
+        let a = prevX
+        let b = curX
+        let ha = prevH
+        for (let iter = 0; iter < 60; iter++) {
+          const mid = (a + b) / 2
+          const hm = hAt(mid)
+          if (hm === null) break
+          if (hm === 0) {
+            a = mid
+            b = mid
+            break
+          }
+          if (ha * hm < 0) b = mid
+          else {
+            a = mid
+            ha = hm
+          }
+        }
+        const root = (a + b) / 2
+        // The discontinuity guard: a sign change across a pole is not an intersection.
+        if (isTiny(root)) push(root, 'crossing')
+      }
+    }
+    prevX = curX
+    prevH = curH
+  }
+
+  // 2. Touching without crossing: a local extremum of h whose value is ~0.
+  //    The extrema finder works on an expression, so h is rebuilt as text.
+  const hExpr = `(${fSource}) - (${gSource})`
+  let extrema: ExtremaPoint[] = []
+  try {
+    extrema = findExtrema(hExpr, lo, hi, Math.min(count, 200))
+  } catch {
+    extrema = [] // an expression the extrema finder cannot scan simply adds no tangencies
+  }
+  for (const e of extrema) {
+    if (isTiny(e.x)) push(e.x, 'touching')
+  }
+
+  found.sort((a, b) => a.x - b.x)
+  return found
+}
+
+// ---------------------------------------------------------------------------
 // Parametric plots: x(t), y(t)
 // ---------------------------------------------------------------------------
 

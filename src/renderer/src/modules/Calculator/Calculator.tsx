@@ -7,7 +7,9 @@ import {
   type CalcHistoryItem,
   registry,
   toLatexResult,
-  readCurrencyHistoryItem
+  readCurrencyHistoryItem,
+  loadCurrencyContext,
+  formatCurrencyResult
 } from '../../../../shared/calculator'
 import { defaultStorageAdapter } from './adapters/storage'
 import { useModalDialog } from './useModalDialog'
@@ -53,6 +55,8 @@ export function Calculator(props: ModuleProps) {
   const [mode, setMode] = useState<CalcMode>('basic')
   const [expression, setExpression] = useState('')
   const [result, setResult] = useState<string>('')
+  // Set for `100 USD to EUR`: the code shown after the number (`92.31 EUR`).
+  const [resultCurrency, setResultCurrency] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [format, setFormat] = useState<OutputFormat>('decimal')
   const [angleMode, setAngleMode] = useState<'deg' | 'rad' | 'grad'>('deg')
@@ -139,13 +143,26 @@ export function Calculator(props: ModuleProps) {
   const handleCalculate = useCallback(async () => {
     if (!expression.trim()) return
 
+    // `100 USD to EUR` converts with the same offline rates the Convert panel uses.
+    // Loaded fresh on every calculation so a rate edited in the panel is used at once.
+    try {
+      engine.setCurrencyContext(await loadCurrencyContext(defaultStorageAdapter))
+    } catch {
+      engine.setCurrencyContext(null) // the evaluator then explains that rates are needed
+    }
+
     const res = engine.calculate(expression, format)
     if (res.error) {
       setError(res.error)
       setResult('')
+      setResultCurrency(null)
     } else {
       setError(null)
       setResult(res.formatted)
+      setResultCurrency(res.currency ?? null)
+      // Arm chaining: the next operator key starts from this result, any other key
+      // (digit, `(`, function, constant) starts a fresh expression.
+      setChainArmed(true)
 
       const saved = await defaultStorageAdapter.saveHistory({
         // Standard for the shared keypad in both basic and scientific mode; the
@@ -168,11 +185,13 @@ export function Calculator(props: ModuleProps) {
       setCurrencySeed({ amount: currency.amount, from: currency.from, to: currency.to, set: currency.set })
       setExpression(item.input)
       setResult(item.result)
+      setResultCurrency(null)
       return
     }
     // Panel rows with their own engine (statistics/finance/…) save through the panel.
     setExpression(item.input)
     setResult(item.result)
+    setResultCurrency(null)
   }
 
   const append = (str: string) => {
@@ -182,23 +201,88 @@ export function Calculator(props: ModuleProps) {
   const clear = () => {
     setExpression('')
     setResult('')
+    setResultCurrency(null)
     setError(null)
+    setChainArmed(false)
   }
 
   const deleteChar = () => {
     setExpression((prev) => prev.slice(0, -1))
   }
 
+  // Set right after `=` produces a result. The next operator (+ - * / ^ %) then starts
+  // the new expression with the last result (chaining: `5 + 5 =` then `* 2 =` gives 20);
+  // a digit, `(`, a function or a constant starts fresh instead.
+  const [chainArmed, setChainArmed] = useState(false)
+
+  const OPERATOR_KEYS = ['+', '-', '*', '/', '^', '%']
+
+  /** Operator key while chained: replace the expression with the last result, then the operator. */
+  const appendOperator = (op: string) => {
+    setChainArmed(false)
+    if (chainArmed && result) {
+      setExpression(`${result}${op}`)
+    } else {
+      setExpression((prev) => prev + op)
+    }
+  }
+
+  /** The Ans key (or `ans` inside an expression): holds the last calculated result, 0 before any. */
+  const applyAns = () => {
+    setChainArmed(false)
+    setExpression((prev) => prev + 'ans')
+  }
+
   const keypadButtons = useMemo(() => [
-    ['C', '(', ')', '/'],
-    ['7', '8', '9', '*'],
-    ['4', '5', '6', '-'],
-    ['1', '2', '3', '+'],
-    ['0', '.', '^', '=']
+    ['C', '⌫', '(', ')', '/'],
+    ['7', '8', '9', '*', '%'],
+    ['4', '5', '6', '-', 'Ans'],
+    ['1', '2', '3', '+', 'e'],
+    ['0', '.', '^', '=', 'π']
   ], [])
 
   // Scientific mode adds the common function keys above the digits.
-  const scientificKeys = ['sin', 'cos', 'tan', 'ln', 'log10', 'sqrt', 'fact', 'pi']
+  // π and % live only on the main keypad below, so they are not repeated here.
+  const scientificKeys = ['sin', 'cos', 'tan', 'ln', 'log10', 'sqrt', 'fact']
+
+  // Inv flips the trig keys to their inverses and ln / log to e^x / 10^x.
+  const INV_LABELS: Record<string, string> = {
+    sin: 'sin⁻¹',
+    cos: 'cos⁻¹',
+    tan: 'tan⁻¹',
+    ln: 'e^x',
+    log10: '10^x'
+  }
+  const [invMode, setInvMode] = useState(false)
+  const invActive = useMemo(
+    () => (invMode ? Object.keys(INV_LABELS) : []),
+    [invMode]
+  )
+
+  /** What a scientific key inserts, honouring the Inv toggle. */
+  const applySciKey = (k: string) => {
+    if (invMode && (k === 'sin' || k === 'cos' || k === 'tan')) {
+      append(`${k === 'sin' ? 'asin' : k === 'cos' ? 'acos' : 'atan'}(`)
+    } else if (invMode && k === 'ln') {
+      append('exp(') // e^x
+    } else if (invMode && k === 'log10') {
+      append('10^(') // 10^x
+    } else if (k === 'pi') {
+      append('pi')
+    } else {
+      append(`${k}(`)
+    }
+  }
+
+  // Second row of scientific keys: powers, roots, percent, factorial and EXP notation.
+  const extraSciKeys = useMemo(() => [
+    { label: 'x²', act: () => append('^2') },
+    { label: 'xʸ', act: () => append('^') },
+    { label: '√x', act: () => append('sqrt(') },
+    { label: 'ʸ√x', act: () => append('yRoot(') },
+    { label: 'x!', act: () => append('!') },
+    { label: 'EXP', act: () => append('e') }
+  ], [])
 
   const helpDialog = useModalDialog(showHelp, () => setShowHelp(false))
 
@@ -239,6 +323,17 @@ export function Calculator(props: ModuleProps) {
                 GRAD
               </button>
             </div>
+
+            {mode === 'scientific' && (
+              <button
+                type="button"
+                className={`btn btn-sm font-mono ${invMode ? 'btn-primary' : ''}`}
+                aria-pressed={invMode}
+                onClick={() => setInvMode((v) => !v)}
+              >
+                Inv
+              </button>
+            )}
 
             <label className="sr-only" htmlFor="calc-output-format">Output format</label>
             <select
@@ -335,6 +430,11 @@ export function Calculator(props: ModuleProps) {
                 if (e.key === 'Enter') {
                   setShowSuggestions(false)
                   void handleCalculate()
+                } else if (e.key === 'Backspace') {
+                  // Same as the ⌫ keypad button: remove the last character.
+                  // (The input already deletes the character itself when there is a selection-free
+                  // caret — only when the field is empty does this need to act.)
+                  if ((e.target as HTMLInputElement).value === '') e.preventDefault()
                 } else if (e.key === 'Escape') {
                   setShowSuggestions(false)
                 } else if (e.key === 'ArrowUp') {
@@ -394,8 +494,8 @@ export function Calculator(props: ModuleProps) {
               <div className="flex items-center gap-3 min-w-0">
                 {result && (
                   <>
-                    <span className="text-2xl font-bold font-mono tracking-tight text-fg break-all text-right">
-                      = {result}
+                    <span className="text-2xl font-bold font-mono tracking-tight text-fg break-all text-right" data-testid="calc-result">
+                      = {resultCurrency ? formatCurrencyResult(engine.getAns(), resultCurrency, 2) : result}
                     </span>
                     <div className="flex items-center gap-1 border-l border-line pl-3">
                       <button
@@ -423,24 +523,29 @@ export function Calculator(props: ModuleProps) {
             </div>
           </div>
 
-          {/* Scientific function keys (Scientific mode only) */}
+          {/* Scientific function keys (Scientific mode only): one 12-key block,
+              two fixed rows of 6, so no key ever wraps onto a lone row. */}
           {mode === 'scientific' && (
-            <div className="calc-keypad grid grid-cols-4 gap-2">
-              {scientificKeys.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  className="btn btn-sm font-mono"
-                  onClick={() => (k === 'pi' ? append('pi') : append(`${k}(`))}
-                >
-                  {k === 'pi' ? 'π' : k}
-                </button>
-              ))}
+            <div className="calc-keypad grid grid-cols-6 gap-2 mt-2">
+              {[...scientificKeys, ...extraSciKeys].map((k) => {
+                const isExtra = typeof k === 'object'
+                const key = isExtra ? k.label : k
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`btn btn-sm font-mono ${!isExtra && invActive.includes(key) ? 'btn-primary' : ''}`}
+                    onClick={() => (isExtra ? k.act() : applySciKey(key))}
+                  >
+                    {isExtra ? key : key === 'pi' ? 'π' : invActive.includes(key) ? INV_LABELS[key] ?? key : key}
+                  </button>
+                )
+              })}
             </div>
           )}
 
           {/* Keypad */}
-          <div className="calc-keypad grid grid-cols-4 gap-2">
+          <div className="calc-keypad grid grid-cols-5 gap-2">
             {keypadButtons.map((row, rIdx) =>
               row.map((btn, cIdx) => (
                 <button
@@ -452,7 +557,10 @@ export function Calculator(props: ModuleProps) {
                   onClick={() => {
                     if (btn === '=') void handleCalculate()
                     else if (btn === 'C') clear()
-                    else append(btn)
+                    else if (btn === '⌫') deleteChar()
+                    else if (btn === 'Ans') applyAns()
+                    else if (OPERATOR_KEYS.includes(btn)) appendOperator(btn)
+                    else append(btn === 'π' ? 'pi' : btn === 'e' ? 'e' : btn)
                   }}
                 >
                   {btn}

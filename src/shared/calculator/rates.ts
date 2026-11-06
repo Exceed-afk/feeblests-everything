@@ -187,7 +187,16 @@ export function calculateEffectiveRate(params: {
   // 1. Direct pair override: from -> to
   const directOverride = overrides.find((o) => o.fromCode === from && o.toCode === to)
   if (directOverride) {
-    const rateDec = new Decimal(directOverride.rate)
+    let rateDec: Decimal
+    try {
+      rateDec = new Decimal(directOverride.rate)
+      if (!rateDec.isFinite() || rateDec.lte(0)) {
+        throw new CalcError(`Override rate for ${from}->${to} must be positive (cannot be zero or negative)`)
+      }
+    } catch (e) {
+      if (e instanceof CalcError) throw e
+      throw new CalcError(`Override rate for ${from}->${to} must be a valid positive number`)
+    }
     return {
       rate: rateDec,
       rateString: directOverride.rate,
@@ -206,8 +215,16 @@ export function calculateEffectiveRate(params: {
   // 2. Inverse of pair override: to -> from
   const inverseOverride = overrides.find((o) => o.fromCode === to && o.toCode === from)
   if (inverseOverride) {
-    const directDec = new Decimal(inverseOverride.rate)
-    if (directDec.isZero()) throw new CalcError(`Override rate for ${to}->${from} cannot be zero`)
+    let directDec: Decimal
+    try {
+      directDec = new Decimal(inverseOverride.rate)
+      if (!directDec.isFinite() || directDec.lte(0)) {
+        throw new CalcError(`Override rate for ${to}->${from} must be positive (cannot be zero or negative)`)
+      }
+    } catch (e) {
+      if (e instanceof CalcError) throw e
+      throw new CalcError(`Override rate for ${to}->${from} must be a valid positive number`)
+    }
     const invRate = new Decimal(1).dividedBy(directDec)
     return {
       rate: invRate,
@@ -243,8 +260,15 @@ export function calculateEffectiveRate(params: {
   } else {
     const fromEntry = rateMap.get(from)
     if (!fromEntry) return null
-    rateFromBase = new Decimal(fromEntry.rateToBase)
-    if (rateFromBase.isZero()) throw new CalcError(`Rate for ${from} cannot be zero`)
+    try {
+      rateFromBase = new Decimal(fromEntry.rateToBase)
+      if (!rateFromBase.isFinite() || rateFromBase.lte(0)) {
+        throw new CalcError(`Rate for ${from} must be positive (cannot be zero or negative)`)
+      }
+    } catch (e) {
+      if (e instanceof CalcError) throw e
+      throw new CalcError(`Rate for ${from} must be a valid positive number`)
+    }
     ratesUsed.push({
       currencyCode: fromEntry.currencyCode,
       rateToBase: fromEntry.rateToBase,
@@ -261,8 +285,15 @@ export function calculateEffectiveRate(params: {
   } else {
     const toEntry = rateMap.get(to)
     if (!toEntry) return null
-    rateToBase = new Decimal(toEntry.rateToBase)
-    if (rateToBase.isZero()) throw new CalcError(`Rate for ${to} cannot be zero`)
+    try {
+      rateToBase = new Decimal(toEntry.rateToBase)
+      if (!rateToBase.isFinite() || rateToBase.lte(0)) {
+        throw new CalcError(`Rate for ${to} must be positive (cannot be zero or negative)`)
+      }
+    } catch (e) {
+      if (e instanceof CalcError) throw e
+      throw new CalcError(`Rate for ${to} must be a valid positive number`)
+    }
     ratesUsed.push({
       currencyCode: toEntry.currencyCode,
       rateToBase: toEntry.rateToBase,

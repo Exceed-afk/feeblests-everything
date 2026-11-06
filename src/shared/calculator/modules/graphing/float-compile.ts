@@ -61,7 +61,36 @@ const FLOAT_FUNCTIONS: Record<string, { minArgs: number; maxArgs: number; impl: 
   // Scientific (radian semantics here; angle-mode conversion is applied at compile time)
   sin: { minArgs: 1, maxArgs: 1, impl: Math.sin },
   cos: { minArgs: 1, maxArgs: 1, impl: Math.cos },
-  tan: { minArgs: 1, maxArgs: 1, impl: Math.tan },
+  tan: {
+    minArgs: 1, maxArgs: 1,
+    impl: (rad) => {
+      if (Math.abs(Math.cos(rad)) < 1e-15) return NaN
+      return Math.tan(rad)
+    }
+  },
+  cot: {
+    minArgs: 1, maxArgs: 1,
+    impl: (rad) => {
+      if (Math.abs(Math.sin(rad)) < 1e-15) return NaN
+      return 1 / Math.tan(rad)
+    }
+  },
+  sec: {
+    minArgs: 1, maxArgs: 1,
+    impl: (rad) => {
+      const c = Math.cos(rad)
+      if (Math.abs(c) < 1e-15) return NaN
+      return 1 / c
+    }
+  },
+  csc: {
+    minArgs: 1, maxArgs: 1,
+    impl: (rad) => {
+      const s = Math.sin(rad)
+      if (Math.abs(s) < 1e-15) return NaN
+      return 1 / s
+    }
+  },
   asin: { minArgs: 1, maxArgs: 1, impl: (x) => (x < -1 || x > 1 ? NaN : Math.asin(x)) },
   acos: { minArgs: 1, maxArgs: 1, impl: (x) => (x < -1 || x > 1 ? NaN : Math.acos(x)) },
   atan: { minArgs: 1, maxArgs: 1, impl: Math.atan },
@@ -229,7 +258,7 @@ function compileNode(node: ASTNode, env: CompileEnv): FloatFn {
 
       const name = node.name.toLowerCase()
       const args = node.args.map((a) => compileNode(a, env))
-      const isAngleIn = name === 'sin' || name === 'cos' || name === 'tan'
+      const isAngleIn = name === 'sin' || name === 'cos' || name === 'tan' || name === 'cot' || name === 'sec' || name === 'csc'
       const isAngleOut = name === 'asin' || name === 'acos' || name === 'atan'
 
       const raw = floatFn.impl
@@ -239,6 +268,14 @@ function compileNode(node: ASTNode, env: CompileEnv): FloatFn {
         return (x, t, th) => {
           const v = args[0](x, t, th)
           if (Number.isNaN(v)) return NaN
+          if (name === 'tan' || name === 'sec') {
+            if (mode === 'deg' && Math.abs(v % 180) === 90) return NaN
+            if (mode === 'grad' && Math.abs(v % 200) === 100) return NaN
+          }
+          if (name === 'cot' || name === 'csc') {
+            if (mode === 'deg' && v % 180 === 0) return NaN
+            if (mode === 'grad' && v % 200 === 0) return NaN
+          }
           return raw(radiansOf(mode, v))
         }
       }

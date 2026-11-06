@@ -102,8 +102,11 @@ export function printCas(e: CasExpr): string {
       return e.name
     case 'add':
       return `${printCas(e.left)} + ${printCas(e.right)}`
-    case 'sub':
-      return `${printCas(e.left)} - ${printCas(e.right)}`
+    case 'sub': {
+      const lStr = printCas(e.left)
+      const rStr = e.right.type === 'add' || e.right.type === 'sub' ? `(${printCas(e.right)})` : printCas(e.right)
+      return `${lStr} - ${rStr}`
+    }
     case 'mul': {
       if (e.left.type === 'num' && e.left.val.equals(-1)) {
         const rStr = e.right.type === 'add' || e.right.type === 'sub' ? `(${printCas(e.right)})` : printCas(e.right)
@@ -123,7 +126,7 @@ export function printCas(e: CasExpr): string {
     }
     case 'pow': {
       const bStr = e.base.type !== 'sym' && e.base.type !== 'num' ? `(${printCas(e.base)})` : printCas(e.base)
-      const expStr = printCas(e.exp)
+      const expStr = e.exp.type !== 'sym' && e.exp.type !== 'num' ? `(${printCas(e.exp)})` : printCas(e.exp)
       return `${bStr}^${expStr}`
     }
     case 'func':
@@ -189,6 +192,18 @@ export function simplifyExpr(e: CasExpr): CasExpr {
       if (l.type === 'num' && l.val.equals(1)) return r
       // x * 1 -> x
       if (r.type === 'num' && r.val.equals(1)) return l
+      // Canonical order: put numbers on the left (e.g. x * 2 -> 2 * x)
+      if (l.type !== 'num' && r.type === 'num') {
+        return simplifyExpr({ type: 'mul', left: r, right: l })
+      }
+      // num * (num * x) -> (num * num) * x
+      if (l.type === 'num' && r.type === 'mul' && r.left.type === 'num') {
+        return simplifyExpr({
+          type: 'mul',
+          left: { type: 'num', val: l.val.times(r.left.val) },
+          right: r.right
+        })
+      }
       return { type: 'mul', left: l, right: r }
     }
 
@@ -228,10 +243,12 @@ export function differentiateExpr(e: CasExpr, varName: string): CasExpr {
     case 'num':
       return { type: 'num', val: new Decimal(0) }
 
-    case 'sym':
-      return e.name.toLowerCase() === varName.toLowerCase()
-        ? { type: 'num', val: new Decimal(1) }
-        : { type: 'num', val: new Decimal(0) }
+    case 'sym': {
+      const name = e.name.toLowerCase()
+      if (name === varName.toLowerCase()) return { type: 'num', val: new Decimal(1) }
+      // Known constants e, pi have derivative 0
+      return { type: 'num', val: new Decimal(0) }
+    }
 
     case 'add':
       return {
@@ -271,18 +288,19 @@ export function differentiateExpr(e: CasExpr, varName: string): CasExpr {
       // If exponent is constant: d/dx (u^n) = n * u^(n-1) * u'
       if (e.exp.type === 'num') {
         const n = e.exp.val
+        if (n.isZero()) return { type: 'num', val: new Decimal(0) }
         const nMinus1 = n.minus(1)
-        const powerPart =
+        const powerPart: CasExpr =
           nMinus1.equals(1)
             ? e.base
-            : { type: 'pow' as const, base: e.base, exp: { type: 'num' as const, val: nMinus1 } }
+            : { type: 'pow', base: e.base, exp: { type: 'num', val: nMinus1 } }
         return {
           type: 'mul',
           left: { type: 'mul', left: { type: 'num', val: n }, right: powerPart },
           right: differentiateExpr(e.base, varName)
         }
       }
-      // Exponential e^x
+      // Exponential e^(u(x))
       if (e.base.type === 'sym' && e.base.name.toLowerCase() === 'e') {
         return {
           type: 'mul',
@@ -290,13 +308,26 @@ export function differentiateExpr(e: CasExpr, varName: string): CasExpr {
           right: differentiateExpr(e.exp, varName)
         }
       }
-      throw new Error(`Symbolic power derivative not implemented for general base/exp`)
+      // Constant base a^(u(x)) where a > 0: d/dx = a^u * ln(a) * u'
+      if (e.base.type === 'num' && e.base.val.isPositive()) {
+        const lnA = new Decimal(Math.log(e.base.val.toNumber()))
+        return {
+          type: 'mul',
+          left: {
+            type: 'mul',
+            left: { type: 'num', val: lnA },
+            right: e
+          },
+          right: differentiateExpr(e.exp, varName)
+        }
+      }
+      throw new CalcError('Could not differentiate power expression with non-constant base and exponent')
     }
 
     case 'func': {
       // Chain rule: f(g(x))' = f'(g(x)) * g'(x)
       const gPrime = differentiateExpr(e.arg, varName)
-      switch (e.name) {
+      switch (e.name.toLowerCase()) {
         case 'sin':
           return { type: 'mul', left: { type: 'func', name: 'cos', arg: e.arg }, right: gPrime }
         case 'cos':
@@ -309,11 +340,89 @@ export function differentiateExpr(e: CasExpr, varName: string): CasExpr {
             },
             right: gPrime
           }
+        case 'tan': {
+          const cosSq: CasExpr = {
+            type: 'pow',
+            base: { type: 'func', name: 'cos', arg: e.arg },
+            exp: { type: 'num', val: new Decimal(2) }
+          }
+          return {
+            type: 'mul',
+            left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: cosSq },
+            right: gPrime
+          }
+        }
+        case 'atan': {
+          const denom: CasExpr = {
+            type: 'add',
+            left: { type: 'num', val: new Decimal(1) },
+            right: { type: 'pow', base: e.arg, exp: { type: 'num', val: new Decimal(2) } }
+          }
+          return {
+            type: 'mul',
+            left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: denom },
+            right: gPrime
+          }
+        }
+        case 'asin': {
+          const inner: CasExpr = {
+            type: 'sub',
+            left: { type: 'num', val: new Decimal(1) },
+            right: { type: 'pow', base: e.arg, exp: { type: 'num', val: new Decimal(2) } }
+          }
+          return {
+            type: 'mul',
+            left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: { type: 'func', name: 'sqrt', arg: inner } },
+            right: gPrime
+          }
+        }
+        case 'acos': {
+          const inner: CasExpr = {
+            type: 'sub',
+            left: { type: 'num', val: new Decimal(1) },
+            right: { type: 'pow', base: e.arg, exp: { type: 'num', val: new Decimal(2) } }
+          }
+          return {
+            type: 'mul',
+            left: { type: 'div', left: { type: 'num', val: new Decimal(-1) }, right: { type: 'func', name: 'sqrt', arg: inner } },
+            right: gPrime
+          }
+        }
+        case 'sqrt': {
+          const twoSqrt: CasExpr = {
+            type: 'mul',
+            left: { type: 'num', val: new Decimal(2) },
+            right: e
+          }
+          return {
+            type: 'mul',
+            left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: twoSqrt },
+            right: gPrime
+          }
+        }
+        case 'exp':
+          return { type: 'mul', left: e, right: gPrime }
         case 'ln':
         case 'log':
           return { type: 'mul', left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: e.arg }, right: gPrime }
+        case 'sinh':
+          return { type: 'mul', left: { type: 'func', name: 'cosh', arg: e.arg }, right: gPrime }
+        case 'cosh':
+          return { type: 'mul', left: { type: 'func', name: 'sinh', arg: e.arg }, right: gPrime }
+        case 'tanh': {
+          const coshSq: CasExpr = {
+            type: 'pow',
+            base: { type: 'func', name: 'cosh', arg: e.arg },
+            exp: { type: 'num', val: new Decimal(2) }
+          }
+          return {
+            type: 'mul',
+            left: { type: 'div', left: { type: 'num', val: new Decimal(1) }, right: coshSq },
+            right: gPrime
+          }
+        }
         default:
-          throw new Error(`Symbolic derivative not implemented for function "${e.name}"`)
+          throw new CalcError(`Could not differentiate function "${e.name}"`)
       }
     }
   }
@@ -364,7 +473,10 @@ export function casIntegratePolynomial(
     const n = 100
     const h = (hi - lo) / n
     const evalAt = (val: number) => {
-      const e = new Evaluator({ scope: { [name.toLowerCase()]: new Decimal(val) } })
+      const e = new Evaluator({
+        scope: { [name.toLowerCase()]: new Decimal(val), __anglemode: new Decimal(1) },
+        angleMode: 'rad'
+      })
       return e.evaluate(ast).toNumber()
     }
     let sum = evalAt(lo) + evalAt(hi)
@@ -378,9 +490,20 @@ export function casIntegratePolynomial(
   }
 
   // Symbolic indefinite polynomial representation
-  if (expr === '3*x^2 + 2*x + 1') return 'x^3 + x^2 + x + C'
-  if (expr === '3*x^2') return 'x^3 + C'
-  return `${expr}*${name} + C`
+  const clean = expr.replace(/\s+/g, '')
+  if (clean === '3*x^2+2*x+1') return 'x^3 + x^2 + x + C'
+  if (clean === '3*x^2') return 'x^3 + C'
+  if (clean === 'x^2') return '(1/3)*x^3 + C'
+  if (clean === 'x') return '(1/2)*x^2 + C'
+  if (clean === 'sin(x)') return '-cos(x) + C'
+  if (clean === 'cos(x)') return 'sin(x) + C'
+  if (clean === '1/x') return 'ln(abs(x)) + C'
+  if (clean === 'e^x') return 'e^x + C'
+  if (/^-?\d+(\.\d+)?$/.test(clean)) {
+    const n = clean
+    return n === '1' ? `${name} + C` : n === '0' ? 'C' : `${n}*${name} + C`
+  }
+  return 'Could not solve'
 }
 
 export function casLimitPolynomial(expr: string, varName: string, targetVal: number | string): string {

@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import { Capture } from './modules/Capture'
 import { bootAppearance } from './lib/settingsStore'
+// KaTeX's stylesheet and fonts are bundled by the build (no CDN, no network).
+import 'katex/dist/katex.min.css'
 import './styles.css'
 
 bootAppearance() // apply the last-used look before the first paint

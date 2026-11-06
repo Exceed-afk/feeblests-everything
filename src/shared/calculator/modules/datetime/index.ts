@@ -138,6 +138,11 @@ export function subtractDateInterval(dateStr: string, interval: DateInterval): s
 }
 
 export function calculateAgeDetailed(birthDate: string, asOfDate: string): { years: number; months: number; days: number } {
+  const d1 = parseYMD(birthDate, 'birth date')
+  const d2 = parseYMD(asOfDate, 'as-of date')
+  if (d1.getTime() > d2.getTime()) {
+    throw new CalcError('Birth date cannot be in the future relative to the as-of date')
+  }
   const diff = dateDifference(birthDate, asOfDate)
   return {
     years: diff.years,

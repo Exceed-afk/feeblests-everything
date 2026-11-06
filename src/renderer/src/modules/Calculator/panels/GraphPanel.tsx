@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import type { PlotRange, SamplePoint, ExtremaPoint, ParametricPoint, PolarPoint, TableRow, DerivativeResult } from '../../../../../shared/calculator/modules/graphing'
+import type { PlotRange, SamplePoint, ExtremaPoint, ParametricPoint, PolarPoint, TableRow, DerivativeResult, IntersectionPoint } from '../../../../../shared/calculator/modules/graphing'
 import {
   runGraphBatchSample,
   runGraphAnalysis,
@@ -7,6 +7,7 @@ import {
   runGraphPolar,
   runGraphValueTable,
   runGraphDerivative,
+  runGraphIntersections,
   GRAPH_DEFAULT_TIMEOUT_MS,
   CancelledError
 } from '../workers'
@@ -97,6 +98,13 @@ export function GraphPanel({ angleMode }: GraphPanelProps) {
   const [derivError, setDerivError] = useState<string | null>(null)
   const [isDerivLoading, setIsDerivLoading] = useState(false)
   const [showTangent, setShowTangent] = useState(false)
+
+  // Intersection finder state (function plots only)
+  const [interF, setInterF] = useState('x^2')
+  const [interG, setInterG] = useState('x + 2')
+  const [intersections, setIntersections] = useState<IntersectionPoint[] | null>(null)
+  const [interError, setInterError] = useState<string | null>(null)
+  const [isInterLoading, setIsInterLoading] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const isDraggingRef = useRef(false)
@@ -380,6 +388,22 @@ export function GraphPanel({ angleMode }: GraphPanelProps) {
       ctx.setLineDash([])
     }
 
+    // Intersection markers: a filled dot plus a ring, so they read on any curve colour.
+    if (plotType === 'function' && intersections) {
+      for (const p of intersections) {
+        const sx = toScreenX(p.x)
+        const sy = toScreenY(p.y)
+        if (sx < -8 || sx > width + 8 || sy < -8 || sy > height + 8) continue
+        ctx.beginPath()
+        ctx.arc(sx, sy, 5, 0, Math.PI * 2)
+        ctx.fillStyle = rgba(accentFg, 1)
+        ctx.fill()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = rgba(muted, 0.9)
+        ctx.stroke()
+      }
+    }
+
     // Trace cursor
     if (traceX !== null && traceX >= range.xMin && traceX <= range.xMax) {
       const sx = toScreenX(traceX)
@@ -391,7 +415,7 @@ export function GraphPanel({ angleMode }: GraphPanelProps) {
       ctx.stroke()
       ctx.setLineDash([])
     }
-  }, [plotType, funcs, range, traceX, sampledPoints, paramPoints, polarPoints, derivResult, showTangent, themeEpoch])
+  }, [plotType, funcs, range, traceX, sampledPoints, paramPoints, polarPoints, derivResult, showTangent, themeEpoch, intersections])
 
   useEffect(() => {
     drawPlot()
@@ -564,6 +588,26 @@ export function GraphPanel({ angleMode }: GraphPanelProps) {
       setDerivResult(null)
     } finally {
       setIsDerivLoading(false)
+    }
+  }
+
+  const handleFindIntersections = async () => {
+    if (!interF.trim() || !interG.trim()) return
+    const controller = new AbortController()
+    analysisAbortRef.current = controller
+    setIsInterLoading(true)
+    setInterError(null)
+    try {
+      const res = await runGraphIntersections(
+        { fExpr: interF, gExpr: interG, range, angleMode },
+        { timeoutMs: GRAPH_DEFAULT_TIMEOUT_MS, signal: controller.signal }
+      )
+      setIntersections(res)
+    } catch (err) {
+      setInterError(err instanceof Error ? err.message : String(err))
+      setIntersections(null)
+    } finally {
+      setIsInterLoading(false)
     }
   }
 
@@ -787,6 +831,51 @@ export function GraphPanel({ angleMode }: GraphPanelProps) {
                     .map((e) => `${e.type.toUpperCase()}(${e.x.toFixed(2)}, ${e.y.toFixed(2)})`)
                     .join('; ')}
               </div>
+            </div>
+          )}
+
+          {/* Intersection finder: where f(x) = g(x) over the visible x range */}
+          {plotType === 'function' && (
+            <div className="rounded-lg border border-line bg-card p-3 text-xs space-y-2" data-testid="graph-intersections">
+              <h4 className="font-semibold uppercase tracking-wider text-muted">Intersections — f(x) = g(x)</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <label>
+                  <span className="text-muted block mb-1">f(x)</span>
+                  <input className="field font-mono w-full" value={interF} onChange={(e) => setInterF(e.target.value)} aria-label="f of x expression" />
+                </label>
+                <label>
+                  <span className="text-muted block mb-1">g(x)</span>
+                  <input className="field font-mono w-full" value={interG} onChange={(e) => setInterG(e.target.value)} aria-label="g of x expression" />
+                </label>
+              </div>
+              <button
+                type="button"
+                className="btn-primary text-xs px-2.5"
+                onClick={() => void handleFindIntersections()}
+                disabled={isInterLoading}
+              >
+                {isInterLoading ? 'Finding...' : 'Find intersections'}
+              </button>
+              <p className="text-muted text-[10px]">
+                Scans the visible x range. Touching points (x² vs 0) are found with the extrema finder.
+              </p>
+              {interError && <p className="text-neg">{interError}</p>}
+              {intersections && (
+                <div className="font-mono" data-testid="graph-intersection-list">
+                  {intersections.length === 0 ? (
+                    <span className="text-muted">No intersections in this view.</span>
+                  ) : (
+                    <ul className="space-y-0.5">
+                      {intersections.map((p, i) => (
+                        <li key={`${p.x}-${i}`}>
+                          ({p.x.toPrecision(8)}, {p.y.toPrecision(8)})
+                          {p.kind === 'touching' && <span className="text-muted"> · touching</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

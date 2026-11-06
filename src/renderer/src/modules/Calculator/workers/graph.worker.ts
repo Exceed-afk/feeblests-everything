@@ -6,6 +6,8 @@ import {
   samplePolar,
   buildValueTable,
   derivativeAt,
+  findIntersections,
+  type IntersectionPoint,
   type PlotRange,
   type SamplePoint,
   type ExtremaPoint,
@@ -76,6 +78,16 @@ export interface GraphDerivativePayload {
   point: number
   angleMode?: AngleMode
 }
+
+export interface GraphIntersectionsPayload {
+  fExpr: string
+  gExpr: string
+  range: PlotRange
+  steps?: number
+  angleMode?: AngleMode
+}
+
+export type GraphIntersectionsResult = IntersectionPoint[]
 
 export type GraphParametricResult = ParametricPoint[]
 export type GraphPolarResult = PolarPoint[]
@@ -148,6 +160,14 @@ self.onmessage = (event: MessageEvent<WorkerRequest<unknown>>) => {
       case 'derivative': {
         const payload = req.payload as GraphDerivativePayload
         result = derivativeAt(payload.expr, payload.point, { angleMode: payload.angleMode })
+        break
+      }
+      case 'intersections': {
+        const payload = req.payload as GraphIntersectionsPayload
+        result = findIntersections(payload.fExpr, payload.gExpr, payload.range.xMin, payload.range.xMax, {
+          angleMode: payload.angleMode,
+          steps: payload.steps
+        })
         break
       }
       default:

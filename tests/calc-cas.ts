@@ -72,4 +72,42 @@ const taylorExp = casTaylorSeries('e^x', 'x', 0, 3)
 assert.ok(taylorExp.includes('x^2'), 'Contains quadratic term'); ok()
 assert.ok(taylorExp.includes('x^3'), 'Contains cubic term'); ok()
 
+// ---------- 8. Differentiator Property Test (at least 25 expressions at 5 points) ----------
+import { parse } from '../src/shared/calculator/parser'
+import { Evaluator } from '../src/shared/calculator/evaluator'
+import { Decimal } from '../src/shared/calculator/numeric'
+
+const evalRad = (eStr: string, xVal: number) => {
+  const ast = parse(eStr)
+  const ev = new Evaluator({ scope: { x: new Decimal(xVal), __anglemode: new Decimal(1) }, angleMode: 'rad' })
+  return ev.evaluate(ast).toNumber()
+}
+
+const h = 1e-6
+const expressions = [
+  'e^(2*x)', 'e^(x^2)', 'e^(-x)', 'exp(3*x+1)', 'sin(2*x)', 'cos(x^2)',
+  'ln(3*x)', 'ln(x^2+1)', '(2*x+1)^3', 'sqrt(2*x)', '2^x', '3^(2*x)',
+  'x*e^x', 'sin(x)*cos(x)', 'tan(x)', '1/x', '1/(x^2+1)', 'atan(2*x)',
+  'x^3 + 2*x^2 + 5*x + 7', '3*x - 4', 'sinh(x)', 'cosh(x)', 'tanh(x)',
+  'asin(x)', 'acos(x)', '(x+1)/(x+2)', '5'
+]
+
+for (const expr of expressions) {
+  const d = casDifferentiate(expr, 'x')
+  for (const x of [0.3, 0.4, 0.5, 0.6, 0.7]) {
+    const sym = evalRad(d, x)
+    const num = (evalRad(expr, x + h) - evalRad(expr, x - h)) / (2 * h)
+    const tol = 1e-3 * Math.max(1, Math.abs(sym))
+    assert.ok(
+      Math.abs(sym - num) <= tol,
+      `Differentiator property test mismatch for ${expr} at x=${x}: symbolic=${sym}, numeric=${num}`
+    )
+    ok()
+  }
+}
+
+// Unsupported expressions throw clear CalcError
+assert.throws(() => casDifferentiate('unsupported_fn(x)', 'x'), /Could not differentiate/)
+ok()
+
 console.log(`ok   ${checks} CAS symbolic math tests passed`)

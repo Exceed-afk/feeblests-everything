@@ -3,11 +3,29 @@ import { registry } from '../registry'
 import type { ASTNode } from '../parser/ast'
 import { CALC_LIMITS, limitMessage } from '../limits'
 import { CalcError } from '../errors'
+import { performCurrencyConversion } from '../rates'
+import type { CalcRate, CalcRateOverride, CalcRateSet } from '../types'
+
+/**
+ * The offline rates a `100 USD to EUR` expression converts with. The UI fills this
+ * from the same storage the Convert panel uses; without it a conversion is a clear
+ * error rather than a guess.
+ */
+export interface CurrencyContext {
+  rateSet: CalcRateSet
+  rates: CalcRate[]
+  overrides?: CalcRateOverride[]
+  baseCurrency: string
+  staleRateDays: number
+  /** Local date used for the stale-rate check. */
+  today?: string | Date
+}
 
 export interface EvaluationContext {
   scope?: Record<string, Decimal>
   angleMode?: 'deg' | 'rad' | 'grad'
   ans?: Decimal
+  currency?: CurrencyContext
 }
 
 export class EvaluationError extends CalcError {
@@ -35,6 +53,7 @@ export class Evaluator {
   private scope: Map<string, Decimal>
   private angleMode: 'deg' | 'rad' | 'grad'
   private ans: Decimal
+  private currency: CurrencyContext | null
   // Counted on every recursive step; checked before the JS stack is anywhere near its
   // limit, so a deep tree fails with our own error instead of "Maximum call stack size".
   // The parser already caps real nesting at 200; this is the backstop for a hand-built AST.
@@ -44,6 +63,12 @@ export class Evaluator {
     this.scope = new Map(Object.entries(context.scope || {}))
     this.angleMode = context.angleMode || 'deg'
     this.ans = context.ans || new Decimal(0)
+    this.currency = context.currency ?? null
+  }
+
+  /** Replace the offline rates used by `100 USD to EUR` expressions. */
+  setCurrencyContext(currency: CurrencyContext | null): void {
+    this.currency = currency
   }
 
   setVariable(name: string, value: Decimal): void {
@@ -67,9 +92,26 @@ export class Evaluator {
     let value = this.evaluate(cur)
     for (let i = spine.length - 1; i >= 0; i--) {
       const op = spine[i]
-      value = this.applyBinaryOp(op.operator, value, this.evaluate(op.right), op.pos)
+      value = this.evaluateBinary(op.operator, value, op.right, op.pos)
     }
+    // A trailing postfix percent on the whole chain (e.g. `50%` alone): the spine loop
+    // already applied any inner one; nothing extra is needed here.
     return value
+  }
+
+  /**
+   * Evaluate a binary operation whose right side may be a postfix percent.
+   * Google-style semantics: `a + b%` adds a x b/100 and `a - b%` subtracts a x b/100
+   * (the percent is a fraction OF a); after * / ^ the percent is just b/100.
+   */
+  private evaluateBinary(op: string, left: Decimal, rightNode: ASTNode, pos: number): Decimal {
+    if (rightNode.type === 'PercentSuffix') {
+      const raw = this.evaluate(rightNode.operand)
+      if (op === '+') return assertMagnitude(left.plus(left.times(raw).dividedBy(100)), pos)
+      if (op === '-') return assertMagnitude(left.minus(left.times(raw).dividedBy(100)), pos)
+      return this.applyBinaryOp(op, left, raw.dividedBy(100), pos)
+    }
+    return this.applyBinaryOp(op, left, this.evaluate(rightNode), pos)
   }
 
   /** One binary operation, with the size and domain checks every path shares. */
@@ -121,6 +163,11 @@ export class Evaluator {
 
   getAns(): Decimal {
     return this.ans
+  }
+
+  /** Display hook of a registered function (e.g. primefactors' `2 x 2 x 3 x 5`). */
+  getFunctionFormatter(name: string): ((value: Decimal) => string) | undefined {
+    return registry.getFunction(name)?.format
   }
 
   evaluate(node: ASTNode): Decimal {
@@ -176,7 +223,47 @@ export class Evaluator {
       case 'BinaryOp': {
         // Long left-deep chains (sums, products) are walked iteratively, not recursively.
         if (node.left.type === 'BinaryOp') return this.evaluateLeftChain(node)
-        return this.applyBinaryOp(node.operator, this.evaluate(node.left), this.evaluate(node.right), node.pos)
+        return this.evaluateBinary(node.operator, this.evaluate(node.left), node.right, node.pos)
+      }
+
+      case 'CurrencyConversion': {
+        const amount = this.evaluate(node.amount)
+        const ctx = this.currency
+        if (!ctx) {
+          throw new EvaluationError(
+            `Currency conversion needs your offline rates: open Convert → Offline Currency Rates and add ${node.from} and ${node.to}`,
+            node.pos
+          )
+        }
+        // Name the code that is not in the set, rather than a generic pair message.
+        const known = new Set([ctx.baseCurrency.toUpperCase(), ...ctx.rates.map((r) => r.currencyCode.toUpperCase())])
+        for (const code of [node.from, node.to]) {
+          if (!known.has(code)) {
+            throw new EvaluationError(
+              `Unknown currency code "${code}" — it is not in the rate set "${ctx.rateSet.name}"`,
+              node.pos
+            )
+          }
+        }
+        // The Convert panel's own conversion code: one converter, not two.
+        const out = performCurrencyConversion({
+          amount,
+          from: node.from,
+          to: node.to,
+          targetSet: ctx.rateSet,
+          rates: ctx.rates,
+          overrides: ctx.overrides,
+          baseCurrency: ctx.baseCurrency,
+          staleRateDays: ctx.staleRateDays,
+          today: ctx.today ?? new Date()
+        })
+        return assertMagnitude(new Decimal(out.result), node.pos)
+      }
+
+      case 'PercentSuffix': {
+        // Standalone percent (or percent after * / ^, handled in evaluateBinary):
+        // divide by 100. `50%` = 0.5.
+        return assertMagnitude(this.evaluate(node.operand).dividedBy(100), node.pos)
       }
 
       case 'FunctionCall': {

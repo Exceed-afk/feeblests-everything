@@ -6,6 +6,8 @@ export type TokenType =
   | 'STAR'
   | 'SLASH'
   | 'PERCENT'
+  | 'PERCENT_SUFFIX'
+  | 'BANG'
   | 'CARET'
   | 'LPAREN'
   | 'RPAREN'
@@ -46,10 +48,15 @@ export function tokenize(input: string): Token[] {
       while (i < input.length && /[0-9]/.test(input[i])) {
         numStr += input[i++]
       }
+      // At most one decimal point per number: `2..3` and `1.2.3` are errors,
+      // not silently interpreted as something else.
       if (i < input.length && input[i] === '.') {
         numStr += input[i++]
         while (i < input.length && /[0-9]/.test(input[i])) {
           numStr += input[i++]
+        }
+        if (i < input.length && input[i] === '.') {
+          throw new TokenizerError(`Invalid number (more than one decimal point in "${numStr}.")`, i)
         }
       }
       if (i < input.length && (input[i] === 'e' || input[i] === 'E')) {
@@ -65,6 +72,12 @@ export function tokenize(input: string): Token[] {
         }
       }
       tokens.push({ type: 'NUMBER', value: numStr, pos })
+      // A `%` directly after a number is a postfix percent (e.g. `50%`, `200 + 10%`),
+      // not the modulo operator (which always sits between two values, like `10 % 3`).
+      if (input[i] === '%') {
+        i++
+        tokens.push({ type: 'PERCENT_SUFFIX', value: '%', pos })
+      }
       continue
     }
 
@@ -119,6 +132,11 @@ export function tokenize(input: string): Token[] {
         break
       case '=':
         tokens.push({ type: 'EQUALS', value: '=', pos })
+        i++
+        break
+      case '!':
+        // Postfix factorial: 5! or (n+1)!. Only valid right after a value.
+        tokens.push({ type: 'BANG', value: '!', pos })
         i++
         break
       default:

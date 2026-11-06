@@ -1,7 +1,10 @@
 import { useState, useRef } from 'react'
+import { Copy, Check } from 'lucide-react'
 import type { ModuleProps } from '../../../lib/navigation'
 import { runCasTask, CAS_DEFAULT_TIMEOUT_MS, CancelledError } from '../workers'
 import type { CasOptions } from '../../../../../shared/calculator/modules/cas'
+import { casToLatex } from '../../../../../shared/calculator/latex'
+import { MathOutput } from '../MathOutput'
 
 type CasOp = 'simplify' | 'diff' | 'integrate' | 'limit' | 'subst' | 'solve' | 'taylor'
 
@@ -13,8 +16,15 @@ export function CASPanel(_props: ModuleProps) {
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isRunning, setIsRunning] = useState(false)
+  const [copied, setCopied] = useState<'text' | 'latex' | null>(null)
 
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  const copy = (text: string, kind: 'text' | 'latex') => {
+    void navigator.clipboard.writeText(text)
+    setCopied(kind)
+    setTimeout(() => setCopied(null), 1500)
+  }
 
   const handleCompute = async () => {
     const expr = inputExpr.trim()
@@ -164,9 +174,21 @@ export function CASPanel(_props: ModuleProps) {
       {error && <p className="text-xs text-neg">{error}</p>}
 
       {result && (
-        <div className="p-3 rounded border border-line bg-accent-fg/10">
-          <span className="text-xs text-muted block mb-1">Result:</span>
-          <div className="text-lg font-bold font-mono text-accent-fg tracking-wide">{result}</div>
+        <div className="p-3 rounded border border-line bg-accent-fg/10 space-y-2">
+          <span className="text-xs text-muted block">Result:</span>
+          {/* Rendered maths; plain text is the fallback if KaTeX cannot parse it. */}
+          <MathOutput latex={casToLatex(result)} fallback={result} label={`Result: ${result}`} />
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn btn-sm" onClick={() => copy(result, 'text')}>
+              {copied === 'text' ? <Check aria-hidden="true" className="calc-ico text-pos" /> : <Copy aria-hidden="true" className="calc-ico" />}
+              {copied === 'text' ? 'Copied' : 'Copy'}
+            </button>
+            <button type="button" className="btn btn-sm font-mono" onClick={() => copy(casToLatex(result), 'latex')}>
+              {copied === 'latex' ? <Check aria-hidden="true" className="calc-ico text-pos" /> : null}
+              {copied === 'latex' ? 'Copied' : 'LaTeX'}
+            </button>
+            <span className="text-xs text-muted font-mono break-all">{result}</span>
+          </div>
         </div>
       )}
     </div>

@@ -118,6 +118,8 @@ function printAST(node: ASTNode, parentPrec = 0): string {
       return `${node.name} = ${printAST(node.value, 0)}`
     case 'FunctionCall':
       return `${node.name}(${node.args.map((a) => printAST(a, 0)).join(', ')})`
+    case 'PercentSuffix':
+      return `${printAST(node.operand, 4)}%`
     case 'UnaryOp': {
       // Unary - has precedence 3
       const inner = printAST(node.operand, 3)
@@ -142,6 +144,8 @@ function printAST(node: ASTNode, parentPrec = 0): string {
       const res = `${leftStr} ${node.operator} ${rightStr}`
       return parentPrec > opPrec ? `(${res})` : res
     }
+    case 'CurrencyConversion':
+      return `${printAST(node.amount, 0)} ${node.from} to ${node.to}`
   }
 }
 

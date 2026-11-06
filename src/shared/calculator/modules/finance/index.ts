@@ -523,6 +523,9 @@ export function positionSize(params: PositionSizeParams): PositionSizeResult {
   }
   const balance = toNonNegativeInput(params.accountBalance, 'accountBalance')
   const riskPercent = toNonNegativeInput(params.riskPercent, 'riskPercent')
+  if (riskPercent.gt(100)) {
+    throw new CalcError('riskPercent cannot exceed 100%')
+  }
   const entry = toPositiveInput(params.entryPrice, 'entryPrice')
   const stop = toPositiveInput(params.stopLossPrice, 'stopLossPrice')
   const target = params.targetPrice === undefined ? undefined : toPositiveInput(params.targetPrice, 'targetPrice')
